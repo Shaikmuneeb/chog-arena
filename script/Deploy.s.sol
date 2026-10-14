@@ -2,13 +2,9 @@
 pragma solidity ^0.8.20;
 
 import {Script, console2} from "forge-std/Script.sol";
-import {ChogShield} from "../src/ChogShield.sol";
-import {PredictionMarket} from "../src/PredictionMarket.sol";
+import {ChogArena} from "../src/ChogArena.sol";
 
-/// @notice Deploys the arena stack to Monad (mainnet chain id 41454, or testnet) in the
-/// order the contracts depend on each other: ChogShield first (it needs the Chog NFT
-/// address), then PredictionMarket wired to that shield, then the shield authorizes the
-/// market so its recordLoss() calls are accepted (and so it can rake the fee split in).
+/// @notice Deploys Chog Arena (1v1 Deathmatch with Second Wind) to Monad.
 ///
 /// This script is NOT run automatically — execute it yourself with your own deployer key:
 ///
@@ -17,9 +13,9 @@ import {PredictionMarket} from "../src/PredictionMarket.sol";
 ///     --broadcast
 ///
 /// Required env vars (shell or an untracked .env file):
-///   PRIVATE_KEY       - deployer key (also becomes the owner of both contracts)
-///   CHOG_NFT_ADDRESS  - deployed Chog NFT (ERC721) the shield gates bailouts on
-///   TREASURY_ADDRESS  - receives the 40% treasury cut of the 2.5% protocol rake
+///   PRIVATE_KEY       - deployer key (also becomes the owner of ChogArena)
+///   CHOG_NFT_ADDRESS  - deployed Chog NFT (ERC721) that gates the fee perk / Second Wind
+///   TREASURY_ADDRESS  - receives the 2% protocol rake (only when no fighter holds a Chog NFT)
 ///
 /// Never commit a real private key to this repo.
 contract Deploy is Script {
@@ -30,20 +26,13 @@ contract Deploy is Script {
 
         vm.startBroadcast(deployerPrivateKey);
 
-        ChogShield shield = new ChogShield(chogNftAddress);
-        console2.log("ChogShield deployed at", address(shield));
-
-        PredictionMarket market = new PredictionMarket(payable(address(shield)), treasuryAddress);
-        console2.log("PredictionMarket deployed at", address(market));
-
-        shield.setAuthorizedMarket(address(market));
+        ChogArena arena = new ChogArena(chogNftAddress, treasuryAddress);
+        console2.log("ChogArena deployed at", address(arena));
 
         vm.stopBroadcast();
 
-        console2.log("\nChogShield authorized market set to", address(market));
         console2.log("Next steps (manual, NOT part of this script):");
-        console2.log("1. Fund ChogShield with MON - it pays bailouts from its own balance.");
-        console2.log("2. Deploy the Chog NFT first if it isn't live yet, then set CHOG_NFT_ADDRESS.");
-        console2.log("3. Paste these addresses into your frontend/operator config.");
+        console2.log("1. Deploy the Chog NFT first if it isn't live yet, then set CHOG_NFT_ADDRESS.");
+        console2.log("2. Paste the arena address into your frontend config.");
     }
 }

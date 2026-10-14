@@ -2,310 +2,327 @@
 pragma solidity ^0.8.20;
 
 import {Test} from "forge-std/Test.sol";
-import {ChogShield} from "../src/ChogShield.sol";
-import {PredictionMarket} from "../src/PredictionMarket.sol";
+import {ChogArena} from "../src/ChogArena.sol";
 
-/// @dev Minimal stand-in for the Chog NFT — ChogShield.claimBailout() only reads
-/// balanceOf(). Hand-rolled (not OZ ERC721) because OZ 5.6.1's ERC721.sol requires
-/// solc ^0.8.24 while this project pins 0.8.20.
-contract MockERC721 {
-    string public constant name = "Mock Chog";
-    string public constant symbol = "CHOG";
+/// @dev Minimal Chog NFT stand-in: IERC721.balanceOf(address) selector compatible.
+contract MockChogNFT {
+    mapping(address => uint256) public balanceOf;
 
-    mapping(address => uint256) private _balances;
-    mapping(uint256 => address) private _owners;
-    uint256 private _nextTokenId = 1;
-
-    function balanceOf(address owner) external view returns (uint256) {
-        return _balances[owner];
+    function mint(address to, uint256 amount) external {
+        balanceOf[to] += amount;
     }
 
-    function ownerOf(uint256 tokenId) external view returns (address) {
-        address owner = _owners[tokenId];
-        require(owner != address(0), "nonexistent token");
-        return owner;
-    }
-
-    function mint(address to) external returns (uint256 tokenId) {
-        tokenId = _nextTokenId++;
-        _owners[tokenId] = to;
-        _balances[to] += 1;
+    function burn(address to, uint256 amount) external {
+        balanceOf[to] -= amount;
     }
 }
 
 contract ChogArenaTest is Test {
-    MockERC721 internal nft;
-    ChogShield internal shield;
-    PredictionMarket internal pm;
+    event DuelCreated(uint256 indexed duelId, address indexed creator, uint256 betAmount);
+    event DuelCancelled(uint256 indexed duelId, address indexed creator);
+    event SecondWindTriggered(uint256 indexed duelId, address indexed resurrectedPlayer);
+    event DuelResolved(uint256 indexed duelId, address indexed winner, uint256 payout, bool secondWindUsed);
 
-    address internal alice;
-    address internal bob;
-    address internal charlie;
-    address internal treasury;
+    ChogArena internal arena;
+    MockChogNFT internal nft;
 
-    uint256 internal constant START_BALANCE = 1_000 ether;
-    uint256 internal constant BET = 10 ether;
+    address internal treasury = makeAddr("treasury");
+    address internal creator = makeAddr("creator");
+    address internal challenger = makeAddr("challenger");
+    address internal spectator = makeAddr("spectator");
 
-    // mirror of PredictionMarket/Shield events for vm.expectEmit
-    event MarketCreated(uint256 indexed marketId, string question, uint256 endTime);
-    event MarketResolved(uint256 indexed marketId, uint8 winningOutcome, uint256 shieldFee, uint256 treasuryFee);
-    event WinningsClaimed(uint256 indexed marketId, address indexed user, uint256 payout);
-    event BailoutClaimed(address indexed user, uint256 amount);
+    uint256 internal constant BET = 1 ether;
+
+    /// @dev Safety net so the test contract can receive refunds/payouts when it
+    /// is (accidentally or deliberately) a duel participant.
+    receive() external payable {}
 
     function setUp() public {
-        // realistic chain time — with lastClaimTimestamp starting at 0, claimBailout's
-        // cooldown check needs block.timestamp >= 7 days to ever pass on a first claim
-        vm.warp(30 days);
-
-        alice = makeAddr("alice");
-        bob = makeAddr("bob");
-        charlie = makeAddr("charlie");
-        treasury = makeAddr("treasury");
-
-        nft = new MockERC721();
-        shield = new ChogShield(address(nft));
-        pm = new PredictionMarket(payable(address(shield)), treasury);
-
-        // test contract is the deployer/owner of both, so this passes onlyOwner
-        shield.setAuthorizedMarket(address(pm));
-
-        vm.deal(alice, START_BALANCE);
-        vm.deal(bob, START_BALANCE);
-        vm.deal(charlie, START_BALANCE);
-
-        // NFT minted to Alice only — Bob and Charlie hold 0
-        nft.mint(alice);
-        assertEq(nft.balanceOf(alice), 1);
-        assertEq(nft.balanceOf(bob), 0);
-        assertEq(nft.balanceOf(charlie), 0);
+        nft = new MockChogNFT();
+        arena = new ChogArena(address(nft), treasury);
+        vm.deal(creator, 100 ether);
+        vm.deal(challenger, 100 ether);
     }
 
-    // ── helpers ──
+    // ---------------------------------------------------------------- helpers
 
-    function _market(uint256 marketId)
+    /// @dev Mirrors ChogArena._roll() so tests can predict outcomes.
+    function _predictRoll(uint256 nonce, address player) internal view returns (uint256) {
+        return uint256(keccak256(abi.encodePacked(block.prevrandao, block.timestamp, nonce, player)));
+    }
+
+    /// @dev Destructures the public duels() getter.
+    function _duel(uint256 duelId)
         internal
         view
-        returns (uint256 endTime, uint256 yesAmount, uint256 noAmount, bool resolved, uint8 outcome)
+        returns (
+            address creator_,
+            address challenger_,
+            uint256 betAmount_,
+            address winner_,
+            bool resolved_,
+            bool secondWindProc_
+        )
     {
-        (, endTime, yesAmount, noAmount, resolved, outcome) = pm.markets(marketId);
+        return arena.duels(duelId);
     }
 
-    function _openTwoSidedMarket() internal returns (uint256 marketId) {
-        marketId = pm.createMarket("Will Monad flip bullish?", 1 days);
-        vm.prank(alice);
-        pm.placeBet{value: BET}(marketId, true); // Alice: YES
-        vm.prank(bob);
-        pm.placeBet{value: BET}(marketId, false); // Bob: NO
+    // ------------------------------------------------------- create / cancel
+
+    function test_CreateDuel() public {
+        vm.expectEmit(true, true, false, true);
+        emit DuelCreated(1, creator, BET);
+
+        vm.prank(creator);
+        uint256 duelId = arena.createDuel{value: BET}();
+
+        assertEq(duelId, 1);
+        (
+            address creator_,
+            address challenger_,
+            uint256 betAmount_,
+            address winner_,
+            bool resolved_,
+            bool secondWindProc_
+        ) = _duel(duelId);
+        assertEq(creator_, creator);
+        assertEq(challenger_, address(0));
+        assertEq(betAmount_, BET);
+        assertEq(winner_, address(0));
+        assertFalse(resolved_);
+        assertFalse(secondWindProc_);
+        assertEq(address(arena).balance, BET);
     }
 
-    function _resolveAfterEnd(uint256 marketId, uint8 outcome) internal {
-        (uint256 endTime,,,,) = _market(marketId);
-        vm.warp(endTime);
-        pm.resolveMarket(marketId, outcome);
+    function test_CreateDuel_RevertsWithoutBet() public {
+        vm.expectRevert("Bet required");
+        arena.createDuel{value: 0}();
     }
 
-    // ── a ──
-
-    function test_CreateAndPlaceBets() public {
-        vm.expectEmit(true, false, false, true, address(pm));
-        emit MarketCreated(1, "Will Monad flip bullish?", block.timestamp + 1 days);
-        uint256 marketId = pm.createMarket("Will Monad flip bullish?", 1 days);
-
-        assertEq(marketId, 1);
-        assertEq(pm.marketCount(), 1);
-
-        vm.prank(alice);
-        pm.placeBet{value: BET}(marketId, true);
-        vm.prank(bob);
-        pm.placeBet{value: BET}(marketId, false);
-
-        (, uint256 yesAmount, uint256 noAmount,,) = _market(marketId);
-        assertEq(yesAmount, BET);
-        assertEq(noAmount, BET);
-        // per-user buckets are struct-internal (not exposed by the getter), so verify
-        // them through the stake actually leaving each wallet
-        assertEq(alice.balance, START_BALANCE - BET);
-        assertEq(bob.balance, START_BALANCE - BET);
-        assertEq(charlie.balance, START_BALANCE);
-
-        // guards: zero stake and post-deadline bets are rejected
-        vm.prank(charlie);
-        vm.expectRevert("Zero bet");
-        pm.placeBet{value: 0}(marketId, true);
-
-        (uint256 endTime,,,,) = _market(marketId);
-        vm.warp(endTime);
-        vm.prank(charlie);
-        vm.expectRevert("Market closed");
-        pm.placeBet{value: 1 ether}(marketId, true);
-        assertEq(charlie.balance, START_BALANCE); // rejected bets refund nothing / take nothing
+    function test_CreateDuel_MultipleDuelsGetIncrementalIds() public {
+        vm.prank(challenger);
+        uint256 id1 = arena.createDuel{value: BET}();
+        uint256 id2 = arena.createDuel{value: 2 ether}();
+        assertEq(id1, 1);
+        assertEq(id2, 2);
+        assertEq(arena.duelCounter(), 2);
     }
 
-    // ── b ──
+    function test_CancelDuel() public {
+        vm.prank(creator);
+        arena.createDuel{value: BET}();
 
-    function test_ResolveAndClaimWinnings() public {
-        uint256 marketId = _openTwoSidedMarket(); // 10 YES (Alice) / 10 NO (Bob)
+        uint256 balanceBefore = creator.balance;
 
-        uint256 shieldBefore = address(shield).balance;
-        uint256 treasuryBefore = treasury.balance;
+        vm.expectEmit(true, true, false, true);
+        emit DuelCancelled(1, creator);
+        vm.prank(creator);
+        arena.cancelDuel(1);
 
-        (uint256 endTime,,,,) = _market(marketId);
-        vm.warp(endTime);
-
-        // fee split: 10 MON losing pool -> 0.25 fee -> 0.15 shield / 0.10 treasury
-        vm.expectEmit(true, false, false, true, address(pm));
-        emit MarketResolved(marketId, 1, 0.15 ether, 0.1 ether);
-        pm.resolveMarket(marketId, 1);
-
-        assertEq(address(shield).balance - shieldBefore, 0.15 ether);
-        assertEq(treasury.balance - treasuryBefore, 0.1 ether);
-
-        (, uint256 yesAmount, uint256 noAmount, bool resolved, uint8 outcome) = _market(marketId);
-        assertTrue(resolved);
-        assertEq(outcome, 1);
-        assertEq(yesAmount + noAmount, 20 ether);
-
-        // Alice (YES) wins the whole 20 MON pot minus the 0.25 MON rake = 19.75 MON
-        uint256 aliceBefore = alice.balance;
-        vm.prank(alice);
-        vm.expectEmit(true, true, false, true, address(pm));
-        emit WinningsClaimed(marketId, alice, 19.75 ether);
-        pm.claimWinnings(marketId);
-        assertEq(alice.balance - aliceBefore, 19.75 ether);
-
-        // double claim blocked
-        vm.prank(alice);
-        vm.expectRevert("Already claimed");
-        pm.claimWinnings(marketId);
-
-        // Bob (NO) loses: no payout, but his 10 MON loss is recorded on the shield
-        uint256 bobBefore = bob.balance;
-        vm.prank(bob);
-        pm.claimWinnings(marketId);
-        assertEq(bob.balance, bobBefore);
-        assertEq(shield.userRecordedLosses(bob), BET);
-
-        // market is fully drained: pot - fee = what Alice took
-        assertEq(address(pm).balance, 0);
+        assertEq(creator.balance, balanceBefore + BET);
+        assertEq(address(arena).balance, 0);
+        (,,,, bool resolved_,) = _duel(1);
+        assertTrue(resolved_);
     }
 
-    // ── c ──
-
-    function test_ShieldClaimGate() public {
-        // Bob books a real loss first so only the NFT gate can be what stops him
-        uint256 marketId = _openTwoSidedMarket();
-        _resolveAfterEnd(marketId, 1); // YES wins, Bob loses 10 MON
-
-        vm.prank(bob);
-        pm.claimWinnings(marketId);
-        assertEq(shield.userRecordedLosses(bob), BET);
-        assertEq(nft.balanceOf(bob), 0);
-
-        vm.prank(bob);
-        vm.expectRevert("No Chog NFT");
-        shield.claimBailout();
-
-        // Alice passes the gate (she holds the NFT), so the gate is what differs
-        vm.prank(alice);
-        vm.expectRevert("No loss to claim"); // Alice won, nothing recorded
-        shield.claimBailout();
+    function test_CancelDuel_RevertsForNonCreator() public {
+        arena.createDuel{value: BET}();
+        vm.prank(spectator);
+        vm.expectRevert("Not creator");
+        arena.cancelDuel(1);
     }
 
-    // ── d ──
+    function test_CancelDuel_RevertsAfterJoin() public {
+        vm.prank(creator);
+        arena.createDuel{value: BET}();
+        vm.prank(challenger);
+        arena.joinDuel{value: BET}(1);
 
-    function test_ShieldBailoutSuccessAndCooldown() public {
-        // Alice bets NO and loses 10 MON
-        uint256 marketId = pm.createMarket("Alice's losing market?", 1 days);
-        vm.prank(alice);
-        pm.placeBet{value: BET}(marketId, false);
-        vm.prank(bob);
-        pm.placeBet{value: BET}(marketId, true);
-        _resolveAfterEnd(marketId, 1);
-
-        vm.prank(alice);
-        pm.claimWinnings(marketId); // records Alice's loss, pays her nothing
-        assertEq(shield.userRecordedLosses(alice), BET);
-
-        // top the shield up (accumulated historical rake) so 20% isn't clamped:
-        // rebate 2.0 MON vs. only the 0.15 MON this market raked in
-        vm.deal(address(shield), address(shield).balance + 10 ether);
-
-        uint256 aliceBefore = alice.balance;
-        uint256 shieldBefore = address(shield).balance;
-
-        vm.prank(alice);
-        vm.expectEmit(true, false, false, true, address(shield));
-        emit BailoutClaimed(alice, 2 ether);
-        shield.claimBailout();
-
-        assertEq(alice.balance - aliceBefore, 2 ether); // 20% of 10 MON
-        assertEq(shieldBefore - address(shield).balance, 2 ether);
-        assertEq(shield.userRecordedLosses(alice), 0);
-        assertEq(shield.lastClaimTimestamp(alice), block.timestamp);
-
-        vm.prank(alice);
-        vm.expectRevert("Cooldown active");
-        shield.claimBailout();
-
-        // after the 7-day cooldown the rebate is empty, so it fails on "No loss"
-        vm.warp(block.timestamp + 7 days);
-        vm.prank(alice);
-        vm.expectRevert("No loss to claim");
-        shield.claimBailout();
+        vm.prank(creator);
+        vm.expectRevert("Already joined");
+        arena.cancelDuel(1);
     }
 
-    // ── e ──
-
-    function test_ShieldSolvencyClamping() public {
-        // Alice loses 10 MON -> theoretical rebate 2.0 MON
-        uint256 marketId = pm.createMarket("Clamp market?", 1 days);
-        vm.prank(alice);
-        pm.placeBet{value: BET}(marketId, false);
-        vm.prank(bob);
-        pm.placeBet{value: BET}(marketId, true);
-        _resolveAfterEnd(marketId, 1);
-
-        vm.prank(alice);
-        pm.claimWinnings(marketId);
-        assertEq(shield.userRecordedLosses(alice), BET);
-
-        // shield only holds this market's 0.15 MON rake — less than the 2.0 MON rebate
-        uint256 shieldBalance = address(shield).balance;
-        assertEq(shieldBalance, 0.15 ether);
-
-        uint256 aliceBefore = alice.balance;
-        vm.prank(alice);
-        shield.claimBailout(); // must not revert
-
-        uint256 received = alice.balance - aliceBefore;
-        assertEq(received, shieldBalance); // clamped to remaining pool balance
-        assertLt(received, 2 ether); // below the uncapped 20% rebate
-        assertEq(address(shield).balance, 0);
-        assertEq(shield.userRecordedLosses(alice), 0);
-        assertEq(shield.lastClaimTimestamp(alice), block.timestamp);
-
-        // pool is empty now: book another loss (as the authorized market) and a later
-        // rebate request can't pay anything — clamps to 0 and reverts cleanly
-        vm.prank(address(pm));
-        shield.recordLoss(alice, 5 ether);
-        assertEq(address(shield).balance, 0);
-
-        vm.warp(block.timestamp + 7 days);
-        vm.prank(alice);
-        vm.expectRevert("No loss to claim");
-        shield.claimBailout();
+    function test_CancelDuel_RevertsForUnknownDuel() public {
+        vm.prank(creator);
+        vm.expectRevert("Duel does not exist");
+        arena.cancelDuel(42);
     }
 
-    // ── authorization / access control ──
+    // -------------------------------------------------------------- settlement
 
-    function test_RecordLoss_RevertsForNonMarket() public {
-        vm.expectRevert("not market");
-        shield.recordLoss(alice, 1 ether);
+    function test_SettleDuel_NonNftHolders_Pays2PctFee() public {
+        vm.prevrandao(bytes32(uint256(42)));
+        vm.warp(1_000_000);
+
+        bool creatorWins = _predictRoll(1, challenger) % 2 == 0;
+        address expectedWinner = creatorWins ? creator : challenger;
+
+        vm.prank(creator);
+        arena.createDuel{value: BET}();
+
+        vm.prank(challenger);
+        arena.joinDuel{value: BET}(1);
+
+        uint256 pot = BET * 2;
+        uint256 expectedFee = (pot * 200) / 10000; // 0.04 ether
+        uint256 expectedPayout = pot - expectedFee;
+
+        (,,, address winner_, bool resolved_, bool secondWindProc_) = _duel(1);
+        assertEq(winner_, expectedWinner);
+        assertTrue(resolved_);
+        assertFalse(secondWindProc_);
+
+        assertEq(treasury.balance, expectedFee);
+        assertEq(expectedWinner.balance, 99 ether + expectedPayout);
+        assertEq(address(arena).balance, 0);
     }
 
-    function test_SetAuthorizedMarket_OnlyOwner() public {
-        vm.prank(alice);
+    function test_SettleDuel_NftHolder_FeeWaived() public {
+        vm.prevrandao(bytes32(uint256(7)));
+        vm.warp(1_000_000);
+
+        // Creator holds a Chog NFT -> 0% rake even though challenger has none.
+        nft.mint(creator, 1);
+
+        bool creatorWins = _predictRoll(1, challenger) % 2 == 0;
+        address expectedWinner = creatorWins ? creator : challenger;
+
+        vm.prank(creator);
+        arena.createDuel{value: BET}();
+
+        vm.prank(challenger);
+        arena.joinDuel{value: BET}(1);
+
+        (,,, address winner_, bool resolved_,) = _duel(1);
+        assertEq(winner_, expectedWinner);
+        assertTrue(resolved_);
+
+        assertEq(treasury.balance, 0);
+        assertEq(expectedWinner.balance, 99 ether + BET * 2);
+    }
+
+    function test_JoinDuel_RevertsOnBetMismatch() public {
+        arena.createDuel{value: BET}();
+        vm.prank(challenger);
+        vm.expectRevert("Bet mismatch");
+        arena.joinDuel{value: BET - 1}(1);
+    }
+
+    function test_JoinDuel_RevertsOnSelfDuel() public {
+        vm.prank(creator);
+        arena.createDuel{value: BET}();
+        vm.prank(creator);
+        vm.expectRevert("Cannot fight yourself");
+        arena.joinDuel{value: BET}(1);
+    }
+
+    function test_JoinDuel_RevertsWhenAlreadyJoined() public {
+        vm.prank(creator);
+        arena.createDuel{value: BET}();
+        vm.prank(challenger);
+        arena.joinDuel{value: BET}(1);
+
+        vm.deal(spectator, 1 ether);
+        vm.prank(spectator);
+        vm.expectRevert("Already joined");
+        arena.joinDuel{value: BET}(1);
+    }
+
+    // ------------------------------------------------------------ second wind
+
+    function test_SecondWind_ResurrectsLoser() public {
+        vm.warp(1_000_000);
+
+        // Both fighters hold Chog NFTs so the initial loser is always eligible
+        // for Second Wind (and the fee perk applies).
+        nft.mint(creator, 1);
+        nft.mint(challenger, 1);
+
+        vm.prank(creator);
+        arena.createDuel{value: BET}();
+
+        // Brute-force a prevrandao seed where the Second Wind roll (nonce 2)
+        // lands under the 20% threshold.
+        uint256 seed;
+        bool found;
+        for (uint256 s = 1; s < 500; s++) {
+            vm.prevrandao(bytes32(s));
+            if (_predictRoll(2, challenger) % 10000 < 2000) {
+                seed = s;
+                found = true;
+                break;
+            }
+        }
+        assertTrue(found, "no seed triggered Second Wind");
+        vm.prevrandao(bytes32(seed));
+
+        // Predict the combatants from the combat roll (nonce 1) and the final
+        // winner from the sudden-death re-roll (nonce 3).
+        address initialLoser = _predictRoll(1, challenger) % 2 == 0 ? challenger : creator;
+        address expectedWinner = _predictRoll(3, challenger) % 2 == 0 ? creator : challenger;
+
+        vm.expectEmit(true, true, false, true, address(arena));
+        emit SecondWindTriggered(1, initialLoser);
+        vm.expectEmit(true, true, false, true, address(arena));
+        // Fee perk: both hold NFTs -> winner takes the whole 2 ether pot.
+        emit DuelResolved(1, expectedWinner, BET * 2, true);
+
+        vm.prank(challenger);
+        arena.joinDuel{value: BET}(1);
+
+        (,,, address winner_, bool resolved_, bool secondWindProc_) = _duel(1);
+        assertTrue(secondWindProc_, "secondWindProc not set");
+        assertTrue(resolved_);
+        assertEq(winner_, expectedWinner);
+        // Winner paid the 1 ETH stake and takes the whole 2 ETH pot back.
+        assertEq(expectedWinner.balance, 99 ether + BET * 2);
+        assertEq(treasury.balance, 0);
+    }
+
+    function test_SecondWind_NotTriggeredForNonNftLoser() public {
+        vm.prevrandao(bytes32(uint256(99)));
+        vm.warp(1_000_000);
+
+        // Only the creator holds an NFT; if the challenger loses there is no
+        // Second Wind check at all — settle with the regular outcome.
+        nft.mint(creator, 1);
+        vm.prank(creator);
+        arena.createDuel{value: BET}();
+
+        // Find a seed where the loser is the NFT-less challenger (roll 1 == 0
+        // means creator wins) so the Second Wind path must be skipped.
+        uint256 seed;
+        bool found;
+        for (uint256 s = 1; s < 500; s++) {
+            vm.prevrandao(bytes32(s));
+            if (_predictRoll(1, challenger) % 2 == 0) {
+                seed = s;
+                found = true;
+                break;
+            }
+        }
+        assertTrue(found);
+        vm.prevrandao(bytes32(seed));
+
+        vm.prank(challenger);
+        arena.joinDuel{value: BET}(1);
+
+        (,,, address winner_, bool resolved_, bool secondWindProc_) = _duel(1);
+        assertEq(winner_, creator);
+        assertTrue(resolved_);
+        assertFalse(secondWindProc_);
+    }
+
+    // ------------------------------------------------------------------ owner
+
+    function test_SetTreasury_OnlyOwner() public {
+        address newTreasury = makeAddr("newTreasury");
+        vm.prank(creator);
         vm.expectRevert();
-        shield.setAuthorizedMarket(alice);
+        arena.setTreasury(newTreasury);
+
+        arena.setTreasury(newTreasury);
+        assertEq(arena.treasury(), newTreasury);
     }
 }
