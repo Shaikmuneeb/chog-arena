@@ -1,0 +1,25 @@
+# Foundry
+lib/
+out/
+cache/
+broadcast/
+
+# Node
+node_modules/
+
+# Secrets / environment files
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+logs/
+.logs/
+
+# Local-only bulk / machine state (Vercel cache, build metadata, TS build info,
+# Replit artifact snapshots and attached assets)
+.vercel/
+*.tsbuildinfo
+Chog-Casino/artifacts/
+Chog-Casino/attached_assets/
