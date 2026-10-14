@@ -9,6 +9,7 @@ via_ir = true
 
 [rpc_endpoints]
 monad_mainnet = "https://rpc.monad.xyz"
+monad_testnet = "https://testnet-rpc.monad.xyz"
 
 [etherscan]
 # Fill in a Monad-compatible block explorer API key/URL here before verifying.
