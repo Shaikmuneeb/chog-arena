@@ -46,6 +46,12 @@ contract ChogArena is Ownable2Step, ReentrancyGuard {
         treasury = _treasury;
     }
 
+    /// @notice Accept direct MON top-ups for the house bankroll.
+    receive() external payable {}
+
+    /// @notice Explicit house-bankroll deposit used by the owner/ops.
+    function fundArena() external payable {}
+
     /// @notice Open a duel by staking the bet amount. Active until joined.
     function createDuel() external payable nonReentrant returns (uint256 duelId) {
         require(msg.value > 0, "Bet required");
@@ -100,7 +106,7 @@ contract ChogArena is Ownable2Step, ReentrancyGuard {
 
         // Second Wind: a losing Chog NFT holder may resurrect once.
         bool secondWindUsed = false;
-        if (IERC721(chogNFT).balanceOf(loser) >= 1) {
+        if (_holdsChogNft(loser)) {
             if (_roll(msg.sender) % 10000 < SECOND_WIND_PROB_BPS) {
                 duel.secondWindProc = true;
                 secondWindUsed = true;
@@ -121,7 +127,7 @@ contract ChogArena is Ownable2Step, ReentrancyGuard {
         // Fee perk: 0% rake when either fighter holds a Chog NFT, else 2%.
         uint256 pot = duel.betAmount * 2;
         uint256 fee = 0;
-        if (IERC721(chogNFT).balanceOf(duel.creator) == 0 && IERC721(chogNFT).balanceOf(duel.challenger) == 0) {
+        if (!_holdsChogNft(duel.creator) && !_holdsChogNft(duel.challenger)) {
             fee = (pot * PROTOCOL_FEE_BPS) / 10000;
         }
         uint256 payout = pot - fee;
@@ -136,6 +142,73 @@ contract ChogArena is Ownable2Step, ReentrancyGuard {
         emit DuelResolved(duelId, winner, payout, secondWindUsed);
     }
 
+    /// @notice Fight an Arena NPC with a real MON stake. The house plays the
+    /// NPC side (address(this)); winnings come out of the arena bankroll.
+    /// Losses fund the bankroll. Capped payouts ensure the tx never reverts
+    /// on an underfunded house pool.
+    function fightNpc(uint256 npcId)
+        external
+        payable
+        nonReentrant
+        returns (bool playerWon, bool secondWindUsed, uint256 payout)
+    {
+        require(msg.value > 0, "Stake required");
+        uint256 duelId = ++duelCounter;
+
+        bool holdsNft = _holdsChogNft(msg.sender);
+
+        // Initial combat roll: 0 -> player wins, 1 -> NPC wins.
+        playerWon = _roll(msg.sender) % 2 == 0;
+
+        // Second Wind: a losing Chog NFT holder may resurrect once.
+        if (!playerWon && holdsNft) {
+            if (_roll(msg.sender) % 10000 < SECOND_WIND_PROB_BPS) {
+                secondWindUsed = true;
+                emit SecondWindTriggered(duelId, msg.sender);
+                // Sudden-death re-roll decides the final winner.
+                playerWon = _roll(msg.sender) % 2 == 0;
+            }
+        }
+
+        address winner = playerWon ? msg.sender : address(this);
+        uint256 fee;
+
+        if (playerWon) {
+            // Gross double-or-nothing; 0% rake for Chog NFT holders.
+            uint256 gross = msg.value * 2;
+            fee = holdsNft ? 0 : (gross * PROTOCOL_FEE_BPS) / 10000;
+            uint256 netPayout = gross - fee;
+
+            // Safe bankroll handling: never overdraw the house pool.
+            uint256 bankroll = address(this).balance; // includes msg.value
+            if (netPayout > bankroll) {
+                netPayout = bankroll;
+            }
+            payout = netPayout;
+
+            (bool paid,) = payable(msg.sender).call{value: netPayout}("");
+            require(paid, "Payout failed");
+
+            // Pay the rake only from whatever fee headroom remains.
+            if (fee > 0 && address(this).balance >= fee) {
+                (bool feeSent,) = payable(treasury).call{value: fee}("");
+                require(feeSent, "Fee transfer failed");
+            }
+        } else {
+            // NPC wins: stake stays in the arena bankroll; rake the stake
+            // unless the player holds a Chog NFT.
+            payout = 0;
+            fee = holdsNft ? 0 : (msg.value * PROTOCOL_FEE_BPS) / 10000;
+            if (fee > 0) {
+                (bool feeSent,) = payable(treasury).call{value: fee}("");
+                require(feeSent, "Fee transfer failed");
+            }
+        }
+
+        emit DuelResolved(duelId, winner, payout, secondWindUsed);
+        // npcId is an identifier only — entropy comes from _roll().
+    }
+
     /// @notice Owner rescue: rotate the treasury fee recipient.
     function setTreasury(address _treasury) external onlyOwner {
         require(_treasury != address(0), "Zero address");
@@ -147,5 +220,15 @@ contract ChogArena is Ownable2Step, ReentrancyGuard {
     function _roll(address player) internal returns (uint256) {
         rollNonce += 1;
         return uint256(keccak256(abi.encodePacked(block.prevrandao, block.timestamp, rollNonce, player)));
+    }
+
+    /// @dev Revert-safe Chog NFT ownership check. Placeholder / undeployed
+    /// chogNFT addresses (or precompile 0x01) would make a raw IERC721 call
+    /// revert on empty return data — treat "no contract" as "no NFT".
+    function _holdsChogNft(address who) internal view returns (bool) {
+        if (chogNFT.code.length == 0) return false;
+        (bool success, bytes memory data) = chogNFT.staticcall(abi.encodeWithSelector(IERC721.balanceOf.selector, who));
+        if (!success || data.length < 32) return false;
+        return abi.decode(data, (uint256)) >= 1;
     }
 }

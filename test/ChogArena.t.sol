@@ -325,4 +325,237 @@ contract ChogArenaTest is Test {
         arena.setTreasury(newTreasury);
         assertEq(arena.treasury(), newTreasury);
     }
+
+    // -------------------------------------------------------- arena funding
+
+    function test_Receive_AcceptsPlainEth() public {
+        vm.deal(spectator, 1 ether);
+        (bool ok,) = address(arena).call{value: 0.4 ether}("");
+        assertTrue(ok);
+        assertEq(address(arena).balance, 0.4 ether);
+    }
+
+    function test_FundArena_AccumulatesBankroll() public {
+        vm.deal(spectator, 5 ether);
+        vm.prank(spectator);
+        arena.fundArena{value: 2 ether}();
+        assertEq(address(arena).balance, 2 ether);
+
+        vm.prank(spectator);
+        arena.fundArena{value: 1 ether}();
+        assertEq(address(arena).balance, 3 ether);
+    }
+
+    // -------------------------------------------------------------- fightNpc
+
+    function test_FightNpc_RevertsWithoutStake() public {
+        vm.prank(challenger);
+        vm.expectRevert("Stake required");
+        arena.fightNpc{value: 0}(1);
+    }
+
+    function test_SettleDuel_PlaceholderNftAddress_DoesNotRevert() public {
+        // Deploy with a precompile-style placeholder NFT address (no code):
+        // raw IERC721.balanceOf would revert on empty return data.
+        ChogArena bare = new ChogArena(address(0x01), treasury);
+        vm.deal(creator, 10 ether);
+        vm.deal(challenger, 10 ether);
+
+        vm.prank(creator);
+        bare.createDuel{value: BET}();
+        vm.prank(challenger);
+        bare.joinDuel{value: BET}(1);
+
+        (,,, address winner_, bool resolved_,) = bare.duels(1);
+        assertTrue(resolved_);
+        assertTrue(winner_ == creator || winner_ == challenger);
+        // No NFT perk without a real NFT contract -> 2% rake applies.
+        assertEq(treasury.balance, (BET * 2 * 200) / 10000);
+    }
+
+    function test_FightNpc_PlaceholderNftAddress_DoesNotRevert() public {
+        ChogArena bare = new ChogArena(address(0x01), treasury);
+        vm.deal(challenger, 10 ether);
+        vm.deal(spectator, 10 ether);
+        vm.prank(spectator);
+        bare.fundArena{value: 5 ether}();
+
+        // A raw IERC721.balanceOf against the placeholder would revert here.
+        vm.prank(challenger);
+        bare.fightNpc{value: BET}(1);
+        assertEq(bare.duelCounter(), 1);
+    }
+
+    function test_FightNpc_IncrementsDuelCounter() public {
+        vm.deal(challenger, 10 ether);
+        vm.prank(challenger);
+        arena.fightNpc{value: 1 ether}(1);
+        assertEq(arena.duelCounter(), 1);
+    }
+
+    function test_FightNpc_PlayerWins_PaysFromBankroll_WithFee() public {
+        vm.warp(1_000_000);
+        vm.deal(challenger, 10 ether);
+        // Top up the house bankroll so a win can be paid out.
+        vm.deal(spectator, 10 ether);
+        vm.prank(spectator);
+        arena.fundArena{value: 5 ether}();
+
+        // Non-holder: first roll (nonce 1) % 2 == 0 means player wins.
+        bool playerWins;
+        for (uint256 s = 1; s < 500; s++) {
+            vm.prevrandao(bytes32(s));
+            if (_predictRoll(1, challenger) % 2 == 0) {
+                playerWins = true;
+                break;
+            }
+        }
+        assertTrue(playerWins, "seed must give the player a win");
+
+        uint256 pot = BET * 2;
+        uint256 expectedFee = (pot * 200) / 10000; // 0.04 ether
+        uint256 expectedPayout = pot - expectedFee;
+
+        vm.expectEmit(true, true, false, true, address(arena));
+        emit DuelResolved(1, challenger, expectedPayout, false);
+
+        vm.prank(challenger);
+        (bool playerWon, bool secondWindUsed, uint256 payout) = arena.fightNpc{value: BET}(1);
+
+        assertTrue(playerWon);
+        assertFalse(secondWindUsed);
+        assertEq(payout, expectedPayout);
+        assertEq(challenger.balance, 9 ether + expectedPayout);
+        assertEq(treasury.balance, expectedFee);
+        // Bankroll: 5 + 1 stake - payout - fee = 5.96
+        assertEq(address(arena).balance, 5 ether + BET - expectedPayout - expectedFee);
+    }
+
+    function test_FightNpc_NpcWins_KeepsStakeAndRakes() public {
+        vm.prevrandao(bytes32(uint256(7)));
+        vm.warp(1_000_000);
+        vm.deal(challenger, 10 ether);
+
+        // Find a seed where the NPC wins (nonce 1 roll != 0).
+        uint256 seed;
+        bool found;
+        for (uint256 s = 1; s < 500; s++) {
+            vm.prevrandao(bytes32(s));
+            if (_predictRoll(1, challenger) % 2 != 0) {
+                seed = s;
+                found = true;
+                break;
+            }
+        }
+        assertTrue(found);
+        vm.prevrandao(bytes32(seed));
+
+        uint256 expectedFee = (BET * 200) / 10000; // 2% of the stake
+
+        vm.prank(challenger);
+        (bool playerWon, bool secondWindUsed, uint256 payout) = arena.fightNpc{value: BET}(1);
+
+        assertFalse(playerWon);
+        assertFalse(secondWindUsed);
+        assertEq(payout, 0);
+        assertEq(challenger.balance, 9 ether);
+        assertEq(treasury.balance, expectedFee);
+        assertEq(address(arena).balance, BET - expectedFee);
+    }
+
+    function test_FightNpc_NftHolder_SecondWindClutch_FeeWaived() public {
+        vm.warp(1_000_000);
+        nft.mint(challenger, 1);
+        vm.deal(challenger, 10 ether);
+        vm.deal(spectator, 10 ether);
+        vm.prank(spectator);
+        arena.fundArena{value: 5 ether}();
+
+        // Find one seed where: initial roll (nonce 1) loses, Second Wind
+        // (nonce 2) lands under 20%, and sudden death (nonce 3) goes to the
+        // player — a full clutch comeback in a single pass.
+        bool found;
+        for (uint256 s = 1; s < 5000; s++) {
+            vm.prevrandao(bytes32(s));
+            if (
+                _predictRoll(1, challenger) % 2 != 0 && _predictRoll(2, challenger) % 10000 < 2000
+                    && _predictRoll(3, challenger) % 2 == 0
+            ) {
+                found = true;
+                break;
+            }
+        }
+        assertTrue(found, "no seed triggered the clutch comeback");
+
+        vm.expectEmit(true, true, false, true, address(arena));
+        emit SecondWindTriggered(1, challenger);
+        // NFT holder -> 0% rake; winner takes the full 2 ether pot.
+        vm.expectEmit(true, true, false, true, address(arena));
+        emit DuelResolved(1, challenger, BET * 2, true);
+
+        vm.prank(challenger);
+        (bool playerWon, bool secondWindUsed, uint256 payout) = arena.fightNpc{value: BET}(1);
+
+        assertTrue(playerWon, "clutch comeback must win");
+        assertTrue(secondWindUsed);
+        assertEq(payout, BET * 2);
+        assertEq(challenger.balance, 9 ether + BET * 2);
+        assertEq(treasury.balance, 0);
+    }
+
+    function test_FightNpc_UnderfundedBankroll_CapsPayoutNoRevert() public {
+        vm.warp(1_000_000);
+        vm.deal(challenger, 10 ether);
+
+        // Empty house pool: arena balance == the incoming stake only.
+        bool playerWins;
+        for (uint256 s = 1; s < 500; s++) {
+            vm.prevrandao(bytes32(s));
+            if (_predictRoll(1, challenger) % 2 == 0) {
+                playerWins = true;
+                break;
+            }
+        }
+        assertTrue(playerWins, "seed must give the player a win");
+
+        vm.prank(challenger);
+        (bool playerWon,, uint256 payout) = arena.fightNpc{value: BET}(1);
+
+        assertTrue(playerWon);
+        // Capped to the full contract balance (the stake itself); fee skipped.
+        assertEq(payout, BET);
+        assertEq(challenger.balance, 9 ether + BET);
+        assertEq(address(arena).balance, 0);
+        assertEq(treasury.balance, 0);
+    }
+
+    function test_FightNpc_NftHolderLoss_NoSecondWind_KeepsStakeNoFee() public {
+        vm.warp(1_000_000);
+        nft.mint(challenger, 1);
+        vm.deal(challenger, 10 ether);
+
+        // Seed: player loses (nonce 1 != 0) and Second Wind fails (nonce 2 >= 2000).
+        uint256 seed;
+        bool found;
+        for (uint256 s = 1; s < 2000; s++) {
+            vm.prevrandao(bytes32(s));
+            if (_predictRoll(1, challenger) % 2 != 0 && _predictRoll(2, challenger) % 10000 >= 2000) {
+                seed = s;
+                found = true;
+                break;
+            }
+        }
+        assertTrue(found);
+        vm.prevrandao(bytes32(seed));
+
+        vm.prank(challenger);
+        (bool playerWon, bool secondWindUsed, uint256 payout) = arena.fightNpc{value: BET}(1);
+
+        assertFalse(playerWon);
+        assertFalse(secondWindUsed);
+        assertEq(payout, 0);
+        // Holder perk: no rake on the lost stake.
+        assertEq(treasury.balance, 0);
+        assertEq(address(arena).balance, BET);
+    }
 }

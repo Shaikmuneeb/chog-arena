@@ -84,3 +84,429 @@ body {
   animation: rise-in 0.4s ease-out both;
 }
 
+/* ---- Combat sequence ---- */
+
+@keyframes lunge-right {
+  0%,
+  100% {
+    transform: translateX(0) scale(1);
+  }
+  35% {
+    transform: translateX(30px) scale(1.07);
+  }
+}
+
+@keyframes lunge-left {
+  0%,
+  100% {
+    transform: translateX(0) scale(1);
+  }
+  35% {
+    transform: translateX(-30px) scale(1.07);
+  }
+}
+
+.animate-lunge-right {
+  animation: lunge-right 0.45s ease-in-out;
+}
+
+.animate-lunge-left {
+  animation: lunge-left 0.45s ease-in-out;
+}
+
+@keyframes hit-shake {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  20% {
+    transform: translateX(-7px);
+  }
+  40% {
+    transform: translateX(7px);
+  }
+  60% {
+    transform: translateX(-5px);
+  }
+  80% {
+    transform: translateX(5px);
+  }
+}
+
+.animate-hit-shake {
+  animation: hit-shake 0.45s ease-in-out;
+}
+
+@keyframes damage-float {
+  0% {
+    transform: translateY(0) scale(0.9);
+    opacity: 0;
+  }
+  15% {
+    transform: translateY(-6px) scale(1.1);
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(-48px) scale(1);
+    opacity: 0;
+  }
+}
+
+.animate-damage-float {
+  animation: damage-float 0.95s ease-out forwards;
+}
+
+@keyframes second-wind-flash {
+  0% {
+    opacity: 0;
+  }
+  20% {
+    opacity: 1;
+  }
+  45% {
+    opacity: 0.15;
+  }
+  70% {
+    opacity: 0.85;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+.animate-second-wind-flash {
+  animation: second-wind-flash 1.4s ease-in-out;
+}
+
+@keyframes hp-refill {
+  0% {
+    filter: brightness(1);
+  }
+  50% {
+    filter: brightness(1.8);
+  }
+  100% {
+    filter: brightness(1);
+  }
+}
+
+.animate-hp-refill {
+  animation: hp-refill 1s ease-in-out;
+}
+
+@keyframes verdict-slam {
+  0% {
+    transform: scale(2.6);
+    opacity: 0;
+  }
+  60% {
+    transform: scale(0.94);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+.animate-verdict-slam {
+  animation: verdict-slam 0.55s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+/* ---- Full-body fighter sprites ---- */
+
+.sprite-mirror {
+  transform: scaleX(-1);
+}
+
+@keyframes sprite-bob {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-3px);
+  }
+}
+
+.sprite-idle {
+  animation: sprite-bob 2.2s ease-in-out infinite;
+}
+
+@keyframes sprite-dash {
+  0% {
+    transform: translateX(0);
+  }
+  35% {
+    transform: translateX(42px) skewX(-4deg);
+  }
+  100% {
+    transform: translateX(0);
+  }
+}
+
+.sprite-dash {
+  animation: sprite-dash 0.55s ease-out;
+}
+
+@keyframes sprite-recoil {
+  0% {
+    transform: translateX(0);
+  }
+  30% {
+    transform: translateX(-12px) rotate(-4deg);
+  }
+  100% {
+    transform: translateX(0);
+  }
+}
+
+.sprite-recoil {
+  animation: sprite-recoil 0.5s ease-out;
+}
+
+@keyframes sprite-dead-fall {
+  0% {
+    transform: rotate(0deg) translateY(0);
+    opacity: 1;
+  }
+  60% {
+    transform: rotate(-70deg) translateY(4px);
+    opacity: 1;
+  }
+  100% {
+    transform: rotate(-88deg) translateY(6px);
+    opacity: 0.85;
+  }
+}
+
+.sprite-dead {
+  animation: sprite-dead-fall 0.75s ease-in forwards;
+}
+
+@keyframes sprite-levitate {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  30% {
+    transform: translateY(-16px);
+  }
+  60% {
+    transform: translateY(-8px);
+  }
+}
+
+.sprite-levitate {
+  animation: sprite-levitate 1.4s ease-in-out;
+}
+
+@keyframes sprite-victory-body {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-6px);
+  }
+}
+
+.sprite-victory-body {
+  animation: sprite-victory-body 0.9s ease-in-out infinite;
+}
+
+@keyframes sprite-weapon-swing {
+  0% {
+    transform: rotate(0deg);
+  }
+  35% {
+    transform: rotate(-115deg);
+  }
+  100% {
+    transform: rotate(0deg);
+  }
+}
+
+.sprite-weapon-swing {
+  animation: sprite-weapon-swing 0.55s ease-out;
+}
+
+@keyframes sprite-weapon-raise {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(-150deg);
+  }
+}
+
+.sprite-weapon-raise {
+  animation: sprite-weapon-raise 0.7s ease-out forwards;
+}
+
+@keyframes sprite-aura-pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 0.7;
+  }
+}
+
+.sprite-aura {
+  animation: sprite-aura-pulse 2.4s ease-in-out infinite;
+}
+
+.sprite-aura-hot {
+  animation: sprite-aura-pulse 0.7s ease-in-out infinite;
+}
+
+@keyframes sprite-slash-arc {
+  0% {
+    opacity: 0;
+    transform: scale(0.6) rotate(-16deg);
+  }
+  35% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.15) rotate(8deg);
+  }
+}
+
+.sprite-slash {
+  animation: sprite-slash-arc 0.5s ease-out forwards;
+  transform-origin: 62px 70px;
+  transform-box: view-box;
+}
+
+.sprite-slash-trail {
+  animation-delay: 0.06s;
+}
+
+@keyframes sprite-flash-out {
+  0% {
+    opacity: 0.75;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+.sprite-flash {
+  animation: sprite-flash-out 0.45s ease-out forwards;
+}
+
+@keyframes sprite-spark-fly {
+  0% {
+    opacity: 1;
+    transform: translate(0, 0) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(var(--spark-x, 14px), var(--spark-y, -18px)) scale(0.3);
+  }
+}
+
+.sprite-spark {
+  animation: sprite-spark-fly 0.55s ease-out forwards;
+  transform-box: fill-box;
+}
+
+@keyframes sprite-pillar-flash {
+  0% {
+    opacity: 0;
+  }
+  25% {
+    opacity: 1;
+  }
+  55% {
+    opacity: 0.35;
+  }
+  80% {
+    opacity: 0.9;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+.sprite-pillar {
+  animation: sprite-pillar-flash 1.6s ease-in-out;
+}
+
+@keyframes sprite-shield-pop {
+  0% {
+    opacity: 0;
+    transform: scale(0.4);
+  }
+  40% {
+    opacity: 1;
+    transform: scale(1.05);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.25);
+  }
+}
+
+.sprite-shield {
+  animation: sprite-shield-pop 1.5s ease-out forwards;
+  transform-origin: 50px 72px;
+  transform-box: view-box;
+}
+
+@keyframes sprite-orb-bob {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-4px);
+  }
+}
+
+.sprite-orb {
+  animation: sprite-orb-bob 1.8s ease-in-out infinite;
+}
+
+@keyframes sprite-orb-ring {
+  0%,
+  100% {
+    opacity: 0.5;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.15;
+    transform: scale(1.35);
+  }
+}
+
+.sprite-orb-ring {
+  animation: sprite-orb-ring 1.8s ease-in-out infinite;
+  transform-origin: center;
+  transform-box: fill-box;
+}
+
+@keyframes sprite-dust-puff {
+  0% {
+    opacity: 0;
+    transform: scaleX(0.4);
+  }
+  40% {
+    opacity: 0.45;
+  }
+  100% {
+    opacity: 0;
+    transform: scaleX(1.3);
+  }
+}
+
+.sprite-dust {
+  animation: sprite-dust-puff 0.9s ease-out forwards;
+  transform-origin: center;
+  transform-box: fill-box;
+}
+

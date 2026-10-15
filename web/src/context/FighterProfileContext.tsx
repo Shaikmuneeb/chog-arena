@@ -9,12 +9,21 @@ import {
   type ReactNode,
 } from "react";
 import { cn, truncateAddress } from "@/lib/utils";
+import {
+  isFighterClass,
+  type FighterClass,
+} from "@/config/fighterClasses";
+import { ARENA_NPCS } from "@/config/arenaNpcs";
+
+export type { FighterClass };
 
 export type FighterProfile = {
   username: string;
   /** Custom avatar image: uploaded data URL or external http(s)/ipfs link. */
   avatarUrl: string;
   title: string;
+  /** Full-body fighter class used by the sprite rig + battle stage. */
+  fighterClass: FighterClass;
 };
 
 /* v2: avatar field changed from preset emoji id to custom image URL. */
@@ -49,25 +58,38 @@ export function FighterProfileProvider({
 }) {
   const [profiles, setProfiles] = useState<Record<string, FighterProfile>>({});
 
-  /* Hydrate profiles from localStorage after mount (SSR-safe). */
+  /* Hydrate profiles from localStorage after mount (SSR-safe), with the
+   * Arena NPC roster always present underneath. */
   useEffect(() => {
+    let stored: Record<string, FighterProfile> = {};
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (raw) {
-        const stored = JSON.parse(raw) as Record<string, Partial<FighterProfile>>;
-        const migrated: Record<string, FighterProfile> = {};
-        for (const [key, value] of Object.entries(stored)) {
-          migrated[key] = {
+        const parsed = JSON.parse(raw) as Record<string, Partial<FighterProfile>>;
+        for (const [key, value] of Object.entries(parsed)) {
+          stored[key] = {
             username: typeof value.username === "string" ? value.username : "",
             avatarUrl: typeof value.avatarUrl === "string" ? value.avatarUrl : "",
             title: typeof value.title === "string" ? value.title : "",
+            fighterClass: isFighterClass(value.fighterClass)
+              ? value.fighterClass
+              : "berserker",
           };
         }
-        setProfiles(migrated);
       }
     } catch {
       /* corrupted storage — start empty */
     }
+    const npcProfiles: Record<string, FighterProfile> = {};
+    for (const npc of ARENA_NPCS) {
+      npcProfiles[npc.address.toLowerCase()] = {
+        username: npc.name,
+        avatarUrl: "",
+        title: npc.title,
+        fighterClass: npc.fighterClass,
+      };
+    }
+    setProfiles({ ...npcProfiles, ...stored });
   }, []);
 
   const value = useMemo<FighterProfileContextValue>(
@@ -140,7 +162,7 @@ export function FighterAvatarBadge({
   size = "md",
 }: {
   address?: string | null;
-  size?: "sm" | "md" | "lg";
+  size?: "sm" | "md" | "lg" | "xl";
 }) {
   const { getProfile } = useFighterProfile();
   const profile = address ? getProfile(address) : null;
@@ -156,6 +178,7 @@ export function FighterAvatarBadge({
     sm: "h-7 w-7 text-[9px]",
     md: "h-11 w-11 text-xs",
     lg: "h-16 w-16 text-lg",
+    xl: "h-24 w-24 text-3xl",
   } as const;
 
   return (

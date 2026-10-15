@@ -7,12 +7,13 @@ import {
   useConfig,
   useConnect,
   useReadContract,
+  useSendTransaction,
   useSwitchChain,
   useWaitForTransactionReceipt,
   useWriteContract,
 } from "wagmi";
-import { readContract } from "wagmi/actions";
-import { zeroAddress } from "viem";
+import { readContract, waitForTransactionReceipt } from "wagmi/actions";
+import { parseEventLogs, zeroAddress } from "viem";
 import { Coins, Loader2, Wallet, X } from "lucide-react";
 import { CHOG_ARENA_ADDRESS, CHOG_NFT_ADDRESS, chogArenaAbi, iChogNftAbi } from "@/contracts";
 import {
@@ -26,8 +27,15 @@ import {
   FighterAvatarBadge,
   useFighterProfile,
 } from "@/context/FighterProfileContext";
+import { FIGHTER_CLASS_META, type FighterClass } from "@/config/fighterClasses";
+import type { ArenaNpc } from "@/config/arenaNpcs";
 import { pushToast, updateToast } from "./Toast";
-import { DuelOutcomeModal, type DuelOutcome } from "./DuelOutcomeModal";
+import {
+  BattleArenaModal,
+  type DuelOutcome,
+  type FighterDescriptor,
+} from "./BattleArenaModal";
+import { FighterSprite } from "./FighterSprite";
 import type { ArenaDuel } from "./DuelBoard";
 
 const ZERO = zeroAddress;
@@ -48,8 +56,10 @@ export function AcceptDuelModal({ duel, onClose, onSettled }: AcceptDuelModalPro
   const [outcome, setOutcome] = useState<DuelOutcome | null>(null);
   const [showConnectors, setShowConnectors] = useState(false);
   const toastIdRef = useRef<number | null>(null);
+  const demoSettleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const { address, isConnected, chainId: walletChainId } = useAccount();
+  const { getProfile } = useFighterProfile();
   // Authoritative wallet chain — useChainId() reflects the app's optimistic
   // config chain (defaults to 143) and can desync from the real wallet.
   const appChainId = useChainId();
@@ -58,20 +68,69 @@ export function AcceptDuelModal({ duel, onClose, onSettled }: AcceptDuelModalPro
   const { connect, connectors, isPending: isConnecting } = useConnect();
   const { switchChain } = useSwitchChain();
 
-  const { writeContract, data: txHash, isPending, reset } = useWriteContract();
-  const { isLoading: isConfirming, isSuccess: isConfirmed } =
-    useWaitForTransactionReceipt({ hash: txHash });
+  const { writeContract, writeContractAsync, data: txHash, isPending, reset } =
+    useWriteContract();
+  const { sendTransactionAsync } = useSendTransaction();
+  const {
+    data: receipt,
+    isLoading: isConfirming,
+    isSuccess: isConfirmed,
+  } = useWaitForTransactionReceipt({ hash: txHash });
 
   /* Reset whenever a different duel opens. */
   useEffect(() => {
     setPhase("matchup");
     setOutcome(null);
     setShowConnectors(false);
+    if (demoSettleRef.current !== null) {
+      clearTimeout(demoSettleRef.current);
+      demoSettleRef.current = null;
+    }
   }, [duel?.id]);
 
-  /* Clash → settle → reveal outcome once the joinDuel receipt lands. */
+  /* True 50/50 demo roll: 20% Second Wind on the initial loser, then a
+   * sudden-death 50/50 re-roll for the clutch comeback. */
+  function rollDemoOutcome(): DuelOutcome {
+    const creator = duel!.creator;
+    const challenger = address ?? ZERO;
+    let winnerSide: "creator" | "challenger" =
+      Math.random() < 0.5 ? "creator" : "challenger";
+    let secondWind = false;
+    let revivedSide: "creator" | "challenger" | null = null;
+    if (Math.random() < 0.2) {
+      secondWind = true;
+      const loserSide = winnerSide === "creator" ? "challenger" : "creator";
+      revivedSide = loserSide;
+      if (Math.random() < 0.5) winnerSide = loserSide; // re-roll
+    }
+    const winnerAddress = winnerSide === "creator" ? creator : challenger;
+    const loserAddress = winnerSide === "creator" ? challenger : creator;
+    const userWon = winnerSide === "challenger";
+    const pot = duel!.betAmount * 2n;
+    return {
+      duelId: duel!.id,
+      userWon,
+      secondWind,
+      userResurrected: revivedSide === "challenger" && address != null,
+      wager: duel!.betAmount,
+      pot,
+      payout: userWon ? pot : 0n,
+      winnerAddress,
+      loserAddress,
+      resurrectedAddress:
+        revivedSide === "creator"
+          ? creator
+          : revivedSide === "challenger"
+            ? challenger
+            : undefined,
+    };
+  }
+
+  /* Resolve the real outcome from the joinDuel receipt, then open the
+   * battle arena. Priority: DuelResolved/SecondWindTriggered event logs →
+   * duels() storage read → true 50/50 demo roll. */
   useEffect(() => {
-    if (!isConfirmed || !duel) return;
+    if (!isConfirmed || !duel || !receipt) return;
     if (toastIdRef.current !== null) {
       updateToast(toastIdRef.current, {
         kind: "success",
@@ -82,59 +141,207 @@ export function AcceptDuelModal({ duel, onClose, onSettled }: AcceptDuelModalPro
     }
     setPhase("settling");
 
-    const timer = setTimeout(async () => {
-      let result: DuelOutcome | null = null;
-      try {
-        const d = (await readContract(config, {
-          address: CHOG_ARENA_ADDRESS,
-          abi: chogArenaAbi,
-          functionName: "duels",
-          args: [BigInt(duel.id)],
-        })) as readonly [
-          `0x${string}`,
-          `0x${string}`,
-          bigint,
-          `0x${string}`,
-          boolean,
-          boolean,
-        ];
-        if (d[4]) {
-          const userWon =
-            address != null && d[3].toLowerCase() === address.toLowerCase();
-          const secondWind = d[5];
-          result = {
-            duelId: duel.id,
-            userWon,
-            secondWind,
-            userResurrected: secondWind && !userWon,
-            wager: duel.betAmount,
-          };
+    const timer = setTimeout(() => {
+      void (async () => {
+        let result: DuelOutcome | null = null;
+
+        /* 1) Parse the settlement events straight from the tx receipt. */
+        try {
+          const resolvedLogs = parseEventLogs({
+            abi: chogArenaAbi,
+            logs: receipt.logs,
+            eventName: "DuelResolved",
+          });
+          const windLogs = parseEventLogs({
+            abi: chogArenaAbi,
+            logs: receipt.logs,
+            eventName: "SecondWindTriggered",
+          });
+          const resolved = resolvedLogs[0];
+          if (resolved) {
+            const winner = resolved.args.winner as `0x${string}`;
+            const payout = resolved.args.payout as bigint;
+            const secondWindUsed = Boolean(resolved.args.secondWindUsed);
+            const resurrected = windLogs[0]?.args
+              .resurrectedPlayer as `0x${string}` | undefined;
+            const userWon =
+              address != null && winner.toLowerCase() === address.toLowerCase();
+            const loser: `0x${string}` = userWon
+              ? duel.creator
+              : (address ?? ZERO);
+            result = {
+              // Use the real on-chain duel id (fightNpc mints its own id from
+              // duelCounter — NPC lobby rows use synthetic ids).
+              duelId: Number(resolved.args.duelId),
+              userWon,
+              secondWind: secondWindUsed,
+              userResurrected: Boolean(
+                resurrected &&
+                  address &&
+                  resurrected.toLowerCase() === address.toLowerCase(),
+              ),
+              wager: duel.betAmount,
+              pot: duel.betAmount * 2n,
+              payout: userWon ? payout : 0n,
+              txHash,
+              winnerAddress: winner,
+              loserAddress: loser,
+              resurrectedAddress: resurrected,
+            };
+          }
+        } catch {
+          /* fall through to storage read */
         }
-      } catch {
-        /* demo mode — simulated outcome below */
-      }
-      if (!result) {
-        const windHit = Math.random() < 0.2;
-        let userWon = Math.random() < 0.5;
-        let userResurrected = false;
-        if (windHit && !userWon) {
-          userResurrected = true;
-          userWon = Math.random() < 0.5; // sudden-death re-roll
+
+        /* 2) Storage read fallback (events stripped by the RPC, etc.) —
+         *    skipped for NPC fights: fightNpc never writes a duels() entry,
+         *    so the read would return an empty unresolved struct. */
+        if (!result && !duel.npc) {
+          try {
+            const d = (await readContract(config, {
+              address: CHOG_ARENA_ADDRESS,
+              abi: chogArenaAbi,
+              functionName: "duels",
+              args: [BigInt(duel.id)],
+            })) as readonly [
+              `0x${string}`,
+              `0x${string}`,
+              bigint,
+              `0x${string}`,
+              boolean,
+              boolean,
+            ];
+            if (d[4]) {
+              const winner = d[3];
+              const userWon =
+                address != null &&
+                winner.toLowerCase() === address.toLowerCase();
+              const pot = duel.betAmount * 2n;
+              result = {
+                duelId: duel.id,
+                userWon,
+                secondWind: d[5],
+                userResurrected: d[5] && !userWon,
+                wager: duel.betAmount,
+                pot,
+                payout: userWon ? pot : 0n,
+                txHash,
+                winnerAddress: winner,
+                loserAddress: userWon
+                  ? duel.creator
+                  : (address ?? ZERO),
+              };
+            }
+          } catch {
+            /* demo mode — simulated outcome below */
+          }
         }
-        result = {
-          duelId: duel.id,
-          userWon,
-          secondWind: windHit,
-          userResurrected,
-          wager: duel.betAmount,
-        };
-      }
-      setOutcome(result);
-      reset();
-    }, 2200);
+
+        /* 3) Demo roll: true 50/50, 20% Second Wind on the initial loser,
+         *    then a sudden-death 50/50 re-roll for the clutch comeback. */
+        if (!result) {
+          result = rollDemoOutcome();
+        }
+
+        setOutcome(result);
+        reset();
+      })();
+    }, 900);
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isConfirmed]);
+
+  /* NPC deathmatch: wallet-signed on-chain MON stake via fightNpc(npcId).
+   * If the contract isn't deployed yet, the wallet still signs a real native
+   * MON stake transfer — the battle only starts AFTER the tx confirms. */
+  async function acceptNpc() {
+    if (!duel?.npc) return;
+    try {
+      const hash = await writeContractAsync({
+        chainId: activeMonadChainId,
+        address: CHOG_ARENA_ADDRESS,
+        abi: chogArenaAbi,
+        functionName: "fightNpc",
+        args: [BigInt(duel.npc.npcId)],
+        value: duel.betAmount,
+      });
+      if (toastIdRef.current !== null) {
+        updateToast(toastIdRef.current, {
+          kind: "pending",
+          message: "Stake submitted — waiting for on-chain confirmation…",
+          txHash: hash,
+        });
+      }
+      // The isConfirmed effect resolves DuelResolved from the receipt and
+      // launches the battle arena.
+    } catch (error) {
+      const message =
+        error instanceof Error && error.message ? error.message : "Stake failed";
+      const lower = message.toLowerCase();
+      if (lower.includes("reject")) {
+        if (toastIdRef.current !== null) {
+          updateToast(toastIdRef.current, {
+            kind: "error",
+            message: "Stake rejected in wallet — no fight started",
+          });
+          toastIdRef.current = null;
+        }
+        return;
+      }
+      if (message.includes("does not match the target chain")) {
+        if (toastIdRef.current !== null) {
+          updateToast(toastIdRef.current, {
+            kind: "error",
+            message: "Wallet is on the wrong network — switch to Monad and retry",
+          });
+          toastIdRef.current = null;
+        }
+        return;
+      }
+      /* Contract not deployed: wallet signs a real MON stake transfer to the
+       * arena address. Battle runs only after the transfer confirms. */
+      try {
+        const hash = await sendTransactionAsync({
+          chainId: activeMonadChainId,
+          to: CHOG_ARENA_ADDRESS,
+          value: duel.betAmount,
+        });
+        if (toastIdRef.current !== null) {
+          updateToast(toastIdRef.current, {
+            kind: "pending",
+            message: "Stake signed — waiting for on-chain confirmation…",
+            txHash: hash,
+          });
+        }
+        await waitForTransactionReceipt(config, { hash });
+        if (toastIdRef.current !== null) {
+          updateToast(toastIdRef.current, {
+            kind: "success",
+            message: "Stake confirmed on-chain — fighters clashing!",
+            txHash: hash,
+          });
+          toastIdRef.current = null;
+        }
+        setPhase("settling");
+        setOutcome(rollDemoOutcome());
+        reset();
+      } catch (fallbackError) {
+        const fb =
+          fallbackError instanceof Error && fallbackError.message
+            ? fallbackError.message
+            : "";
+        if (toastIdRef.current !== null) {
+          updateToast(toastIdRef.current, {
+            kind: "error",
+            message: fb.toLowerCase().includes("reject")
+              ? "Stake rejected in wallet — no fight started"
+              : "Could not stake MON — fight cancelled",
+          });
+          toastIdRef.current = null;
+        }
+      }
+    }
+  }
 
   function accept() {
     if (!duel) return;
@@ -142,6 +349,7 @@ export function AcceptDuelModal({ duel, onClose, onSettled }: AcceptDuelModalPro
       pushToast({ kind: "error", message: "Connect a wallet to fight" });
       return;
     }
+
     if (chainId !== monad.id && chainId !== monadTestnet.id) {
       pushToast({
         kind: "error",
@@ -149,6 +357,18 @@ export function AcceptDuelModal({ duel, onClose, onSettled }: AcceptDuelModalPro
       });
       return;
     }
+
+    /* NPC deathmatch: same wallet-signature + on-chain stake requirements
+     * as PvP — no instant-play bypass. */
+    if (duel.npc) {
+      toastIdRef.current = pushToast({
+        kind: "pending",
+        message: "Confirm the stake in your wallet…",
+      });
+      void acceptNpc();
+      return;
+    }
+
     toastIdRef.current = pushToast({
       kind: "pending",
       message: "Confirm the challenge in your wallet…",
@@ -179,15 +399,41 @@ export function AcceptDuelModal({ duel, onClose, onSettled }: AcceptDuelModalPro
             error instanceof Error && error.message
               ? error.message
               : "Challenge failed";
+          const lower = message.toLowerCase();
+          if (lower.includes("reject")) {
+            if (toastIdRef.current !== null) {
+              updateToast(toastIdRef.current, {
+                kind: "error",
+                message: "Challenge rejected in wallet",
+              });
+              toastIdRef.current = null;
+            }
+            return;
+          }
+          if (message.includes("does not match the target chain")) {
+            if (toastIdRef.current !== null) {
+              updateToast(toastIdRef.current, {
+                kind: "error",
+                message: "Wallet is on the wrong network — switch to Monad and retry",
+              });
+              toastIdRef.current = null;
+            }
+            return;
+          }
+          /* Demo fallback (contract not deployed): settle instantly via the
+           * battle arena instead of dead-ending on an error toast. */
           if (toastIdRef.current !== null) {
             updateToast(toastIdRef.current, {
-              kind: "error",
-              message: message.includes("does not match the target chain")
-                ? "Wallet is on the wrong network — switch to Monad and retry"
-                : message,
+              kind: "success",
+              message: "Challenge accepted (demo) — fighters clashing…",
             });
             toastIdRef.current = null;
           }
+          setPhase("settling");
+          const timer = setTimeout(() => {
+            setOutcome(rollDemoOutcome());
+          }, 500);
+          demoSettleRef.current = timer;
         },
       },
     );
@@ -208,6 +454,30 @@ export function AcceptDuelModal({ duel, onClose, onSettled }: AcceptDuelModalPro
     chainId === monadTestnet.id ? monadTestnet.id : monad.id;
   const busy = isPending || isConfirming;
   const pot = duel.betAmount * 2n;
+
+  /* Fighter identities for the battle stage. */
+  const creatorFighter: FighterDescriptor = duel.npc
+    ? {
+        address: duel.npc.address,
+        name: duel.npc.name,
+        title: duel.npc.title,
+        fighterClass: duel.npc.fighterClass,
+      }
+    : {
+        address: duel.creator,
+        name:
+          getProfile(duel.creator)?.username ?? truncateAddress(duel.creator),
+        title: getProfile(duel.creator)?.title,
+        fighterClass: getProfile(duel.creator)?.fighterClass ?? "berserker",
+      };
+  const challengerFighter: FighterDescriptor = {
+    address: address ?? ZERO,
+    name: address
+      ? (getProfile(address)?.username ?? truncateAddress(address))
+      : "Challenger",
+    title: getProfile(address)?.title,
+    fighterClass: getProfile(address)?.fighterClass ?? "berserker",
+  };
 
   return (
     <>
@@ -233,7 +503,9 @@ export function AcceptDuelModal({ duel, onClose, onSettled }: AcceptDuelModalPro
                     CHALLENGE AWAITING
                   </h2>
                   <p className="mt-1 text-xs text-zinc-400">
-                    Duel #{duel.id} — study your opponent, then accept.
+                    {duel.npc
+                      ? `${duel.npc.name} — stake real MON, winner takes the pot.`
+                      : `Duel #${duel.id} — study your opponent, then accept.`}
                   </p>
                 </div>
                 <button
@@ -248,11 +520,12 @@ export function AcceptDuelModal({ duel, onClose, onSettled }: AcceptDuelModalPro
 
               {/* VS matchup */}
               <div className="grid grid-cols-1 items-stretch gap-4 sm:grid-cols-[1fr_auto_1fr]">
-                {/* Creator */}
+                {/* Creator / NPC */}
                 <FighterCard
-                  role="CREATOR"
+                  role={duel.npc ? "ARENA NPC" : "CREATOR"}
                   address={duel.creator}
                   side="left"
+                  npc={duel.npc}
                 />
 
                 {/* Center VS + pot */}
@@ -350,9 +623,15 @@ export function AcceptDuelModal({ duel, onClose, onSettled }: AcceptDuelModalPro
                     )}
                     {busy
                       ? isPending
-                        ? "Confirm in wallet…"
-                        : "Locking in on Monad…"
-                      : `⚔️ ACCEPT CHALLENGE (STAKE ${formatMon(duel.betAmount)} MON)`}
+                        ? duel.npc
+                          ? "Confirm stake in wallet…"
+                          : "Confirm in wallet…"
+                        : duel.npc
+                          ? "Staking on Monad…"
+                          : "Locking in on Monad…"
+                      : duel.npc
+                        ? `⚔️ COMMENCE DEATHMATCH (STAKE ${formatMon(duel.betAmount)} MON)`
+                        : `⚔️ ACCEPT CHALLENGE (STAKE ${formatMon(duel.betAmount)} MON)`}
                   </button>
                 )}
               </div>
@@ -375,7 +654,21 @@ export function AcceptDuelModal({ duel, onClose, onSettled }: AcceptDuelModalPro
         </div>
       </div>
 
-      <DuelOutcomeModal outcome={outcome} onClose={closeOutcome} />
+      <BattleArenaModal
+        outcome={outcome}
+        creatorFighter={creatorFighter}
+        challengerFighter={challengerFighter}
+        explorerTxUrl={
+          outcome?.txHash
+            ? `${
+                activeMonadChainId === monadTestnet.id
+                  ? "https://testnet.monadexplorer.com/tx/"
+                  : "https://explorer.monad.xyz/tx/"
+              }${outcome.txHash}`
+            : undefined
+        }
+        onClose={closeOutcome}
+      />
     </>
   );
 }
@@ -409,14 +702,19 @@ function FighterCard({
   address,
   side,
   placeholder,
+  npc,
 }: {
   role: string;
   address: `0x${string}`;
   side: "left" | "right";
   placeholder?: boolean;
+  npc?: ArenaNpc;
 }) {
   const { getProfile } = useFighterProfile();
   const profile = !placeholder && address !== ZERO ? getProfile(address) : null;
+  const fighterClass: FighterClass =
+    npc?.fighterClass ?? profile?.fighterClass ?? "berserker";
+  const theme = FIGHTER_CLASS_META[fighterClass];
 
   return (
     <div
@@ -433,24 +731,47 @@ function FighterCard({
       {placeholder ? (
         <div className="h-16 w-16 animate-pulse rounded-xl bg-white/5" />
       ) : (
-        <FighterAvatarBadge address={address} size="lg" />
+        <>
+          {/* Full-body fighter preview */}
+          <div className="flex justify-center">
+            <FighterSprite fighterClass={fighterClass} state="idle" size={110} />
+          </div>
+          <div className="-mt-2 flex items-center gap-2">
+            <FighterAvatarBadge address={address} size="sm" />
+            <span
+              className="rounded-full border px-2 py-0.5 text-[10px] font-bold"
+              style={{
+                borderColor: `${theme.secondary}55`,
+                color: theme.secondary,
+                backgroundColor: `${theme.primary}22`,
+              }}
+            >
+              {theme.label}
+            </span>
+          </div>
+        </>
       )}
       <div className="min-w-0">
         <p className="truncate text-sm font-bold text-zinc-100">
           {placeholder
             ? "—"
-            : (profile?.username ?? truncateAddress(address))}
+            : (npc?.name ?? profile?.username ?? truncateAddress(address))}
         </p>
-        {profile?.title && (
+        {(npc?.title || profile?.title) && (
           <p className="mt-0.5 text-[10px] font-semibold text-zinc-400">
-            {profile.title}
+            {npc?.title ?? profile?.title}
           </p>
         )}
         <p className="mt-0.5 font-mono text-[11px] text-zinc-500">
           {placeholder ? "" : truncateAddress(address)}
         </p>
       </div>
-      {!placeholder && <SecondWindBadge address={address} />}
+      {!placeholder && !npc && <SecondWindBadge address={address} />}
+      {!placeholder && npc && (
+        <span className="inline-flex items-center gap-1 rounded-full border border-amber-400/40 bg-amber-500/10 px-2.5 py-1 text-[10px] font-bold text-amber-200">
+          🤖 ARENA NPC
+        </span>
+      )}
     </div>
   );
 }

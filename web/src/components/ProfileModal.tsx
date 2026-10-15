@@ -6,7 +6,13 @@ import { Check, ImagePlus, Link, Trash2, X } from "lucide-react";
 import {
   FIGHTER_TITLES,
   useFighterProfile,
+  type FighterClass,
 } from "@/context/FighterProfileContext";
+import {
+  FIGHTER_CLASSES,
+  FIGHTER_CLASS_META,
+} from "@/config/fighterClasses";
+import { FighterSprite } from "./FighterSprite";
 import { cn, truncateAddress } from "@/lib/utils";
 import { pushToast } from "./Toast";
 
@@ -56,6 +62,7 @@ export function ProfileModal({ open, onClose }: ProfileModalProps) {
   const [username, setUsername] = useState("");
   const [avatarUrl, setAvatarUrl] = useState("");
   const [title, setTitle] = useState<string>(FIGHTER_TITLES[0]);
+  const [fighterClass, setFighterClass] = useState<FighterClass>("berserker");
   const [urlInput, setUrlInput] = useState("");
   const [previewFailed, setPreviewFailed] = useState(false);
 
@@ -66,6 +73,7 @@ export function ProfileModal({ open, onClose }: ProfileModalProps) {
     setUsername(current?.username ?? "");
     setAvatarUrl(current?.avatarUrl ?? "");
     setTitle(current?.title ?? FIGHTER_TITLES[0]);
+    setFighterClass(current?.fighterClass ?? "berserker");
     setUrlInput("");
     setPreviewFailed(false);
   }, [open, address, getProfile]);
@@ -124,7 +132,7 @@ export function ProfileModal({ open, onClose }: ProfileModalProps) {
 
   function save() {
     if (!address) return;
-    updateProfile(address, { username, avatarUrl, title });
+    updateProfile(address, { username, avatarUrl, title, fighterClass });
     pushToast({
       kind: "success",
       message: username
@@ -140,7 +148,7 @@ export function ProfileModal({ open, onClose }: ProfileModalProps) {
       onClick={onClose}
     >
       <div
-        className="w-full max-w-md rounded-2xl border border-red-500/30 bg-zinc-950/90 p-6 shadow-[0_0_50px_-10px_rgba(239,68,68,0.25)] animate-rise-in"
+        className="w-full max-w-md max-h-[92vh] overflow-y-auto rounded-2xl border border-red-500/30 bg-zinc-950/90 p-6 shadow-[0_0_50px_-10px_rgba(239,68,68,0.25)] animate-rise-in"
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
@@ -274,6 +282,45 @@ export function ProfileModal({ open, onClose }: ProfileModalProps) {
                 </p>
               </div>
             </div>
+
+            {/* Fighter class */}
+            <p className="mt-5 text-xs font-semibold uppercase tracking-wider text-zinc-500">
+              Fighter Class
+            </p>
+            <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
+              {FIGHTER_CLASSES.map((cls) => {
+                const meta = FIGHTER_CLASS_META[cls];
+                const selected = fighterClass === cls;
+                return (
+                  <button
+                    key={cls}
+                    type="button"
+                    onClick={() => setFighterClass(cls)}
+                    className={cn(
+                      "flex flex-col items-center gap-1 rounded-xl border px-2 pb-2 pt-1 transition",
+                      selected
+                        ? "border-red-500/60 bg-red-500/10 shadow-[0_0_16px_rgba(239,68,68,0.3)]"
+                        : "border-white/10 bg-black/40 hover:border-white/25",
+                    )}
+                  >
+                    <FighterSprite
+                      fighterClass={cls}
+                      state="idle"
+                      size={88}
+                    />
+                    <span
+                      className="text-[10px] font-extrabold uppercase tracking-wider"
+                      style={{ color: selected ? meta.secondary : "#a1a1aa" }}
+                    >
+                      {meta.label}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+            <p className="mt-1.5 text-[10px] text-zinc-600">
+              {FIGHTER_CLASS_META[fighterClass].blurb}
+            </p>
 
             {/* Title */}
             <p className="mt-5 text-xs font-semibold uppercase tracking-wider text-zinc-500">

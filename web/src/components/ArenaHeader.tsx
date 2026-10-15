@@ -10,7 +10,12 @@ import {
   useReadContract,
 } from "wagmi";
 import { ChevronDown, LogOut, Swords, Wallet } from "lucide-react";
-import { CHOG_NFT_ADDRESS, iChogNftAbi } from "@/contracts";
+import {
+  CHOG_ARENA_ADDRESS,
+  CHOG_NFT_ADDRESS,
+  chogArenaAbi,
+  iChogNftAbi,
+} from "@/contracts";
 import {
   FighterAvatarBadge,
   useFighterProfile,
@@ -80,6 +85,16 @@ export function ArenaHeader() {
     query: { enabled: Boolean(address), refetchInterval: 15_000 },
   });
 
+  /* Liveness probe: a successful duelCounter read means the deployed
+   * ChogArena contract is reachable on the current chain. */
+  const { data: arenaCounter, isError: arenaProbeFailed } = useReadContract({
+    address: CHOG_ARENA_ADDRESS,
+    abi: chogArenaAbi,
+    functionName: "duelCounter",
+    query: { refetchInterval: 20_000 },
+  });
+  const arenaOnline = arenaCounter !== undefined && !arenaProbeFailed;
+
   const secondWind = typeof nftBalance === "bigint" && nftBalance > 0n;
   const monBalance = balance
     ? `${Number(balance.formatted).toLocaleString("en-US", { maximumFractionDigits: 3 })} MON`
@@ -99,6 +114,30 @@ export function ArenaHeader() {
                 // 1V1 DEATHMATCH
               </span>
             </span>
+            {/* Live arena status — probe the deployed contract */}
+            {mounted && (
+              <span
+                className={cn(
+                  "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 font-mono text-[10px] font-semibold tracking-wide",
+                  arenaOnline
+                    ? "border-emerald-400/40 bg-emerald-500/10 text-emerald-300"
+                    : "border-zinc-700 bg-zinc-900 text-zinc-500",
+                )}
+                title={`ChogArena @ ${CHOG_ARENA_ADDRESS} (Monad Mainnet)`}
+              >
+                <span
+                  className={cn(
+                    "h-1.5 w-1.5 rounded-full",
+                    arenaOnline
+                      ? "animate-pulse bg-emerald-400"
+                      : "bg-zinc-600",
+                  )}
+                />
+                {arenaOnline
+                  ? `ARENA ONLINE · ${truncateAddress(CHOG_ARENA_ADDRESS)}`
+                  : "ARENA OFFLINE"}
+              </span>
+            )}
           </div>
 
           <div className="flex items-center gap-3">

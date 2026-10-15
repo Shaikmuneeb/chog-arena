@@ -19,6 +19,10 @@ export const chogArenaAbi = [
     "stateMutability": "nonpayable"
   },
   {
+    "type": "receive",
+    "stateMutability": "payable"
+  },
+  {
     "type": "function",
     "name": "PROTOCOL_FEE_BPS",
     "inputs": [],
@@ -146,6 +150,42 @@ export const chogArenaAbi = [
       }
     ],
     "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "fightNpc",
+    "inputs": [
+      {
+        "name": "npcId",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "playerWon",
+        "type": "bool",
+        "internalType": "bool"
+      },
+      {
+        "name": "secondWindUsed",
+        "type": "bool",
+        "internalType": "bool"
+      },
+      {
+        "name": "payout",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "payable"
+  },
+  {
+    "type": "function",
+    "name": "fundArena",
+    "inputs": [],
+    "outputs": [],
+    "stateMutability": "payable"
   },
   {
     "type": "function",

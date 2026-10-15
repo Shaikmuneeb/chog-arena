@@ -23,6 +23,13 @@ import {
   FighterAvatarBadge,
   useFighterProfile,
 } from "@/context/FighterProfileContext";
+import {
+  ARENA_NPCS,
+  NPC_DUEL_ID_BASE,
+  type ArenaNpc,
+} from "@/config/arenaNpcs";
+import { FIGHTER_CLASS_META } from "@/config/fighterClasses";
+import { FighterSprite } from "./FighterSprite";
 import { cn, formatMon, truncateAddress } from "@/lib/utils";
 import { pushToast } from "./Toast";
 import { AcceptDuelModal } from "./AcceptDuelModal";
@@ -34,6 +41,8 @@ export type ArenaDuel = {
   status: "open" | "settling";
   /** true when the connected player opened this duel */
   mine?: boolean;
+  /** Arena NPC challenger (demo opponent with its own fighter class). */
+  npc?: ArenaNpc;
 };
 
 const ZERO = zeroAddress;
@@ -143,10 +152,22 @@ export function DuelBoard({ duels, onDuelSettled }: DuelBoardProps) {
     }
   }
 
-  const mine = duels.filter((d) => d.mine);
-  // Only real on-chain duels (plus your own optimistic entries) — no mocks.
+  // Arena NPC challengers + local optimistic entries + live on-chain
+  // duels (deduped by id).
+  const npcDuels: ArenaDuel[] = ARENA_NPCS.map((npc, i) => ({
+    id: NPC_DUEL_ID_BASE + i,
+    creator: npc.address,
+    betAmount: npc.wager,
+    status: "open",
+    npc,
+  }));
   const lobby = liveDuels ?? [];
-  const rows = [...mine, ...lobby];
+  const localIds = new Set(duels.map((d) => d.id));
+  const rows = [
+    ...npcDuels,
+    ...duels,
+    ...lobby.filter((d) => !localIds.has(d.id)),
+  ];
 
   return (
     <section>
@@ -156,9 +177,8 @@ export function DuelBoard({ duels, onDuelSettled }: DuelBoardProps) {
           Duel Lobby
         </h2>
         <span className="text-xs text-zinc-500">
-          {liveDuels
-            ? `${liveDuels.length} open duel${liveDuels.length === 1 ? "" : "s"}`
-            : "Reading arena…"}
+          {rows.length} challenger{rows.length === 1 ? "" : "s"}
+          {!liveDuels && " · arena offline"}
         </span>
       </div>
 
@@ -171,10 +191,15 @@ export function DuelBoard({ duels, onDuelSettled }: DuelBoardProps) {
         <ul className="space-y-3">
           {rows.map((duel) => {
             const profile = getProfile(duel.creator);
+            // Ownership follows the CONNECTED wallet — never the stale
+            // `mine` flag from creation time, which used to lock other
+            // wallets out of the Accept button.
             const isMine =
-              (address != null &&
-                duel.creator.toLowerCase() === address.toLowerCase()) ||
-              duel.mine;
+              address != null &&
+              duel.creator.toLowerCase() === address.toLowerCase();
+            const fighterClass =
+              duel.npc?.fighterClass ?? profile?.fighterClass ?? "berserker";
+            const classMeta = FIGHTER_CLASS_META[fighterClass];
             return (
               <li
                 key={duel.id}
@@ -183,12 +208,33 @@ export function DuelBoard({ duels, onDuelSettled }: DuelBoardProps) {
                 <div className="flex flex-wrap items-center justify-between gap-4">
                   <div className="flex min-w-0 items-center gap-4">
                     <FighterAvatarBadge address={duel.creator} size="md" />
+                    {/* Mini full-body fighter preview */}
+                    <div
+                      className="hidden shrink-0 rounded-xl border border-white/10 bg-black/50 px-1 sm:block"
+                      style={{ boxShadow: `0 0 14px ${classMeta.primary}33` }}
+                    >
+                      <FighterSprite
+                        fighterClass={fighterClass}
+                        state="idle"
+                        size={64}
+                      />
+                    </div>
                     <div className="min-w-0">
                       <p className="flex flex-wrap items-center gap-2 text-sm font-bold text-zinc-100">
-                        {profile?.username ?? truncateAddress(duel.creator)}
-                        {profile?.title && (
+                        {duel.npc?.name ?? profile?.username ?? truncateAddress(duel.creator)}
+                        <span
+                          className="rounded-full border px-2 py-0.5 text-[10px] font-semibold"
+                          style={{
+                            borderColor: `${classMeta.secondary}55`,
+                            color: classMeta.secondary,
+                            backgroundColor: `${classMeta.primary}22`,
+                          }}
+                        >
+                          {classMeta.label}
+                        </span>
+                        {(duel.npc?.title || profile?.title) && (
                           <span className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] font-medium text-zinc-300">
-                            {profile.title}
+                            {duel.npc?.title ?? profile?.title}
                           </span>
                         )}
                         {isMine && (
@@ -196,9 +242,18 @@ export function DuelBoard({ duels, onDuelSettled }: DuelBoardProps) {
                             YOUR DUEL
                           </span>
                         )}
+                        {duel.npc && (
+                          <span className="rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] font-semibold text-amber-300">
+                            ARENA NPC
+                          </span>
+                        )}
                       </p>
                       <p className="mt-0.5 font-mono text-xs text-zinc-500">
-                        {truncateAddress(duel.creator)} · Duel #{duel.id} ·{" "}
+                        {duel.npc
+                          ? `${duel.npc.name}`
+                          : truncateAddress(duel.creator)}
+                        {" · "}
+                        {duel.npc ? "NPC Duel" : `Duel #${duel.id}`} ·{" "}
                         <span className="font-semibold text-amber-200">
                           {formatMon(duel.betAmount)} MON
                         </span>{" "}
@@ -232,7 +287,7 @@ export function DuelBoard({ duels, onDuelSettled }: DuelBoardProps) {
                       onClick={() => setActiveDuel(duel)}
                       className="rounded-xl bg-rose-600 px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-rose-600/20 transition hover:bg-rose-500"
                     >
-                      Accept Challenge
+                      {duel.npc ? "⚔️ Fight NPC" : "Accept Challenge"}
                     </button>
                   )}
                 </div>
