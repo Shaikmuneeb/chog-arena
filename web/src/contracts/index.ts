@@ -1,11 +1,3 @@
-export {
-  chogShieldAbi,
-  predictionMarketAbi,
-  iChogNftAbi,
-} from "./abis";
+export { chogArenaAbi, iChogNftAbi } from "./abis";
 
-export {
-  CHOG_NFT_ADDRESS,
-  CHOG_SHIELD_ADDRESS,
-  PREDICTION_MARKET_ADDRESS,
-} from "./addresses";
+export { CHOG_NFT_ADDRESS, CHOG_ARENA_ADDRESS } from "./addresses";

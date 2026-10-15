@@ -5,22 +5,25 @@ import { monad, monadTestnet } from "./monadChain";
 /**
  * Wagmi config for Chog Arena.
  *
- * Injected connectors only — each target resolves to the wallet's injected
- * provider (window.backpack / window.rabby / window.ethereum) and reports
- * itself as unavailable when the extension isn't installed.
+ * - `injected()` (generic) + targeted connectors for MetaMask / Rabby /
+ *   Backpack so each wallet can be picked explicitly.
+ * - `multiInjectedProviderDiscovery: true` turns on EIP-6963, so any wallet
+ *   announcing itself through `window`ethereum` (Rabby, Backpack, MetaMask,
+ *   Coinbase, etc.) is auto-discovered and appears in `useConnect().connectors`.
  */
 export const config = createConfig({
   chains: [monad, monadTestnet],
   connectors: [
-    injected({ target: "backpack" }),
-    injected({ target: "rabby" }),
+    injected(), // generic browser-injected fallback (window.ethereum)
     injected({ target: "metaMask" }),
+    injected({ target: "rabby" }),
+    injected({ target: "backpack" }),
   ],
   transports: {
     [monad.id]: http(monad.rpcUrls.default.http[0]),
     [monadTestnet.id]: http(monadTestnet.rpcUrls.default.http[0]),
   },
-  multiInjectedProviderDiscovery: false,
+  multiInjectedProviderDiscovery: true,
 });
 
 export { chains };

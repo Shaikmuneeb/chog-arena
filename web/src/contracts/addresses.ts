@@ -8,8 +8,5 @@ import type { Address } from "viem";
 export const CHOG_NFT_ADDRESS =
   "0x1000000000000000000000000000000000000001" as const satisfies Address;
 
-export const CHOG_SHIELD_ADDRESS =
-  "0x2000000000000000000000000000000000000002" as const satisfies Address;
-
-export const PREDICTION_MARKET_ADDRESS =
+export const CHOG_ARENA_ADDRESS =
   "0x3000000000000000000000000000000000000003" as const satisfies Address;

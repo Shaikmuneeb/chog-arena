@@ -1,12 +1,13 @@
 import type { Metadata } from "next";
 import { Providers } from "./providers";
-import { Navbar } from "@/components/Navbar";
+import { FighterProfileProvider } from "@/context/FighterProfileContext";
+import { Toaster } from "@/components/Toast";
 import "./globals.css";
 
 export const metadata: Metadata = {
   title: "Chog Arena",
   description:
-    "Binary prediction markets on Monad with the Chog Shield loss-rebate system.",
+    "1v1 Deathmatch with Second Wind resurrection on Monad — stake MON, fight instantly.",
 };
 
 export default function RootLayout({
@@ -16,9 +17,9 @@ export default function RootLayout({
     <html lang="en">
       <body>
         <Providers>
-          <Navbar />
-          <main className="mx-auto max-w-6xl px-4 py-10">{children}</main>
+          <FighterProfileProvider>{children}</FighterProfileProvider>
         </Providers>
+        <Toaster />
       </body>
     </html>
   );

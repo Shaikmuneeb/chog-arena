@@ -47,3 +47,15 @@ export const monadTestnet = defineChain({
 });
 
 export const chains = [monad, monadTestnet] as const;
+
+/**
+ * Chain new/incorrect wallets are switched to (Monad Mainnet). Passed to
+ * `switchChain` so the wallet shows its Add/Switch Network prompt using the
+ * rpcUrls + nativeCurrency (MON, 18 decimals) defined above.
+ */
+export const targetChain = monad;
+
+/** True when the wallet is already on any Monad network (mainnet or testnet). */
+export function isMonadChainId(chainId: number | undefined): boolean {
+  return chainId === monad.id || chainId === monadTestnet.id;
+}
