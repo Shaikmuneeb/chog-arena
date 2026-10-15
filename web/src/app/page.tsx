@@ -9,36 +9,9 @@ import { CreateDuelModal } from "@/components/CreateDuelModal";
 import { DuelBoard, type ArenaDuel } from "@/components/DuelBoard";
 import { CHOG_ARENA_ADDRESS, chogArenaAbi } from "@/contracts";
 
-/** Demo duels — replaced by live reads once ChogArena is deployed. */
-const INITIAL_DUels: ArenaDuel[] = [
-  {
-    id: 1,
-    creator: "0x4F3A8C2b9E1d7A6f0C5b2D9e8F1a3B4c5D6e7F80",
-    betAmount: 500_000_000_000_000_000n, // 0.5 MON
-    status: "open",
-  },
-  {
-    id: 2,
-    creator: "0x9B7E4d2C1a8F3e6B0c9D2a5F8e1B4c7D0a3F6E91",
-    betAmount: 1_000_000_000_000_000_000n, // 1 MON
-    status: "open",
-  },
-  {
-    id: 3,
-    creator: "0xD1C47A9b3E6f2C8a0D5B1e4F7a2C9b6E3d8F5A12",
-    betAmount: 2_500_000_000_000_000_000n, // 2.5 MON
-    status: "open",
-  },
-  {
-    id: 4,
-    creator: "0x77AB3c9F1e4D7a0B5c8E2f6A9d3C0b7E4f1A8D34",
-    betAmount: 100_000_000_000_000_000n, // 0.1 MON
-    status: "open",
-  },
-];
-
 export default function Home() {
-  const [duels, setDuels] = useState<ArenaDuel[]>(INITIAL_DUels);
+  /* Only real duels live here — the lobby reads them from ChogArena. */
+  const [duels, setDuels] = useState<ArenaDuel[]>([]);
   const [createOpen, setCreateOpen] = useState(false);
   const { address } = useAccount();
   const config = useConfig();

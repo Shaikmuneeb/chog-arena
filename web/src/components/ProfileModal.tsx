@@ -2,11 +2,9 @@
 
 import { useEffect, useState } from "react";
 import { useAccount } from "wagmi";
-import { Check, X } from "lucide-react";
+import { Check, ImagePlus, Link, Trash2, X } from "lucide-react";
 import {
-  AVATARS,
   FIGHTER_TITLES,
-  getAvatar,
   useFighterProfile,
 } from "@/context/FighterProfileContext";
 import { cn, truncateAddress } from "@/lib/utils";
@@ -17,32 +15,116 @@ type ProfileModalProps = {
   onClose: () => void;
 };
 
+/** Cover-crop + compress an uploaded image to a 160×160 JPEG data URL. */
+function resizeImageFile(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("Could not read file"));
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = () => reject(new Error("Invalid image data"));
+      img.onload = () => {
+        const size = 160;
+        const canvas = document.createElement("canvas");
+        canvas.width = size;
+        canvas.height = size;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) {
+          reject(new Error("Canvas not supported"));
+          return;
+        }
+        // Center cover-crop to a square.
+        const min = Math.min(img.width, img.height);
+        const sx = (img.width - min) / 2;
+        const sy = (img.height - min) / 2;
+        ctx.drawImage(img, sx, sy, min, min, 0, 0, size, size);
+        resolve(canvas.toDataURL("image/jpeg", 0.85));
+      };
+      img.src = reader.result as string;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
 /**
- * Fighter identity editor: callsign (max 16 alphanumeric), neon avatar,
- * and title badge — persisted per-wallet in localStorage with instant
- * reactivity across the app.
+ * Fighter identity editor: callsign, custom avatar (upload or image URL),
+ * and title badge — persisted per-wallet with instant app-wide reactivity.
  */
 export function ProfileModal({ open, onClose }: ProfileModalProps) {
   const { address, isConnected } = useAccount();
   const { getProfile, updateProfile } = useFighterProfile();
   const [username, setUsername] = useState("");
-  const [avatar, setAvatar] = useState<string>(AVATARS[0].id);
+  const [avatarUrl, setAvatarUrl] = useState("");
   const [title, setTitle] = useState<string>(FIGHTER_TITLES[0]);
+  const [urlInput, setUrlInput] = useState("");
+  const [previewFailed, setPreviewFailed] = useState(false);
 
   /* Sync form with the current profile each time the modal opens. */
   useEffect(() => {
     if (!open || !address) return;
     const current = getProfile(address);
     setUsername(current?.username ?? "");
-    setAvatar(current?.avatar ?? AVATARS[0].id);
+    setAvatarUrl(current?.avatarUrl ?? "");
     setTitle(current?.title ?? FIGHTER_TITLES[0]);
+    setUrlInput("");
+    setPreviewFailed(false);
   }, [open, address, getProfile]);
+
+  useEffect(() => {
+    setPreviewFailed(false);
+  }, [avatarUrl]);
 
   if (!open) return null;
 
+  const initials = (
+    username || (address ? address.slice(2, 4) : "??")
+  ).slice(0, 2).toUpperCase();
+  const hue = address ? parseInt(address.slice(2, 8), 16) % 360 : 280;
+  const fallbackHex = `hsl(${hue} 75% 55%)`;
+
+  async function onUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // allow re-selecting the same file
+    if (!file) return;
+    if (!/^image\/(png|jpeg|webp|gif)$/.test(file.type)) {
+      pushToast({ kind: "error", message: "Use a PNG, JPEG, WebP, or GIF image" });
+      return;
+    }
+    if (file.size > 8 * 1024 * 1024) {
+      pushToast({ kind: "error", message: "Image too large (max 8 MB)" });
+      return;
+    }
+    try {
+      const dataUrl = await resizeImageFile(file);
+      setAvatarUrl(dataUrl);
+      pushToast({ kind: "success", message: "Avatar ready — Save to apply" });
+    } catch {
+      pushToast({ kind: "error", message: "Could not process that image" });
+    }
+  }
+
+  function applyUrl() {
+    const url = urlInput.trim();
+    if (!url) return;
+    const normalized = url.startsWith("ipfs://")
+      ? `https://ipfs.io/ipfs/${url.slice("ipfs://".length)}`
+      : url;
+    if (!/^(https?:\/\/|data:image\/)/i.test(normalized)) {
+      pushToast({ kind: "error", message: "Enter a valid http(s) or ipfs image link" });
+      return;
+    }
+    setAvatarUrl(normalized);
+    setUrlInput("");
+  }
+
+  function removeAvatar() {
+    setAvatarUrl("");
+    setUrlInput("");
+  }
+
   function save() {
     if (!address) return;
-    updateProfile(address, { username, avatar, title });
+    updateProfile(address, { username, avatarUrl, title });
     pushToast({
       kind: "success",
       message: username
@@ -109,32 +191,88 @@ export function ProfileModal({ open, onClose }: ProfileModalProps) {
               </span>
             </label>
 
-            {/* Avatar */}
+            {/* Custom avatar uploader */}
             <p className="mt-5 text-xs font-semibold uppercase tracking-wider text-zinc-500">
-              Avatar
+              Fighter Avatar
             </p>
-            <div className="mt-2 grid grid-cols-6 gap-2.5">
-              {AVATARS.map((a) => (
-                <button
-                  key={a.id}
-                  type="button"
-                  onClick={() => setAvatar(a.id)}
-                  className={cn(
-                    "flex aspect-square items-center justify-center rounded-xl border-2 text-2xl transition",
-                    avatar === a.id
-                      ? "scale-110"
-                      : "opacity-60 hover:opacity-100",
-                  )}
-                  style={{
-                    borderColor: a.hex,
-                    background: `radial-gradient(circle at 30% 30%, ${a.hex}33, transparent 70%), #09090b`,
-                    boxShadow: avatar === a.id ? `0 0 16px ${a.hex}88` : "none",
-                  }}
-                  aria-pressed={avatar === a.id}
-                >
-                  {a.emoji}
-                </button>
-              ))}
+            <div className="mt-2 flex items-start gap-4">
+              {/* Live preview */}
+              <div
+                className="flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-2xl border-2"
+                style={{
+                  borderColor: fallbackHex,
+                  background: `radial-gradient(circle at 30% 30%, ${fallbackHex}33, transparent 70%), #09090b`,
+                  boxShadow: `0 0 16px ${fallbackHex}66`,
+                }}
+              >
+                {avatarUrl && !previewFailed ? (
+                  <img
+                    src={avatarUrl}
+                    alt="Fighter avatar preview"
+                    className="h-full w-full object-cover"
+                    onError={() => setPreviewFailed(true)}
+                  />
+                ) : (
+                  <span className="text-2xl font-extrabold text-zinc-100">
+                    {initials}
+                  </span>
+                )}
+              </div>
+
+              <div className="min-w-0 flex-1 space-y-2">
+                <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-semibold text-zinc-200 transition hover:bg-white/10">
+                  <ImagePlus className="h-3.5 w-3.5" aria-hidden />
+                  Upload Image
+                  <input
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp,image/gif"
+                    className="hidden"
+                    onChange={(e) => void onUpload(e)}
+                  />
+                </label>
+
+                {avatarUrl && (
+                  <button
+                    type="button"
+                    onClick={removeAvatar}
+                    className="inline-flex items-center gap-1.5 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-semibold text-zinc-400 transition hover:border-red-400/40 hover:text-red-300"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" aria-hidden />
+                    Remove / Reset
+                  </button>
+                )}
+
+                <div className="flex items-center gap-1.5">
+                  <div className="flex min-w-0 flex-1 items-center gap-1.5 rounded-xl border border-white/10 bg-black/50 px-2.5 py-2 focus-within:border-red-500/60">
+                    <Link className="h-3.5 w-3.5 shrink-0 text-zinc-500" aria-hidden />
+                    <input
+                      type="url"
+                      value={urlInput}
+                      placeholder="Or paste image / NFT URL"
+                      onChange={(e) => setUrlInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          applyUrl();
+                        }
+                      }}
+                      className="w-full min-w-0 bg-transparent text-xs text-zinc-200 outline-none placeholder:text-zinc-600"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={applyUrl}
+                    className="shrink-0 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-semibold text-zinc-200 transition hover:bg-white/10"
+                  >
+                    Set
+                  </button>
+                </div>
+
+                <p className="text-[10px] leading-snug text-zinc-600">
+                  PNG / JPEG / WebP / GIF up to 8 MB — resized to 160×160.
+                  Supports direct links and ipfs:// URIs.
+                </p>
+              </div>
             </div>
 
             {/* Title */}
@@ -159,31 +297,10 @@ export function ProfileModal({ open, onClose }: ProfileModalProps) {
               ))}
             </div>
 
-            {/* Preview + save */}
-            <div className="mt-6 flex items-center gap-3 rounded-xl border border-white/5 bg-black/40 px-4 py-3">
-              <span
-                className="flex h-10 w-10 items-center justify-center rounded-xl border-2 text-lg"
-                style={{
-                  borderColor: getAvatar(avatar).hex,
-                  background: `radial-gradient(circle at 30% 30%, ${getAvatar(avatar).hex}33, transparent 70%), #09090b`,
-                  boxShadow: `0 0 12px ${getAvatar(avatar).hex}66`,
-                }}
-                aria-hidden
-              >
-                {getAvatar(avatar).emoji}
-              </span>
-              <div className="min-w-0">
-                <p className="truncate text-sm font-bold text-zinc-100">
-                  {username || truncateAddress(address ?? "")}
-                </p>
-                <p className="text-[11px] text-zinc-500">{title}</p>
-              </div>
-            </div>
-
             <button
               type="button"
               onClick={save}
-              className="mt-5 flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-red-600 via-rose-600 to-orange-600 py-3 text-sm font-extrabold tracking-wide text-white shadow-[0_0_24px_rgba(239,68,68,0.4)] transition hover:from-red-500 hover:via-rose-500 hover:to-orange-500"
+              className="mt-6 flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-red-600 via-rose-600 to-orange-600 py-3 text-sm font-extrabold tracking-wide text-white shadow-[0_0_24px_rgba(239,68,68,0.4)] transition hover:from-red-500 hover:via-rose-500 hover:to-orange-500"
             >
               <Check className="h-4 w-4" aria-hidden />
               SAVE FIGHTER PROFILE

@@ -144,7 +144,8 @@ export function DuelBoard({ duels, onDuelSettled }: DuelBoardProps) {
   }
 
   const mine = duels.filter((d) => d.mine);
-  const lobby = liveDuels ?? duels.filter((d) => !d.mine);
+  // Only real on-chain duels (plus your own optimistic entries) — no mocks.
+  const lobby = liveDuels ?? [];
   const rows = [...mine, ...lobby];
 
   return (
@@ -156,14 +157,15 @@ export function DuelBoard({ duels, onDuelSettled }: DuelBoardProps) {
         </h2>
         <span className="text-xs text-zinc-500">
           {liveDuels
-            ? `Live — ${liveDuels.length} open duel${liveDuels.length === 1 ? "" : "s"}`
-            : "Demo board — deploy ChogArena to go live"}
+            ? `${liveDuels.length} open duel${liveDuels.length === 1 ? "" : "s"}`
+            : "Reading arena…"}
         </span>
       </div>
 
       {rows.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-white/10 bg-zinc-900/40 px-6 py-12 text-center text-sm text-zinc-500">
-          No open duels. Be the first to enter the arena.
+          No open duels. Forge one to enter the arena — only real challenges
+          appear here.
         </div>
       ) : (
         <ul className="space-y-3">

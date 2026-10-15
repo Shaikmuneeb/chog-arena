@@ -12,21 +12,13 @@ import { cn, truncateAddress } from "@/lib/utils";
 
 export type FighterProfile = {
   username: string;
-  avatar: string;
+  /** Custom avatar image: uploaded data URL or external http(s)/ipfs link. */
+  avatarUrl: string;
   title: string;
 };
 
-const STORAGE_KEY = "chog-arena-fighter-profiles-v1";
-
-/** Preset neon-ring avatars (emoji badge + glow color). */
-export const AVATARS = [
-  { id: "chog", emoji: "🦎", hex: "#84cc16" },
-  { id: "reaper", emoji: "💀", hex: "#f43f5e" },
-  { id: "frog", emoji: "🐸", hex: "#a855f7" },
-  { id: "whale", emoji: "🐋", hex: "#38bdf8" },
-  { id: "bolt", emoji: "⚡", hex: "#f59e0b" },
-  { id: "katana", emoji: "⚔️", hex: "#fb7185" },
-] as const;
+/* v2: avatar field changed from preset emoji id to custom image URL. */
+const STORAGE_KEY = "chog-arena-fighter-profiles-v2";
 
 /** Preset fighter title badges. */
 export const FIGHTER_TITLES = [
@@ -38,32 +30,8 @@ export const FIGHTER_TITLES = [
   "Rookie Fighter",
 ] as const;
 
-/** Demo roster so the lobby looks like a live arcade, not grey 0x icons. */
-const DEMO_PROFILES: Record<string, FighterProfile> = {
-  "0x4f3a8c2b9e1d7a6f0c5b2d9e8f1a3b4c5d6e7f80": {
-    username: "Chogzilla",
-    avatar: "chog",
-    title: "Chog Whale",
-  },
-  "0x9b7e4d2c1a8f3e6b0c9d2a5f8e1b4c7d0a3f6e91": {
-    username: "MonadReaper",
-    avatar: "reaper",
-    title: "Arena Executioner",
-  },
-  "0xd1c47a9b3e6f2c8a0d5b1e4f7a2c9b6e3d8f5a12": {
-    username: "KeoneSlayer",
-    avatar: "katana",
-    title: "Second Wind Specialist",
-  },
-  "0x77ab3c9f1e4d7a0b5c8e2f6a9d3c0b7e4f1a8d34": {
-    username: "0xPurpleFrog",
-    avatar: "frog",
-    title: "High Roller",
-  },
-};
-
 type FighterProfileContextValue = {
-  /** Stored profile for an address (demo roster included), or null. */
+  /** Stored profile for an address, or null. */
   getProfile: (address?: string | null) => FighterProfile | null;
   /** "Username (0x1234…abcd)" when set, plain "0x1234…abcd" otherwise. */
   getDisplayName: (address?: string | null) => string;
@@ -79,19 +47,26 @@ export function FighterProfileProvider({
 }: {
   children: ReactNode;
 }) {
-  const [profiles, setProfiles] =
-    useState<Record<string, FighterProfile>>(DEMO_PROFILES);
+  const [profiles, setProfiles] = useState<Record<string, FighterProfile>>({});
 
-  /* Hydrate user overrides from localStorage after mount (SSR-safe). */
+  /* Hydrate profiles from localStorage after mount (SSR-safe). */
   useEffect(() => {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (raw) {
-        const stored = JSON.parse(raw) as Record<string, FighterProfile>;
-        setProfiles({ ...DEMO_PROFILES, ...stored });
+        const stored = JSON.parse(raw) as Record<string, Partial<FighterProfile>>;
+        const migrated: Record<string, FighterProfile> = {};
+        for (const [key, value] of Object.entries(stored)) {
+          migrated[key] = {
+            username: typeof value.username === "string" ? value.username : "",
+            avatarUrl: typeof value.avatarUrl === "string" ? value.avatarUrl : "",
+            title: typeof value.title === "string" ? value.title : "",
+          };
+        }
+        setProfiles(migrated);
       }
     } catch {
-      /* corrupted storage — keep demo roster */
+      /* corrupted storage — start empty */
     }
   }, []);
 
@@ -112,12 +87,7 @@ export function FighterProfileProvider({
         setProfiles((prev) => {
           const next = { ...prev, [key]: profile };
           try {
-            const raw = localStorage.getItem(STORAGE_KEY);
-            const stored = raw
-              ? (JSON.parse(raw) as Record<string, FighterProfile>)
-              : {};
-            stored[key] = profile;
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(stored));
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
           } catch {
             /* storage full / blocked — in-memory only */
           }
@@ -145,11 +115,26 @@ export function useFighterProfile() {
   return ctx;
 }
 
-export function getAvatar(avatarId?: string) {
-  return AVATARS.find((a) => a.id === avatarId) ?? AVATARS[0];
+/** First 2 letters of the username, else 2 hex chars of the address. */
+function getInitials(
+  username?: string,
+  address?: string | null,
+): string {
+  if (username && username.length > 0) return username.slice(0, 2).toUpperCase();
+  if (address) return address.slice(2, 4).toUpperCase();
+  return "??";
 }
 
-/** Neon-ringed emoji badge for any fighter address. */
+/** Deterministic neon hue per address for the fallback ring. */
+function fallbackHue(address?: string | null): number {
+  if (!address) return 280;
+  return parseInt(address.slice(2, 8), 16) % 360;
+}
+
+/**
+ * Fighter avatar: custom image inside a neon ring, with an initials +
+ * gradient fallback when no image is set or the image fails to load.
+ */
 export function FighterAvatarBadge({
   address,
   size = "md",
@@ -159,26 +144,45 @@ export function FighterAvatarBadge({
 }) {
   const { getProfile } = useFighterProfile();
   const profile = address ? getProfile(address) : null;
-  const avatar = getAvatar(profile?.avatar);
+  const [imgFailed, setImgFailed] = useState(false);
+
+  useEffect(() => {
+    setImgFailed(false);
+  }, [profile?.avatarUrl]);
+
+  const initials = getInitials(profile?.username, address);
+  const hex = `hsl(${fallbackHue(address)} 75% 55%)`;
   const sizes = {
-    sm: "h-7 w-7 text-sm",
-    md: "h-11 w-11 text-xl",
-    lg: "h-16 w-16 text-3xl",
+    sm: "h-7 w-7 text-[9px]",
+    md: "h-11 w-11 text-xs",
+    lg: "h-16 w-16 text-lg",
   } as const;
+
   return (
     <span
       className={cn(
-        "flex shrink-0 items-center justify-center rounded-xl border-2",
+        "relative flex shrink-0 items-center justify-center overflow-hidden rounded-xl border-2",
         sizes[size],
       )}
       style={{
-        borderColor: avatar.hex,
-        background: `radial-gradient(circle at 30% 30%, ${avatar.hex}33, transparent 70%), #09090b`,
-        boxShadow: `0 0 14px ${avatar.hex}66`,
+        borderColor: hex,
+        background: `radial-gradient(circle at 30% 30%, ${hex}33, transparent 70%), #09090b`,
+        boxShadow: `0 0 14px ${hex}66`,
       }}
       aria-hidden
     >
-      {avatar.emoji}
+      {profile?.avatarUrl && !imgFailed ? (
+        <img
+          src={profile.avatarUrl}
+          alt=""
+          className="h-full w-full object-cover"
+          onError={() => setImgFailed(true)}
+        />
+      ) : (
+        <span className="font-extrabold tracking-tight text-zinc-100">
+          {initials}
+        </span>
+      )}
     </span>
   );
 }
