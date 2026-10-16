@@ -1,13 +1,22 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ExternalLink, SkipForward } from "lucide-react";
+import { ExternalLink, SkipForward, Swords } from "lucide-react";
 import { FighterAvatarBadge } from "@/context/FighterProfileContext";
 import type { FighterClass } from "@/config/fighterClasses";
 import { FIGHTER_CLASS_META } from "@/config/fighterClasses";
 import type { SpriteState } from "./FighterSprite";
 import { SheetFighter } from "./ChogzillaSprite";
 import { cn, formatMon, truncateAddress } from "@/lib/utils";
+import {
+  playDashSfx,
+  playHitSfx,
+  playImpactSfx,
+  playRoundAnnouncement,
+  playSecondWindSfx,
+  resetArenaAudio,
+  stopArenaAudio,
+} from "@/utils/arenaAudio";
 
 export type DuelOutcome = {
   duelId: number;
@@ -37,25 +46,11 @@ export type FighterDescriptor = {
 
 type Side = "creator" | "challenger";
 
-type Strike = {
-  attacker: Side;
-  /** Damage dealt; ignored when suddenDeath (uses defender's remaining HP). */
-  damage: number;
-  crit: boolean;
-  suddenDeath?: boolean;
-};
-
-type CombatScript = {
-  strikes: Strike[];
-  suddenDeath: Strike | null;
-  revivedSide: Side | null;
-  loserSide: Side;
-  finalWinnerSide: Side;
-};
-
 type Stage =
   | "faceoff"
+  | "roundintro"
   | "combat"
+  | "ko"
   | "down"
   | "secondwind"
   | "suddendeath"
@@ -67,7 +62,6 @@ type Fx = {
   target: Side;
   dmg: number;
   crit: boolean;
-  suddenDeath?: boolean;
 };
 
 type BattleArenaModalProps = {
@@ -75,98 +69,91 @@ type BattleArenaModalProps = {
   creatorFighter: FighterDescriptor;
   challengerFighter: FighterDescriptor;
   explorerTxUrl?: string;
+  /** Timeline only starts when this is true AND outcome is confirmed. */
+  isOpen?: boolean;
   onClose: () => void;
 };
 
 /**
- * Street-Fighter-style battle stage: arcade HUD (PFPs, slanted HP bars,
- * timer/pot), a colosseum stage with two full-body FighterSprite rigs that
- * dash, swing, take damage, die, and resurrect — driven by the real duel
- * outcome.
+ * Street-Fighter-style 3-round battle stage driven by a SINGLE async match
+ * sequencer (no reactive per-round useEffect chains). The timeline starts
+ * only when `isOpen` && a confirmed `outcome` exist, runs rounds 1→2→3 with
+ * close-range melee exchanges, and always ends on the real on-chain winner.
  */
 export function BattleArenaModal({
   outcome,
   creatorFighter,
   challengerFighter,
   explorerTxUrl,
+  isOpen = true,
   onClose,
 }: BattleArenaModalProps) {
   const [stage, setStage] = useState<Stage>("faceoff");
+  const [round, setRound] = useState<1 | 2 | 3>(1);
   const [hp, setHp] = useState<{ creator: number; challenger: number }>({
     creator: 100,
     challenger: 100,
   });
-  const [strikeIdx, setStrikeIdx] = useState(0);
   const [fx, setFx] = useState<Fx | null>(null);
+  const [banner, setBanner] = useState<string | null>(null);
+  const [orbScore, setOrbScore] = useState<{ creator: number; challenger: number }>(
+    { creator: 0, challenger: 0 },
+  );
+  const [slamFx, setSlamFx] = useState<{ id: number; target: Side } | null>(
+    null,
+  );
+  const [portalFx, setPortalFx] = useState<{ id: number; target: Side } | null>(
+    null,
+  );
+  const [hitStop, setHitStop] = useState(false);
+  const [camShake, setCamShake] = useState(false);
   const [logLines, setLogLines] = useState<string[]>([]);
   const [timer, setTimer] = useState(99);
-  const hpRef = useRef({ creator: 100, challenger: 100 });
+  const [finalBlowLog, setFinalBlowLog] = useState<string>("");
+
+  const matchRunningRef = useRef(false);
+  const skipRef = useRef(false);
   const logEndRef = useRef<HTMLDivElement | null>(null);
 
   const nameOf = (side: Side): string =>
     side === "creator" ? creatorFighter.name : challengerFighter.name;
 
-  /* Pre-calculate the full combat script from the settled outcome. */
-  const script = useMemo<CombatScript | null>(() => {
+  /* Winner/loser sides + Second Wind resolution — computed once. */
+  const script = useMemo(() => {
     if (!outcome) return null;
     const creatorWon =
       outcome.winnerAddress.toLowerCase() ===
       creatorFighter.address.toLowerCase();
     const finalWinnerSide: Side = creatorWon ? "creator" : "challenger";
     const loserSide: Side = creatorWon ? "challenger" : "creator";
+    const revivedSide: Side | null = outcome.secondWind ? loserSide : null;
+    const revivedWins =
+      revivedSide != null &&
+      outcome.resurrectedAddress != null &&
+      outcome.winnerAddress.toLowerCase() ===
+        outcome.resurrectedAddress.toLowerCase();
+    const isJames = (side: Side): boolean =>
+      (side === "creator" ? creatorFighter : challengerFighter)
+        .fighterClass === "mage";
+    const isKeone = (side: Side): boolean =>
+      (side === "creator" ? creatorFighter : challengerFighter)
+        .fighterClass === "juggernaut";
+    return {
+      finalWinnerSide,
+      loserSide,
+      revivedSide,
+      revivedWins,
+      isJames,
+      isKeone,
+    };
+  }, [
+    outcome,
+    creatorFighter.address,
+    creatorFighter.fighterClass,
+    challengerFighter.fighterClass,
+  ]);
 
-    // Winner lands 3 blows summing to exactly 100; loser lands 2 counters.
-    const a = 20 + Math.floor(Math.random() * 10); // 20–29
-    const b = 30 + Math.floor(Math.random() * 8); // 30–37
-    const c = 100 - a - b; // 34–50
-    const e = 12 + Math.floor(Math.random() * 10); // 12–21
-    const f = 18 + Math.floor(Math.random() * 12); // 18–29
-
-    const strikes: Strike[] = [
-      { attacker: finalWinnerSide, damage: a, crit: false },
-      { attacker: loserSide, damage: e, crit: false },
-      { attacker: finalWinnerSide, damage: b, crit: true },
-      { attacker: loserSide, damage: f, crit: false },
-      { attacker: finalWinnerSide, damage: c, crit: true }, // final blow → 0 HP
-    ];
-
-    let suddenDeath: Strike | null = null;
-    let revivedSide: Side | null = null;
-    if (outcome.secondWind) {
-      revivedSide = loserSide;
-      const revivedWins =
-        outcome.resurrectedAddress != null &&
-        outcome.winnerAddress.toLowerCase() ===
-          outcome.resurrectedAddress.toLowerCase();
-      const finisher: Side = revivedWins ? loserSide : finalWinnerSide;
-      suddenDeath = {
-        attacker: finisher,
-        damage: 0,
-        crit: true,
-        suddenDeath: true,
-      };
-    }
-
-    return { strikes, suddenDeath, revivedSide, loserSide, finalWinnerSide };
-  }, [outcome, creatorFighter.address]);
-
-  /* Reset all combat state whenever a new outcome arrives. */
-  useEffect(() => {
-    if (!outcome || !script) return;
-    hpRef.current = { creator: 100, challenger: 100 };
-    setHp(hpRef.current);
-    setStage("faceoff");
-    setStrikeIdx(0);
-    setFx(null);
-    setTimer(99);
-    setLogLines([
-      `⚔️ Duel #${outcome.duelId} — ${nameOf("creator")} vs ${nameOf("challenger")}!`,
-      `💰 Prize pot: ${formatMon(outcome.pot)} MON on the line!`,
-    ]);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [outcome, script]);
-
-  /* Arcade timer ticks during the fight. */
+  /* Arcade timer ticks while the stage is live. */
   useEffect(() => {
     if (stage === "faceoff" || stage === "verdict") return;
     const interval = setInterval(() => {
@@ -175,138 +162,287 @@ export function BattleArenaModal({
     return () => clearInterval(interval);
   }, [stage]);
 
-  /* Stage 1 → 2: face-off holds 1.5s, then the clashes begin. */
-  useEffect(() => {
-    if (stage !== "faceoff") return;
-    const timeout = setTimeout(() => setStage("combat"), 1500);
-    return () => clearTimeout(timeout);
-  }, [stage]);
-
-  /* Stage 2: strike exchange every 700ms (first strike slightly faster). */
-  useEffect(() => {
-    if (stage !== "combat" || !script || !outcome) return;
-    if (strikeIdx >= script.strikes.length) {
-      const timeout = setTimeout(
-        () => setStage(outcome.secondWind ? "down" : "verdict"),
-        650,
-      );
-      return () => clearTimeout(timeout);
-    }
-    const strike = script.strikes[strikeIdx];
-    const timeout = setTimeout(
-      () => {
-        executeStrike(strike);
-        setStrikeIdx((i) => i + 1);
-      },
-      strikeIdx === 0 ? 450 : 700,
-    );
-    return () => clearTimeout(timeout);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stage, strikeIdx, script, outcome]);
-
-  /* Defeated pause: 0.5s of silence at 0 HP before the resurrection flash. */
-  useEffect(() => {
-    if (stage !== "down") return;
-    const timeout = setTimeout(() => setStage("secondwind"), 500);
-    return () => clearTimeout(timeout);
-  }, [stage]);
-
-  /* Stage 3: Second Wind flash + HP refill to 50%, then sudden death. */
-  useEffect(() => {
-    if (stage !== "secondwind" || !script) return;
-    const refill = setTimeout(() => {
-      if (!script.revivedSide) return;
-      const revived = script.revivedSide;
-      hpRef.current = { ...hpRef.current, [revived]: 50 };
-      setHp(hpRef.current);
-      setLogLines((l) => [
-        ...l,
-        `🛡️ SECOND WIND! ${nameOf(revived)} resurrects with 50 HP!`,
-      ]);
-    }, 900);
-    const next = setTimeout(() => setStage("suddendeath"), 2500);
-    return () => {
-      clearTimeout(refill);
-      clearTimeout(next);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stage, script]);
-
-  /* Sudden-death clash decides the true winner. */
-  useEffect(() => {
-    if (stage !== "suddendeath" || !script?.suddenDeath) return;
-    const timeout = setTimeout(() => {
-      executeStrike(script.suddenDeath!);
-      setTimeout(() => setStage("verdict"), 950);
-    }, 650);
-    return () => clearTimeout(timeout);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stage, script]);
-
-  /* Clear the floating hit FX after its animation plays out. */
-  useEffect(() => {
-    if (!fx) return;
-    const timeout = setTimeout(() => setFx(null), 950);
-    return () => clearTimeout(timeout);
-  }, [fx]);
-
   /* Keep the combat log pinned to the latest line. */
   useEffect(() => {
     logEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [logLines]);
 
-  function executeStrike(strike: Strike) {
-    const defender: Side =
-      strike.attacker === "creator" ? "challenger" : "creator";
-    const applied = Math.min(
-      strike.suddenDeath ? hpRef.current[defender] : strike.damage,
-      hpRef.current[defender],
-    );
-    hpRef.current = {
-      ...hpRef.current,
-      [defender]: Math.max(0, hpRef.current[defender] - applied),
-    };
-    setHp(hpRef.current);
-    setFx({
-      id: Date.now(),
-      attacker: strike.attacker,
-      target: defender,
-      dmg: applied,
-      crit: strike.crit,
-      suddenDeath: strike.suddenDeath,
-    });
+  /* Clear the Void Claw slam shockwave after its ring plays out. */
+  useEffect(() => {
+    if (!slamFx) return;
+    const timeout = setTimeout(() => setSlamFx(null), 650);
+    return () => clearTimeout(timeout);
+  }, [slamFx]);
 
-    const attackerName = nameOf(strike.attacker);
-    let line: string;
-    if (strike.suddenDeath) {
-      line = `☠️ SUDDEN DEATH — ${attackerName} lands the finishing blow for ${applied} DMG!`;
-    } else if (strike.crit) {
-      line = `💥 ${attackerName} CRITS for ${applied} DMG!`;
-    } else if (Math.random() < 0.5) {
-      line = `⚡ ${attackerName} lands a heavy Monad strike for ${applied} DMG!`;
-    } else {
-      line = `⚡ ${attackerName} strikes for ${applied} DMG!`;
+  /* Clear the Keone portal burst after its bloom plays out. */
+  useEffect(() => {
+    if (!portalFx) return;
+    const timeout = setTimeout(() => setPortalFx(null), 750);
+    return () => clearTimeout(timeout);
+  }, [portalFx]);
+
+  /* ================= SINGLE ASYNC MATCH SEQUENCER =================
+   * Runs the full 3-round fight sequentially. Never re-triggered by
+   * round/HP state updates — only by isOpen + a fresh confirmed outcome. */
+  useEffect(() => {
+    if (!isOpen || !outcome || !script) return;
+    if (matchRunningRef.current) return;
+    matchRunningRef.current = true;
+    skipRef.current = false;
+
+    let cancelled = false;
+    const aborted = () => cancelled || skipRef.current;
+    const wait = (ms: number) =>
+      new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+    /* Local HP model — deterministic, synced to state for rendering. */
+    let hpState = { creator: 100, challenger: 100 };
+    const setHpBoth = (next: { creator: number; challenger: number }) => {
+      hpState = next;
+      setHp(next);
+    };
+    const drain = (side: Side) => {
+      const next = { ...hpState, [side]: 0 };
+      setHpBoth(next);
+    };
+    const refill = () => setHpBoth({ creator: 100, challenger: 100 });
+
+    const log = (line: string) => setLogLines((l) => [...l, line]);
+
+    async function runExchange(
+      attacker: Side,
+      dmg: number,
+      opts: { lethal?: boolean; suddenDeath?: boolean } = {},
+    ) {
+      const target: Side = attacker === "creator" ? "challenger" : "creator";
+      const crit = Boolean(opts.lethal) || Math.random() < 0.25;
+      const signature = script!.isJames(attacker) && (opts.lethal || crit);
+      const keoneSig = script!.isKeone(attacker) && (opts.lethal || crit);
+
+      setFx({ id: Date.now(), attacker, target, dmg, crit });
+      playDashSfx();
+      await wait(180);
+      if (aborted()) return;
+      playHitSfx();
+      if (signature) {
+        playImpactSfx("slam");
+        setSlamFx({ id: Date.now(), target });
+        setHitStop(true);
+        setTimeout(() => setHitStop(false), 90);
+        setCamShake(true);
+        setTimeout(() => setCamShake(false), 420);
+      } else if (keoneSig) {
+        /* Keone Mage — holographic portal + magenta lightning burst. */
+        playImpactSfx("slam");
+        setPortalFx({ id: Date.now(), target });
+        setHitStop(true);
+        setTimeout(() => setHitStop(false), 90);
+        setCamShake(true);
+        setTimeout(() => setCamShake(false), 420);
+      } else {
+        playImpactSfx(crit ? "crit" : "slash");
+      }
+
+      if (opts.lethal || opts.suddenDeath) {
+        drain(target);
+      } else {
+        const next = {
+          ...hpState,
+          [target]: Math.max(0, hpState[target] - dmg),
+        };
+        setHpBoth(next);
+      }
+
+      const attackerName = nameOf(attacker);
+      let line: string;
+      if (opts.suddenDeath) {
+        line = `☠️ SUDDEN DEATH — ${attackerName} lands the finishing blow!`;
+      } else if (opts.lethal) {
+        line = signature
+          ? `💜🔥 ${attackerName} — VOID CLAW SLAM knocks ${nameOf(target)} out!!`
+          : keoneSig
+            ? `🌀⚡ ${attackerName} — DIGITAL PORTAL SLAM K.O.s ${nameOf(target)}!!`
+            : `💥 ${attackerName} lands the K.O. blow!!`;
+      } else if (signature) {
+        line = `💜🔥 ${attackerName} — VOID CLAW SLAM for ${dmg} DMG!!`;
+      } else if (keoneSig) {
+        line = `🌀⚡ ${attackerName} — DIGITAL PORTAL SLAM for ${dmg} DMG!!`;
+      } else if (crit) {
+        line = `💥 ${attackerName} CRITS for ${dmg} DMG!`;
+      } else {
+        line = `⚡ ${attackerName} strikes for ${dmg} DMG!`;
+      }
+      log(line);
+
+      await wait(270);
+      if (aborted()) return;
+      setFx(null);
+      await wait(300);
     }
-    setLogLines((l) => [...l, line]);
-  }
+
+    async function runRound(
+      roundNo: 1 | 2 | 3,
+      roundWinnerSide: Side,
+    ) {
+      if (aborted()) return;
+      refill();
+      setRound(roundNo);
+      setStage("roundintro");
+      setBanner(roundNo === 3 ? "ROUND 3 // FINAL ROUND!" : `ROUND ${roundNo} // FIGHT!`);
+      playRoundAnnouncement(roundNo); // exactly once per round per match
+      log(
+        roundNo === 3
+          ? "🔊 ROUND 3 — FINAL ROUND — FIGHT!"
+          : `🔊 ROUND ${roundNo} — FIGHT!`,
+      );
+      await wait(1200);
+      if (aborted()) return;
+
+      setBanner(null);
+      setStage("combat");
+
+      const roundLoser: Side =
+        roundWinnerSide === "creator" ? "challenger" : "creator";
+      const exchanges =
+        roundNo === 3
+          ? 10 + Math.floor(Math.random() * 3) // 10–12 intense
+          : 8 + Math.floor(Math.random() * 3); // 8–10
+
+      for (let i = 0; i < exchanges; i += 1) {
+        if (aborted()) return;
+        const isFinal = i === exchanges - 1;
+        /* Round loser pressures first; the round winner lands the K.O. */
+        let attacker: Side =
+          i % 2 === 0 ? roundLoser : roundWinnerSide;
+        if (isFinal) attacker = roundWinnerSide;
+        const dmg = 10 + Math.floor(Math.random() * 9); // 10–18
+        await runExchange(attacker, dmg, { lethal: isFinal });
+        if (aborted()) return;
+      }
+
+      /* K.O. — award the round orb. */
+      setStage("ko");
+      setBanner(`ROUND ${roundNo} K.O.!`);
+      setOrbScore((prev) => ({ ...prev, [roundWinnerSide]: prev[roundWinnerSide] + 1 }));
+      setFinalBlowLog(
+        `⚡ ${nameOf(roundWinnerSide)} won Round ${roundNo} by K.O.`,
+      );
+      log(`🏆 ROUND ${roundNo} K.O. — ${nameOf(roundWinnerSide)} takes the round!`);
+      await wait(1600);
+      if (aborted()) return;
+      setBanner(null);
+    }
+
+    async function runFullMatch() {
+      resetArenaAudio();
+      setStage("faceoff");
+      setRound(1);
+      setHpBoth({ creator: 100, challenger: 100 });
+      setOrbScore({ creator: 0, challenger: 0 });
+      setFx(null);
+      setBanner(null);
+      setSlamFx(null);
+      setPortalFx(null);
+      setFinalBlowLog("");
+      setTimer(99);
+      setLogLines([
+        `⚔️ Duel #${outcome!.duelId} — ${nameOf("creator")} vs ${nameOf("challenger")}!`,
+        `💰 Prize pot: ${formatMon(outcome!.pot)} MON on the line!`,
+        `🥊 Best of 3 rounds — Round 1 upcoming!`,
+      ]);
+      await wait(1000);
+      if (aborted()) return;
+
+      /* ROUND 1 — the final loser takes it (1–0). */
+      await runRound(1, script!.loserSide);
+      if (aborted()) return;
+
+      /* ROUND 2 — the winner mounts the comeback (1–1). */
+      await runRound(2, script!.finalWinnerSide);
+      if (aborted()) return;
+
+      /* ROUND 3 — FINAL ROUND decides the real on-chain winner. */
+      await runRound(3, script!.finalWinnerSide);
+      if (aborted()) return;
+
+      /* Second Wind fires inside Round 3 when the roll hit. */
+      if (script!.revivedSide) {
+        const revived = script!.revivedSide;
+        setStage("down");
+        await wait(800);
+        if (aborted()) return;
+
+        setStage("secondwind");
+        playSecondWindSfx();
+        log(`🛡️ SECOND WIND! ${nameOf(revived)} resurrects with 50 HP!`);
+        setHpBoth({
+          creator: revived === "creator" ? 50 : hpState.creator,
+          challenger: revived === "challenger" ? 50 : hpState.challenger,
+        });
+        await wait(2200);
+        if (aborted()) return;
+
+        /* Sudden-death clash — finisher honors revivedWins. */
+        setStage("suddendeath");
+        setBanner("☠️ SUDDEN DEATH!");
+        log("☠️ SUDDEN DEATH — next blow decides everything!");
+        await wait(900);
+        if (aborted()) return;
+        setBanner(null);
+
+        const finisher: Side = script!.revivedWins ? revived : script!.finalWinnerSide;
+        const opener: Side = finisher === "creator" ? "challenger" : "creator";
+        await runExchange(opener, 10 + Math.floor(Math.random() * 9));
+        if (aborted()) return;
+        await runExchange(finisher, 0, { lethal: true, suddenDeath: true });
+        if (aborted()) return;
+        setFinalBlowLog(
+          `☠️ SUDDEN DEATH — ${nameOf(finisher)} landed the finishing blow`,
+        );
+      } else {
+        setFinalBlowLog(
+          script!.isJames(script!.finalWinnerSide)
+            ? `💜🔥 ${nameOf(script!.finalWinnerSide)} landed the VOID CLAW SLAM final blow`
+            : script!.isKeone(script!.finalWinnerSide)
+              ? `🌀⚡ ${nameOf(script!.finalWinnerSide)} landed the DIGITAL PORTAL SLAM final blow`
+              : `💥 ${nameOf(script!.finalWinnerSide)} landed the K.O. final blow`,
+        );
+      }
+
+      setStage("verdict");
+    }
+
+    /* Note: only the cleanup resets matchRunningRef — a finally-block reset
+     * could clobber a StrictMode remount's in-flight second run. */
+    void runFullMatch();
+
+    return () => {
+      cancelled = true;
+      stopArenaAudio();
+      matchRunningRef.current = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, outcome]);
 
   function skipToVerdict() {
+    skipRef.current = true;
+    stopArenaAudio();
+    setBanner(null);
+    setFx(null);
+    setSlamFx(null);
+    setPortalFx(null);
     setStage("verdict");
   }
 
   /* Sprite state machine per side. */
   function sideState(side: Side): SpriteState {
-    if (stage === "faceoff") return "idle";
-    if (stage === "verdict") {
-      return side === script!.finalWinnerSide ? "victory" : "dead";
-    }
-    if (stage === "down") {
-      return side === script!.loserSide ? "dead" : "idle";
-    }
-    if (stage === "secondwind") {
-      return side === script!.revivedSide ? "secondWind" : "idle";
-    }
-    // combat / suddendeath — driven by the current strike FX
+    if (!script) return "idle";
+    if (stage === "verdict")
+      return side === script.finalWinnerSide ? "victory" : "dead";
+    if (stage === "down")
+      return side === script.loserSide ? "dead" : "idle";
+    if (stage === "secondwind")
+      return side === script.revivedSide ? "secondWind" : "idle";
     if (!fx) return "idle";
     if (fx.attacker === side) return "attack";
     if (fx.target === side) return "hit";
@@ -316,13 +452,6 @@ export function BattleArenaModal({
   if (!outcome || !script) return null;
 
   const fighting = stage !== "verdict";
-  const lastStrike =
-    script.suddenDeath ?? script.strikes[script.strikes.length - 1];
-  const finalBlowLog = lastStrike.suddenDeath
-    ? `☠️ SUDDEN DEATH — ${nameOf(lastStrike.attacker)} landed the finishing blow`
-    : lastStrike.crit
-      ? `💥 ${nameOf(lastStrike.attacker)} landed a CRIT final blow`
-      : `⚡ ${nameOf(lastStrike.attacker)} landed the final blow`;
   const revivedName = script.revivedSide ? nameOf(script.revivedSide) : null;
   const spriteAnimKey = `${stage}-${fx?.id ?? 0}`;
 
@@ -345,7 +474,7 @@ export function BattleArenaModal({
           </button>
         )}
 
-        {/* ================= STAGE 4: FINAL VERDICT ================= */}
+        {/* ================= FINAL VERDICT ================= */}
         {stage === "verdict" ? (
           <VerdictScreen
             outcome={outcome}
@@ -362,11 +491,7 @@ export function BattleArenaModal({
           <>
             {/* ============ ARCADE HUD ============ */}
             <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2 border-b border-white/10 bg-black/70 px-3 pb-3 pt-4 sm:gap-4 sm:px-6">
-              <HudSide
-                fighter={creatorFighter}
-                hp={hp.creator}
-                align="left"
-              />
+              <HudSide fighter={creatorFighter} hp={hp.creator} align="left" />
               <div className="flex flex-col items-center gap-0.5 px-1">
                 <p className="font-mono text-2xl font-black tabular-nums text-amber-300 drop-shadow-[0_0_10px_rgba(251,191,36,0.6)]">
                   {String(timer).padStart(2, "0")}
@@ -374,8 +499,11 @@ export function BattleArenaModal({
                 <p className="whitespace-nowrap bg-gradient-to-r from-amber-300 to-orange-300 bg-clip-text text-xs font-extrabold text-transparent">
                   {formatMon(outcome.pot)} MON
                 </p>
-                <p className="text-[9px] font-bold uppercase tracking-widest text-zinc-600">
-                  Duel #{outcome.duelId}
+                <p className="whitespace-nowrap text-[9px] font-bold uppercase tracking-widest text-red-300/90">
+                  {round === 3 ? "FINAL ROUND" : `ROUND ${round}`} · Orbs{" "}
+                  <span className="text-amber-300">
+                    {orbScore.creator}–{orbScore.challenger}
+                  </span>
                 </p>
               </div>
               <HudSide
@@ -386,13 +514,17 @@ export function BattleArenaModal({
             </div>
 
             {/* ============ 2D BATTLE STAGE ============ */}
-            <div className="relative h-[320px] overflow-hidden sm:h-[360px]">
+            <div
+              className={cn(
+                "relative h-[320px] overflow-hidden sm:h-[360px]",
+                camShake && "arena-cam-shake",
+                hitStop && "arena-hit-stop",
+              )}
+            >
               {/* Arena background art */}
               <div
                 className="absolute inset-0 bg-cover bg-center"
-                style={{
-                  backgroundImage: "url(/assets/arena-background.jpg)",
-                }}
+                style={{ backgroundImage: "url(/assets/arena-background.jpg)" }}
                 aria-hidden
               />
               {/* Dark overlay — keeps HUD text, HP bars, and runes crisp */}
@@ -408,7 +540,6 @@ export function BattleArenaModal({
                   preserveAspectRatio="none"
                   aria-hidden
                 >
-                  {/* Floor perspective lines */}
                   {Array.from({ length: 9 }).map((_, i) => (
                     <line
                       key={i}
@@ -431,7 +562,6 @@ export function BattleArenaModal({
                     opacity="0.5"
                   />
                 </svg>
-                {/* Glowing purple runes */}
                 {[
                   { left: "18%", top: "30%", glyph: "ᛝ" },
                   { left: "48%", top: "55%", glyph: "ᛟ" },
@@ -448,8 +578,16 @@ export function BattleArenaModal({
                 ))}
               </div>
 
-              {/* Fighters */}
-              <div className="absolute bottom-6 left-[10%] sm:left-[16%]">
+              {/* Fighters — close-range spacing (18% in) */}
+              <div
+                key={`creator-${fx?.id ?? "idle"}`}
+                className={cn(
+                  "absolute bottom-6 left-[18%]",
+                  fx?.attacker === "creator" &&
+                    (stage === "combat" || stage === "suddendeath") &&
+                    "battle-lunge-right",
+                )}
+              >
                 <SheetFighter
                   fighterClass={creatorFighter.fighterClass}
                   state={sideState("creator")}
@@ -461,7 +599,15 @@ export function BattleArenaModal({
                   <DamageNumber key={fx.id} fx={fx} />
                 )}
               </div>
-              <div className="absolute bottom-6 right-[10%] sm:right-[16%]">
+              <div
+                key={`challenger-${fx?.id ?? "idle"}`}
+                className={cn(
+                  "absolute bottom-6 right-[18%]",
+                  fx?.attacker === "challenger" &&
+                    (stage === "combat" || stage === "suddendeath") &&
+                    "battle-lunge-left",
+                )}
+              >
                 <SheetFighter
                   fighterClass={challengerFighter.fighterClass}
                   state={sideState("challenger")}
@@ -474,19 +620,59 @@ export function BattleArenaModal({
                 )}
               </div>
 
-              {/* Center overlays */}
+              {/* VOID CLAW SLAM — shockwave ring + jagged lightning on defender */}
+              {slamFx && (
+                <>
+                  <div
+                    key={`ring-${slamFx.id}`}
+                    className="void-slam-ring pointer-events-none absolute z-20 h-44 w-44"
+                    style={{
+                      left: slamFx.target === "creator" ? "22%" : "78%",
+                      top: "58%",
+                    }}
+                    aria-hidden
+                  />
+                  <VoidLightning key={`bolt-${slamFx.id}`} side={slamFx.target} />
+                </>
+              )}
+
+              {/* Keone Mage — holographic portal + magenta lightning burst */}
+              {portalFx && (
+                <KeonePortalFx key={`portal-${portalFx.id}`} side={portalFx.target} />
+              )}
+
+              {/* Banner overlays: ROUND N // FIGHT!, K.O., SUDDEN DEATH */}
+              {banner && (
+                <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center">
+                  <div className="animate-round-banner text-center">
+                    <p className="whitespace-nowrap bg-gradient-to-r from-amber-200 via-yellow-100 to-amber-200 bg-clip-text text-4xl font-black tracking-[0.15em] text-transparent drop-shadow-[0_0_26px_rgba(251,191,36,0.85)] sm:text-5xl">
+                      {banner}
+                    </p>
+                    {stage === "roundintro" && (
+                      <p className="mt-1 text-lg font-black uppercase tracking-[0.5em] text-red-400 drop-shadow-[0_0_14px_rgba(239,68,68,0.8)]">
+                        FIGHT!
+                      </p>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Face-off intro */}
               {stage === "faceoff" && (
                 <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
                   <div className="flex flex-col items-center gap-1">
                     <p className="animate-pop-in whitespace-nowrap bg-gradient-to-r from-red-300 via-amber-200 to-orange-300 bg-clip-text text-4xl font-black tracking-widest text-transparent drop-shadow-[0_0_22px_rgba(239,68,68,0.9)] sm:text-5xl">
-                      ⚔️ FIGHT!
+                      ⚔️ READY?
                     </p>
                     <p className="text-[10px] font-bold uppercase tracking-[0.35em] text-zinc-400">
-                      {creatorFighter.name} vs {challengerFighter.name}
+                      {creatorFighter.name} vs {challengerFighter.name} · Best
+                      of 3
                     </p>
                   </div>
                 </div>
               )}
+
+              {/* Second Wind flash */}
               {stage === "secondwind" && (
                 <>
                   <div
@@ -506,13 +692,6 @@ export function BattleArenaModal({
                   </div>
                 </>
               )}
-              {stage === "suddendeath" && (
-                <div className="pointer-events-none absolute inset-x-0 top-1/2 z-30 flex -translate-y-1/2 justify-center">
-                  <p className="animate-pop-in whitespace-nowrap rounded-full border border-amber-400/50 bg-black/80 px-6 py-2.5 text-lg font-black tracking-widest text-amber-200 shadow-[0_0_30px_rgba(251,191,36,0.5)] sm:text-2xl">
-                    ☠️ SUDDEN DEATH CLASH!
-                  </p>
-                </div>
-              )}
             </div>
 
             {/* Combat log */}
@@ -528,11 +707,15 @@ export function BattleArenaModal({
                       "font-mono text-[11px] leading-relaxed",
                       line.startsWith("🛡️") || line.startsWith("☠️")
                         ? "text-purple-300"
-                        : line.startsWith("💥")
+                        : line.startsWith("💥") || line.startsWith("🏆")
                           ? "text-amber-300"
-                          : line.startsWith("💰")
-                            ? "text-amber-200/80"
-                            : "text-zinc-300",
+                          : line.startsWith("💜")
+                            ? "text-fuchsia-300"
+                            : line.startsWith("💰")
+                              ? "text-amber-200/80"
+                              : line.startsWith("🔊")
+                                ? "text-red-300"
+                                : "text-zinc-300",
                     )}
                   >
                     {line}
@@ -642,9 +825,116 @@ function DamageNumber({ fx }: { fx: Fx }) {
           : "text-base text-red-300 drop-shadow-[0_0_8px_rgba(239,68,68,0.9)]",
       )}
     >
-      {fx.suddenDeath ? "☠️ " : ""}
       -{fx.dmg} HP{fx.crit ? " 💥 CRIT!" : ""}
     </p>
+  );
+}
+
+/** Jagged violet + gold lightning bolts cracking across the slam target. */
+function VoidLightning({ side }: { side: Side }) {
+  return (
+    <div
+      className={cn(
+        "void-lightning pointer-events-none absolute bottom-4 z-30 h-48 w-40",
+        side === "creator" ? "left-[12%]" : "right-[12%]",
+      )}
+      aria-hidden
+    >
+      <svg
+        className="h-full w-full"
+        viewBox="0 0 100 160"
+        preserveAspectRatio="none"
+      >
+        <polyline
+          points="52,0 38,38 60,42 40,88 58,92 42,160"
+          fill="none"
+          stroke="#c084fc"
+          strokeWidth="3.5"
+          strokeLinejoin="miter"
+          style={{ filter: "drop-shadow(0 0 8px rgba(168,85,247,0.95))" }}
+        />
+        <polyline
+          points="72,8 62,52 80,56 60,108 74,112 66,150"
+          fill="none"
+          stroke="#fbbf24"
+          strokeWidth="2.2"
+          strokeLinejoin="miter"
+          style={{ filter: "drop-shadow(0 0 6px rgba(251,191,36,0.9))" }}
+        />
+        <polyline
+          points="28,14 34,60 20,64 36,120"
+          fill="none"
+          stroke="#a855f7"
+          strokeWidth="1.8"
+          strokeLinejoin="miter"
+          opacity="0.85"
+        />
+      </svg>
+    </div>
+  );
+}
+
+/** Keone Mage signature — holographic purple/magenta portal + lightning burst. */
+function KeonePortalFx({ side }: { side: Side }) {
+  const center = side === "creator" ? "22%" : "78%";
+  return (
+    <div className="pointer-events-none absolute inset-0 z-[25]" aria-hidden>
+      {/* Holographic portal ring */}
+      <div
+        className="keone-portal-bloom absolute h-40 w-40 rounded-full"
+        style={{
+          left: center,
+          top: "56%",
+          background:
+            "radial-gradient(circle, rgba(232,121,249,0.95) 0%, rgba(168,85,247,0.6) 42%, rgba(34,211,238,0.35) 62%, transparent 78%)",
+          border: "2px solid rgba(232,121,249,0.85)",
+          boxShadow:
+            "0 0 44px rgba(217,70,239,0.85), inset 0 0 32px rgba(168,85,247,0.65)",
+        }}
+      />
+      {/* Magenta energy burst flash */}
+      <div
+        className="keone-burst absolute h-56 w-56 rounded-full"
+        style={{
+          left: center,
+          top: "56%",
+          background:
+            "radial-gradient(circle, rgba(255,255,255,0.9) 0%, rgba(232,121,249,0.55) 40%, transparent 72%)",
+        }}
+      />
+      {/* Magenta/cyan lightning bolts across the target */}
+      <svg
+        className="void-lightning absolute bottom-4 h-48 w-40"
+        style={{ left: side === "creator" ? "14%" : "auto", right: side === "creator" ? "auto" : "14%" }}
+        viewBox="0 0 100 160"
+        preserveAspectRatio="none"
+      >
+        <polyline
+          points="50,0 40,40 62,44 42,92 58,96 44,160"
+          fill="none"
+          stroke="#f0abfc"
+          strokeWidth="3.5"
+          strokeLinejoin="miter"
+          style={{ filter: "drop-shadow(0 0 9px rgba(232,121,249,0.95))" }}
+        />
+        <polyline
+          points="74,10 64,54 82,58 62,112 76,116"
+          fill="none"
+          stroke="#22d3ee"
+          strokeWidth="2.2"
+          strokeLinejoin="miter"
+          style={{ filter: "drop-shadow(0 0 7px rgba(34,211,238,0.9))" }}
+        />
+        <polyline
+          points="26,16 34,62 18,66 34,124"
+          fill="none"
+          stroke="#d946ef"
+          strokeWidth="1.8"
+          strokeLinejoin="miter"
+          opacity="0.85"
+        />
+      </svg>
+    </div>
   );
 }
 
@@ -718,98 +1008,104 @@ function VerdictScreen({
           />
         </div>
 
-      <h3
-        className={cn(
-          "mt-2 animate-verdict-slam text-4xl font-black tracking-wide sm:text-5xl",
-          won
-            ? "bg-gradient-to-r from-emerald-300 via-lime-200 to-emerald-300 bg-clip-text text-transparent drop-shadow-[0_0_20px_rgba(16,185,129,0.6)]"
-            : "bg-gradient-to-r from-red-400 via-rose-300 to-red-400 bg-clip-text text-transparent drop-shadow-[0_0_20px_rgba(239,68,68,0.6)]",
-        )}
-      >
-        {won ? "VICTORY" : "DEFEATED"}
-      </h3>
-
-      {won ? (
-        <p className="mt-3 text-sm text-zinc-300">
-          {challengerName} claimed{" "}
-          <span className="font-bold text-emerald-300">
-            +{formatMon(outcome.payout)} MON
-          </span>{" "}
-          in Duel #{outcome.duelId}
-        </p>
-      ) : (
-        <p className="mt-3 text-sm text-zinc-300">
-          {challengerName} lost{" "}
-          <span className="font-semibold text-zinc-200">
-            {formatMon(outcome.wager)} MON
-          </span>{" "}
-          to {creatorName} in Duel #{outcome.duelId}
-        </p>
-      )}
-
-      {clutch && (
-        <p className="mx-auto mt-4 inline-block animate-pop-in rounded-full border border-orange-400/50 bg-orange-500/15 px-4 py-1.5 text-xs font-extrabold tracking-wide text-orange-200 shadow-[0_0_18px_rgba(251,146,60,0.5)]">
-          🔥 CLUTCH RESURRECTION WIN
-        </p>
-      )}
-
-      {/* Final blow breakdown */}
-      <p className="mx-auto mt-5 max-w-md rounded-xl border border-white/10 bg-black/50 px-4 py-2.5 font-mono text-[11px] text-zinc-400">
-        {finalBlowLog}
-        {outcome.secondWind && revivedName && (
-          <>
-            {" · "}
-            <span className="text-purple-300">
-              {revivedName} was resurrected by Second Wind
-            </span>
-          </>
-        )}
-      </p>
-
-      {/* Second Wind coaching prompt on a plain loss */}
-      {!won && !outcome.secondWind && (
-        <p className="mx-auto mt-3 max-w-sm text-[11px] leading-relaxed text-zinc-500">
-          💡 Hold a Chog NFT for a 20% chance of Second Wind resurrection —
-          it could have saved this duel.
-        </p>
-      )}
-      {!won && outcome.userResurrected && (
-        <p className="mx-auto mt-3 max-w-sm text-[11px] leading-relaxed text-purple-300/80">
-          Your Second Wind fired, but sudden death went against you.
-        </p>
-      )}
-      {!won && outcome.secondWind && !outcome.userResurrected && revivedName && (
-        <p className="mx-auto mt-3 max-w-sm text-[11px] leading-relaxed text-zinc-500">
-          {revivedName}&apos;s Second Wind turned the tide — grab a Chog NFT
-          to fight back next time.
-        </p>
-      )}
-
-      <div className="mt-7 flex flex-col items-center gap-3">
-        <button
-          type="button"
-          onClick={onClose}
+        <h3
           className={cn(
-            "rounded-xl bg-gradient-to-r px-8 py-3 text-sm font-extrabold tracking-wide text-white shadow-lg transition",
+            "mt-2 animate-verdict-slam text-4xl font-black tracking-wide sm:text-5xl",
             won
-              ? "from-emerald-600 to-lime-600 shadow-emerald-600/30 hover:from-emerald-500 hover:to-lime-500"
-              : "from-rose-600 to-red-600 shadow-rose-600/30 hover:from-rose-500 hover:to-red-500",
+              ? "bg-gradient-to-r from-emerald-300 via-lime-200 to-emerald-300 bg-clip-text text-transparent drop-shadow-[0_0_20px_rgba(16,185,129,0.6)]"
+              : "bg-gradient-to-r from-red-400 via-rose-300 to-red-400 bg-clip-text text-transparent drop-shadow-[0_0_20px_rgba(239,68,68,0.6)]",
           )}
         >
-          Play Again / Back to Lobby
-        </button>
-        {outcome.txHash && explorerTxUrl && (
-          <a
-            href={explorerTxUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center gap-1.5 font-mono text-[11px] text-zinc-500 underline-offset-2 transition hover:text-zinc-300 hover:underline"
-          >
-            <ExternalLink className="h-3 w-3" aria-hidden />
-            View tx {truncateAddress(outcome.txHash)}
-          </a>
+          {won ? "VICTORY" : "DEFEATED"}
+        </h3>
+
+        {won ? (
+          <p className="mt-3 text-sm text-zinc-300">
+            {challengerName} claimed{" "}
+            <span className="font-bold text-emerald-300">
+              +{formatMon(outcome.payout)} MON
+            </span>{" "}
+            in Duel #{outcome.duelId}
+          </p>
+        ) : (
+          <p className="mt-3 text-sm text-zinc-300">
+            {challengerName} lost{" "}
+            <span className="font-semibold text-zinc-200">
+              {formatMon(outcome.wager)} MON
+            </span>{" "}
+            to {creatorName} in Duel #{outcome.duelId}
+          </p>
         )}
+
+        {clutch && (
+          <p className="mx-auto mt-4 inline-block animate-pop-in rounded-full border border-orange-400/50 bg-orange-500/15 px-4 py-1.5 text-xs font-extrabold tracking-wide text-orange-200 shadow-[0_0_18px_rgba(251,146,60,0.5)]">
+            🔥 CLUTCH RESURRECTION WIN
+          </p>
+        )}
+
+        {/* Final blow breakdown */}
+        <p className="mx-auto mt-5 max-w-md rounded-xl border border-white/10 bg-black/50 px-4 py-2.5 font-mono text-[11px] text-zinc-400">
+          {finalBlowLog}
+          {outcome.secondWind && revivedName && (
+            <>
+              {" · "}
+              <span className="text-purple-300">
+                {revivedName} was resurrected by Second Wind
+              </span>
+            </>
+          )}
+        </p>
+
+        {/* Second Wind coaching prompt on a plain loss */}
+        {!won && !outcome.secondWind && (
+          <p className="mx-auto mt-3 max-w-sm text-[11px] leading-relaxed text-zinc-500">
+            💡 Hold a Chog NFT for a 20% chance of Second Wind resurrection —
+            it could have saved this duel.
+          </p>
+        )}
+        {!won && outcome.userResurrected && (
+          <p className="mx-auto mt-3 max-w-sm text-[11px] leading-relaxed text-purple-300/80">
+            Your Second Wind fired, but sudden death went against you.
+          </p>
+        )}
+        {!won && outcome.secondWind && !outcome.userResurrected && revivedName && (
+          <p className="mx-auto mt-3 max-w-sm text-[11px] leading-relaxed text-zinc-500">
+            {revivedName}&apos;s Second Wind turned the tide — grab a Chog NFT
+            to fight back next time.
+          </p>
+        )}
+
+        {/* Post-match actions — two distinct arcade buttons, never merged */}
+        <div className="mt-6 flex w-full flex-col items-center justify-center gap-4 sm:flex-row">
+          <button
+            type="button"
+            onClick={onClose}
+            className="flex w-full flex-1 items-center justify-center gap-2 rounded-xl border border-pink-400/30 bg-gradient-to-r from-pink-600 to-purple-600 px-6 py-3.5 font-bold uppercase tracking-wider text-white shadow-lg shadow-pink-600/30 transition-all hover:from-pink-500 hover:to-purple-500 sm:w-auto"
+          >
+            <Swords className="h-4 w-4" aria-hidden />
+            Play Again / Rematch
+          </button>
+          <button
+            type="button"
+            onClick={onClose}
+            className="flex w-full flex-1 items-center justify-center gap-2 rounded-xl border border-white/15 bg-black/50 px-6 py-3.5 font-bold uppercase tracking-wider text-zinc-300 transition-all hover:border-white/30 hover:bg-black/70 hover:text-white sm:w-auto"
+          >
+            Back to Lobby
+          </button>
         </div>
+        {outcome.txHash && explorerTxUrl && (
+          <div className="mt-4 flex justify-center">
+            <a
+              href={explorerTxUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 font-mono text-[11px] text-zinc-500 underline-offset-2 transition hover:text-zinc-300 hover:underline"
+            >
+              <ExternalLink className="h-3 w-3" aria-hidden />
+              View tx {truncateAddress(outcome.txHash)}
+            </a>
+          </div>
+        )}
       </div>
     </div>
   );

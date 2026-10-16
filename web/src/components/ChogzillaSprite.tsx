@@ -11,6 +11,8 @@ const DEFAULT_SHEET = "/assets/chog-slash.png";
 export const CLASS_SPRITE_SHEETS: Partial<Record<FighterClass, string>> = {
   berserker: "/assets/chog-slash.png", // Warlord Chogzilla
   samurai: "/assets/chog-samurai.png", // Chog Samurai
+  mage: "/assets/void-james.png", // Void Lord James
+  juggernaut: "/assets/keone-mage.png", // Keone Mage
 };
 
 type ChogzillaSpriteProps = {

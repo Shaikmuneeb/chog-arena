@@ -312,7 +312,7 @@ export function ProfileModal({ open, onClose }: ProfileModalProps) {
                       className="text-[10px] font-extrabold uppercase tracking-wider"
                       style={{ color: selected ? meta.secondary : "#a1a1aa" }}
                     >
-                      {meta.label}
+                      {meta.profileLabel ?? meta.label}
                     </span>
                   </button>
                 );

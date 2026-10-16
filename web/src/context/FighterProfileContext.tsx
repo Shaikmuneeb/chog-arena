@@ -71,10 +71,14 @@ export function FighterProfileProvider({
             username: typeof value.username === "string" ? value.username : "",
             avatarUrl: typeof value.avatarUrl === "string" ? value.avatarUrl : "",
             title: typeof value.title === "string" ? value.title : "",
-            /* 'ronin' was renamed to 'samurai' — migrate stored profiles. */
+            /* Class renames migrate stored profiles:
+             * 'ronin' → 'samurai', 'keone' → 'juggernaut' (Keone Mage). */
             fighterClass:
-              value.fighterClass === ("ronin" as FighterClass)
-                ? "samurai"
+              value.fighterClass === ("ronin" as FighterClass) ||
+              value.fighterClass === ("keone" as FighterClass)
+                ? value.fighterClass === ("ronin" as FighterClass)
+                  ? "samurai"
+                  : "juggernaut"
                 : isFighterClass(value.fighterClass)
                   ? value.fighterClass
                   : "berserker",
@@ -141,12 +145,18 @@ export function useFighterProfile() {
   return ctx;
 }
 
-/** First 2 letters of the username, else 2 hex chars of the address. */
+/** Word initials ("Keone Mage" → "KM"), else first 2 letters / 2 hex chars. */
 function getInitials(
   username?: string,
   address?: string | null,
 ): string {
-  if (username && username.length > 0) return username.slice(0, 2).toUpperCase();
+  if (username && username.length > 0) {
+    const words = username.trim().split(/\s+/);
+    if (words.length >= 2 && words[0] && words[1]) {
+      return (words[0][0] + words[1][0]).toUpperCase();
+    }
+    return username.slice(0, 2).toUpperCase();
+  }
   if (address) return address.slice(2, 4).toUpperCase();
   return "??";
 }

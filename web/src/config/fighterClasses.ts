@@ -10,7 +10,10 @@ export const FIGHTER_CLASSES: FighterClass[] = [
 export const FIGHTER_CLASS_META: Record<
   FighterClass,
   {
+    /** Compact badge label (HUD chips, VS cards). */
     label: string;
+    /** Optional longer display name for the profile class picker. */
+    profileLabel?: string;
     blurb: string;
     /** Main armor color. */
     primary: string;
@@ -35,15 +38,17 @@ export const FIGHTER_CLASS_META: Record<
     dark: "#3b0764",
   },
   mage: {
-    label: "Mage",
-    blurb: "Dark hooded mystic + lightning staff",
+    label: "Void James",
+    profileLabel: "Void Lord James",
+    blurb: "Close-range VOID CLAW SLAM + jagged void lightning",
     primary: "#4c1d95",
     secondary: "#22d3ee",
     dark: "#1e1b4b",
   },
   juggernaut: {
-    label: "Juggernaut",
-    blurb: "Heavy mecha-knight + plasma warhammer",
+    label: "Cyber Mage",
+    profileLabel: "Keone Mage",
+    blurb: "Holographic portals + DIGITAL SLAM lightning bursts",
     primary: "#64748b",
     secondary: "#38bdf8",
     dark: "#1e293b",

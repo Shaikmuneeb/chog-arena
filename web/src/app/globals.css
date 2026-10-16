@@ -510,3 +510,194 @@ body {
   transform-box: fill-box;
 }
 
+/* ============ Close-range melee combat (Void Lord James arena) ============ */
+
+/* Attacker lunges into the defender's face, then resets. */
+@keyframes battle-lunge-right {
+  0% {
+    transform: translateX(0);
+  }
+  35% {
+    transform: translateX(110px) scale(1.05);
+  }
+  70% {
+    transform: translateX(96px) scale(1.03);
+  }
+  100% {
+    transform: translateX(0);
+  }
+}
+
+@keyframes battle-lunge-left {
+  0% {
+    transform: translateX(0);
+  }
+  35% {
+    transform: translateX(-110px) scale(1.05);
+  }
+  70% {
+    transform: translateX(-96px) scale(1.03);
+  }
+  100% {
+    transform: translateX(0);
+  }
+}
+
+.battle-lunge-right {
+  animation: battle-lunge-right 0.7s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.battle-lunge-left {
+  animation: battle-lunge-left 0.7s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* Heavy camera shake on signature slams. */
+@keyframes arena-cam-shake {
+  0%,
+  100% {
+    transform: translate(0, 0) rotate(0deg);
+  }
+  15% {
+    transform: translate(-7px, 4px) rotate(-0.6deg);
+  }
+  30% {
+    transform: translate(6px, -5px) rotate(0.5deg);
+  }
+  45% {
+    transform: translate(-5px, -3px) rotate(-0.4deg);
+  }
+  60% {
+    transform: translate(4px, 4px) rotate(0.35deg);
+  }
+  75% {
+    transform: translate(-3px, 2px) rotate(-0.2deg);
+  }
+}
+
+.arena-cam-shake {
+  animation: arena-cam-shake 0.4s ease-in-out;
+}
+
+/* 90ms hit-stop freeze for signature impacts. */
+.arena-hit-stop * {
+  animation-play-state: paused !important;
+}
+
+/* VOID CLAW SLAM — expanding purple/gold shockwave ring. */
+@keyframes void-slam-ring {
+  0% {
+    opacity: 0.95;
+    transform: translate(-50%, -50%) scale(0.15);
+  }
+  70% {
+    opacity: 0.55;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(2.6);
+  }
+}
+
+.void-slam-ring {
+  animation: void-slam-ring 0.6s ease-out forwards;
+  background: radial-gradient(
+    circle,
+    transparent 42%,
+    rgba(168, 85, 247, 0.9) 50%,
+    rgba(251, 191, 36, 0.75) 58%,
+    transparent 68%
+  );
+}
+
+/* Jagged violet lightning cracking across the defender. */
+@keyframes void-lightning {
+  0%,
+  100% {
+    opacity: 0;
+  }
+  10% {
+    opacity: 1;
+  }
+  22% {
+    opacity: 0.2;
+  }
+  34% {
+    opacity: 0.95;
+  }
+  55% {
+    opacity: 0.35;
+  }
+  72% {
+    opacity: 0.8;
+  }
+  88% {
+    opacity: 0;
+  }
+}
+
+.void-lightning {
+  animation: void-lightning 0.55s linear forwards;
+}
+
+/* ROUND banner during announcer interludes. */
+@keyframes round-banner-pop {
+  0% {
+    opacity: 0;
+    transform: scale(1.6);
+  }
+  25% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  80% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(0.92);
+  }
+}
+
+.animate-round-banner {
+  animation: round-banner-pop 1.4s ease-out forwards;
+}
+
+/* Keone Mage — holographic portal bloom + magenta energy burst. */
+@keyframes keone-portal-bloom {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.2) rotate(0deg);
+  }
+  30% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(1.9) rotate(140deg);
+  }
+}
+
+.keone-portal-bloom {
+  animation: keone-portal-bloom 0.7s ease-out forwards;
+}
+
+@keyframes keone-burst {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.25);
+  }
+  22% {
+    opacity: 0.95;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(2.3);
+  }
+}
+
+.keone-burst {
+  animation: keone-burst 0.65s ease-out forwards;
+}
+
+

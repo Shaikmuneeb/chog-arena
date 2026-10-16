@@ -654,21 +654,26 @@ export function AcceptDuelModal({ duel, onClose, onSettled }: AcceptDuelModalPro
         </div>
       </div>
 
-      <BattleArenaModal
-        outcome={outcome}
-        creatorFighter={creatorFighter}
-        challengerFighter={challengerFighter}
-        explorerTxUrl={
-          outcome?.txHash
-            ? `${
-                activeMonadChainId === monadTestnet.id
-                  ? "https://testnet.monadexplorer.com/tx/"
-                  : "https://explorer.monad.xyz/tx/"
-              }${outcome.txHash}`
-            : undefined
-        }
-        onClose={closeOutcome}
-      />
+      {/* Battle stage mounts ONLY after the tx confirms (outcome set) —
+          no combat audio or timeline can start during wallet signing. */}
+      {outcome && (
+        <BattleArenaModal
+          outcome={outcome}
+          isOpen
+          creatorFighter={creatorFighter}
+          challengerFighter={challengerFighter}
+          explorerTxUrl={
+            outcome.txHash
+              ? `${
+                  activeMonadChainId === monadTestnet.id
+                    ? "https://testnet.monadexplorer.com/tx/"
+                    : "https://explorer.monad.xyz/tx/"
+                }${outcome.txHash}`
+              : undefined
+          }
+          onClose={closeOutcome}
+        />
+      )}
     </>
   );
 }

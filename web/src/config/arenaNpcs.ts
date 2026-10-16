@@ -15,11 +15,11 @@ export type ArenaNpc = {
 /** Distinct arena NPC challengers available in the demo lobby. */
 export const ARENA_NPCS: ArenaNpc[] = [
   {
-    key: "liquidation-bot",
+    key: "keone-mage",
     npcId: 1,
     address: "0x1111111111111111111111111111111111110001",
-    name: "Liquidation Bot",
-    title: "Ruthless Mecha",
+    name: "Keone Mage",
+    title: "10,000 TPS Grandmaster",
     fighterClass: "juggernaut",
     wager: parseEther("0.1"),
   },
@@ -33,11 +33,11 @@ export const ARENA_NPCS: ArenaNpc[] = [
     wager: parseEther("0.5"),
   },
   {
-    key: "void-sorcerer",
+    key: "void-lord-james",
     npcId: 3,
     address: "0x1111111111111111111111111111111111110003",
-    name: "Void Sorcerer",
-    title: "Dark Pool Caster",
+    name: "Void Lord James",
+    title: "Abyssal Claw Executioner",
     fighterClass: "mage",
     wager: parseEther("1"),
   },
