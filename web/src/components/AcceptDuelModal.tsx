@@ -35,7 +35,7 @@ import {
   type DuelOutcome,
   type FighterDescriptor,
 } from "./BattleArenaModal";
-import { FighterSprite } from "./FighterSprite";
+import { SheetFighter } from "./ChogzillaSprite";
 import type { ArenaDuel } from "./DuelBoard";
 
 const ZERO = zeroAddress;
@@ -734,7 +734,11 @@ function FighterCard({
         <>
           {/* Full-body fighter preview */}
           <div className="flex justify-center">
-            <FighterSprite fighterClass={fighterClass} state="idle" size={110} />
+            <SheetFighter
+              fighterClass={fighterClass}
+              state="idle"
+              size={110}
+            />
           </div>
           <div className="-mt-2 flex items-center gap-2">
             <FighterAvatarBadge address={address} size="sm" />

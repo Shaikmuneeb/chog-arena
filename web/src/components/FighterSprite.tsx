@@ -328,7 +328,7 @@ function FighterHead({
           <rect x="41" y="44" width="18" height="4" rx="1.5" fill="#fef08a" filter={`url(#glow-${fighterClass})`} />
         </g>
       );
-    case "ronin":
+    case "samurai":
       return (
         <g>
           {/* Wide kasa hat */}
@@ -414,7 +414,7 @@ function FighterWeapon({
           />
         </g>
       );
-    case "ronin":
+    case "samurai":
       /* Glowing purple katana */
       return (
         <g filter={`url(#glow-${fighterClass})`}>

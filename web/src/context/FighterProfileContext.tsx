@@ -71,9 +71,13 @@ export function FighterProfileProvider({
             username: typeof value.username === "string" ? value.username : "",
             avatarUrl: typeof value.avatarUrl === "string" ? value.avatarUrl : "",
             title: typeof value.title === "string" ? value.title : "",
-            fighterClass: isFighterClass(value.fighterClass)
-              ? value.fighterClass
-              : "berserker",
+            /* 'ronin' was renamed to 'samurai' — migrate stored profiles. */
+            fighterClass:
+              value.fighterClass === ("ronin" as FighterClass)
+                ? "samurai"
+                : isFighterClass(value.fighterClass)
+                  ? value.fighterClass
+                  : "berserker",
           };
         }
       }

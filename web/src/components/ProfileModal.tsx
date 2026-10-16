@@ -12,7 +12,7 @@ import {
   FIGHTER_CLASSES,
   FIGHTER_CLASS_META,
 } from "@/config/fighterClasses";
-import { FighterSprite } from "./FighterSprite";
+import { SheetFighter } from "./ChogzillaSprite";
 import { cn, truncateAddress } from "@/lib/utils";
 import { pushToast } from "./Toast";
 
@@ -303,7 +303,7 @@ export function ProfileModal({ open, onClose }: ProfileModalProps) {
                         : "border-white/10 bg-black/40 hover:border-white/25",
                     )}
                   >
-                    <FighterSprite
+                    <SheetFighter
                       fighterClass={cls}
                       state="idle"
                       size={88}

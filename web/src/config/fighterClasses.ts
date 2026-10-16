@@ -1,8 +1,8 @@
-export type FighterClass = "berserker" | "ronin" | "mage" | "juggernaut";
+export type FighterClass = "berserker" | "samurai" | "mage" | "juggernaut";
 
 export const FIGHTER_CLASSES: FighterClass[] = [
   "berserker",
-  "ronin",
+  "samurai",
   "mage",
   "juggernaut",
 ];
@@ -27,8 +27,8 @@ export const FIGHTER_CLASS_META: Record<
     secondary: "#fbbf24",
     dark: "#7f1d1d",
   },
-  ronin: {
-    label: "Ronin",
+  samurai: {
+    label: "Chog Samurai",
     blurb: "Cyber-monad samurai + glowing katana",
     primary: "#7c3aed",
     secondary: "#c4b5fd",

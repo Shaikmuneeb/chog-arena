@@ -29,7 +29,7 @@ import {
   type ArenaNpc,
 } from "@/config/arenaNpcs";
 import { FIGHTER_CLASS_META } from "@/config/fighterClasses";
-import { FighterSprite } from "./FighterSprite";
+import { SheetFighter } from "./ChogzillaSprite";
 import { cn, formatMon, truncateAddress } from "@/lib/utils";
 import { pushToast } from "./Toast";
 import { AcceptDuelModal } from "./AcceptDuelModal";
@@ -213,11 +213,11 @@ export function DuelBoard({ duels, onDuelSettled }: DuelBoardProps) {
                       className="hidden shrink-0 rounded-xl border border-white/10 bg-black/50 px-1 sm:block"
                       style={{ boxShadow: `0 0 14px ${classMeta.primary}33` }}
                     >
-                      <FighterSprite
-                        fighterClass={fighterClass}
-                        state="idle"
-                        size={64}
-                      />
+                    <SheetFighter
+                      fighterClass={fighterClass}
+                      state="idle"
+                      size={64}
+                    />
                     </div>
                     <div className="min-w-0">
                       <p className="flex flex-wrap items-center gap-2 text-sm font-bold text-zinc-100">

@@ -24,12 +24,12 @@ export const ARENA_NPCS: ArenaNpc[] = [
     wager: parseEther("0.1"),
   },
   {
-    key: "monad-ronin",
+    key: "chog-samurai",
     npcId: 2,
     address: "0x1111111111111111111111111111111111110002",
-    name: "Monad Ronin",
+    name: "Chog Samurai",
     title: "10,000 TPS Blade",
-    fighterClass: "ronin",
+    fighterClass: "samurai",
     wager: parseEther("0.5"),
   },
   {

@@ -5,7 +5,8 @@ import { ExternalLink, SkipForward } from "lucide-react";
 import { FighterAvatarBadge } from "@/context/FighterProfileContext";
 import type { FighterClass } from "@/config/fighterClasses";
 import { FIGHTER_CLASS_META } from "@/config/fighterClasses";
-import { FighterSprite, type SpriteState } from "./FighterSprite";
+import type { SpriteState } from "./FighterSprite";
+import { SheetFighter } from "./ChogzillaSprite";
 import { cn, formatMon, truncateAddress } from "@/lib/utils";
 
 export type DuelOutcome = {
@@ -386,51 +387,21 @@ export function BattleArenaModal({
 
             {/* ============ 2D BATTLE STAGE ============ */}
             <div className="relative h-[320px] overflow-hidden sm:h-[360px]">
-              {/* Sky */}
-              <div className="absolute inset-0 bg-gradient-to-b from-[#1b1033] via-[#2a1548] to-[#0d0a1f]" />
-              {/* Colosseum arches */}
-              <svg
-                className="absolute inset-x-0 top-6 h-28 w-full opacity-40"
-                viewBox="0 0 800 120"
-                preserveAspectRatio="none"
+              {/* Arena background art */}
+              <div
+                className="absolute inset-0 bg-cover bg-center"
+                style={{
+                  backgroundImage: "url(/assets/arena-background.jpg)",
+                }}
                 aria-hidden
-              >
-                {[0, 1, 2, 3, 4, 5, 6].map((i) => (
-                  <path
-                    key={i}
-                    d={`M${i * 115 + 10} 120 L${i * 115 + 10} 50 Q ${
-                      i * 115 + 57
-                    } 0 ${i * 115 + 104} 50 L${i * 115 + 104} 120`}
-                    fill="#120d22"
-                    stroke="#7c3aed"
-                    strokeWidth="1"
-                    opacity="0.6"
-                  />
-                ))}
-              </svg>
-              {/* Crowd silhouettes */}
-              <svg
-                className="absolute inset-x-0 top-[34%] h-16 w-full"
-                viewBox="0 0 800 60"
-                preserveAspectRatio="none"
+              />
+              {/* Dark overlay — keeps HUD text, HP bars, and runes crisp */}
+              <div
+                className="absolute inset-0 bg-gradient-to-b from-black/55 via-black/35 to-black/70"
                 aria-hidden
-              >
-                <rect x="0" y="30" width="800" height="30" fill="#0c0a1a" />
-                {Array.from({ length: 40 }).map((_, i) => (
-                  <g key={i} fill="#0c0a1a">
-                    <circle cx={i * 20 + 10} cy={24 + (i % 3) * 3} r="8" />
-                    <rect
-                      x={i * 20 + 2}
-                      y={30 + (i % 3) * 3}
-                      width="16"
-                      height="22"
-                      rx="6"
-                    />
-                  </g>
-                ))}
-              </svg>
+              />
               {/* Arena floor with glowing Monad runes */}
-              <div className="absolute inset-x-0 bottom-0 h-[46%] bg-gradient-to-b from-[#241a3d] via-[#1a1230] to-[#120d22]">
+              <div className="absolute inset-x-0 bottom-0 h-[38%] bg-gradient-to-b from-transparent via-[#241a3d]/60 to-[#120d22]/90">
                 <svg
                   className="absolute inset-0 h-full w-full"
                   viewBox="0 0 800 160"
@@ -479,7 +450,7 @@ export function BattleArenaModal({
 
               {/* Fighters */}
               <div className="absolute bottom-6 left-[10%] sm:left-[16%]">
-                <FighterSprite
+                <SheetFighter
                   fighterClass={creatorFighter.fighterClass}
                   state={sideState("creator")}
                   facing="right"
@@ -491,7 +462,7 @@ export function BattleArenaModal({
                 )}
               </div>
               <div className="absolute bottom-6 right-[10%] sm:right-[16%]">
-                <FighterSprite
+                <SheetFighter
                   fighterClass={challengerFighter.fighterClass}
                   state={sideState("challenger")}
                   facing="left"
@@ -708,28 +679,44 @@ function VerdictScreen({
   return (
     <div
       className={cn(
-        "px-6 py-10 text-center sm:px-10 sm:py-12",
-        won
-          ? "bg-gradient-to-b from-emerald-950/70 via-zinc-950 to-zinc-950"
-          : "bg-gradient-to-b from-rose-950/60 via-zinc-950 to-zinc-950",
+        "relative overflow-hidden px-6 py-10 text-center sm:px-10 sm:py-12",
+        won ? "bg-emerald-950" : "bg-zinc-950",
       )}
     >
-      {/* Winner / loser sprites flanking the verdict */}
-      <div className="mb-2 flex items-end justify-center gap-8">
-        <FighterSprite
-          fighterClass={loserDescriptor.fighterClass}
-          state="dead"
-          facing="right"
-          size={110}
-        />
-        <FighterSprite
-          fighterClass={winnerDescriptor.fighterClass}
-          state="victory"
-          facing="left"
-          size={140}
-          animKey="verdict"
-        />
-      </div>
+      {/* Arena backdrop art */}
+      <div
+        className="absolute inset-0 bg-cover bg-center opacity-40"
+        style={{ backgroundImage: "url(/assets/arena-background.jpg)" }}
+        aria-hidden
+      />
+      {/* Tinted dark overlay — verdict text stays crisp */}
+      <div
+        className={cn(
+          "absolute inset-0",
+          won
+            ? "bg-gradient-to-b from-emerald-950/85 via-zinc-950/80 to-zinc-950/95"
+            : "bg-gradient-to-b from-rose-950/80 via-zinc-950/80 to-zinc-950/95",
+        )}
+        aria-hidden
+      />
+
+      <div className="relative z-10">
+        {/* Winner / loser sprites flanking the verdict */}
+        <div className="mb-2 flex items-end justify-center gap-8">
+          <SheetFighter
+            fighterClass={loserDescriptor.fighterClass}
+            state="dead"
+            facing="right"
+            size={110}
+          />
+          <SheetFighter
+            fighterClass={winnerDescriptor.fighterClass}
+            state="victory"
+            facing="left"
+            size={140}
+            animKey="verdict"
+          />
+        </div>
 
       <h3
         className={cn(
@@ -822,6 +809,7 @@ function VerdictScreen({
             View tx {truncateAddress(outcome.txHash)}
           </a>
         )}
+        </div>
       </div>
     </div>
   );
