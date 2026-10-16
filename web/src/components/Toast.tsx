@@ -18,6 +18,30 @@ let toasts: ToastItem[] = EMPTY;
 let nextId = 1;
 const listeners = new Set<() => void>();
 
+/** Auto-dismiss delays: tx confirmations clear fast; errors linger to read. */
+const AUTO_DISMISS_MS: Record<Exclude<ToastKind, "pending">, number> = {
+  success: 2000,
+  error: 6000,
+};
+
+const autoDismissTimers = new Map<number, ReturnType<typeof setTimeout>>();
+
+function scheduleAutoDismiss(id: number, kind: ToastKind) {
+  const existing = autoDismissTimers.get(id);
+  if (existing !== undefined) {
+    clearTimeout(existing);
+    autoDismissTimers.delete(id);
+  }
+  if (kind === "pending") return; // stays until updated or dismissed
+  autoDismissTimers.set(
+    id,
+    setTimeout(() => {
+      autoDismissTimers.delete(id);
+      dismissToast(id);
+    }, AUTO_DISMISS_MS[kind]),
+  );
+}
+
 function emit() {
   for (const listener of listeners) listener();
 }
@@ -45,9 +69,7 @@ export function pushToast(input: {
   const id = nextId++;
   toasts = [...toasts, { ...input, id }];
   emit();
-  if (input.kind !== "pending") {
-    setTimeout(() => dismissToast(id), 7000);
-  }
+  scheduleAutoDismiss(id, input.kind);
   return id;
 }
 
@@ -57,9 +79,17 @@ export function updateToast(
 ) {
   toasts = toasts.map((t) => (t.id === id ? { ...t, ...patch } : t));
   emit();
+  // Pending -> success/error transitions must also start the auto-dismiss
+  // timer (this used to leave "fighters clashing…" toasts stuck forever).
+  scheduleAutoDismiss(id, patch.kind);
 }
 
 export function dismissToast(id: number) {
+  const timer = autoDismissTimers.get(id);
+  if (timer !== undefined) {
+    clearTimeout(timer);
+    autoDismissTimers.delete(id);
+  }
   toasts = toasts.filter((t) => t.id !== id);
   emit();
 }
