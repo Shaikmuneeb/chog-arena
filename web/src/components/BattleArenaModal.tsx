@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ExternalLink, SkipForward, Swords } from "lucide-react";
+import { ExternalLink, Loader2, SkipForward, Swords } from "lucide-react";
 import { FighterAvatarBadge } from "@/context/FighterProfileContext";
 import type { FighterClass } from "@/config/fighterClasses";
 import { FIGHTER_CLASS_META } from "@/config/fighterClasses";
@@ -71,6 +71,10 @@ type BattleArenaModalProps = {
   explorerTxUrl?: string;
   /** Timeline only starts when this is true AND outcome is confirmed. */
   isOpen?: boolean;
+  /** Verdict "Play Again" — re-runs the on-chain stake flow for a rematch. */
+  onPlayAgain?: () => void;
+  /** While the rematch stake is awaiting wallet/chain confirmation. */
+  onPlayAgainBusy?: boolean;
   onClose: () => void;
 };
 
@@ -86,6 +90,8 @@ export function BattleArenaModal({
   challengerFighter,
   explorerTxUrl,
   isOpen = true,
+  onPlayAgain,
+  onPlayAgainBusy = false,
   onClose,
 }: BattleArenaModalProps) {
   const [stage, setStage] = useState<Stage>("faceoff");
@@ -105,6 +111,13 @@ export function BattleArenaModal({
   const [portalFx, setPortalFx] = useState<{ id: number; target: Side } | null>(
     null,
   );
+  const [chogFx, setChogFx] = useState<{ id: number; target: Side } | null>(
+    null,
+  );
+  const [samuraiFx, setSamuraiFx] = useState<{ id: number; target: Side } | null>(
+    null,
+  );
+  const [impactFx, setImpactFx] = useState<{ id: number } | null>(null);
   const [hitStop, setHitStop] = useState(false);
   const [camShake, setCamShake] = useState(false);
   const [logLines, setLogLines] = useState<string[]>([]);
@@ -138,6 +151,12 @@ export function BattleArenaModal({
     const isKeone = (side: Side): boolean =>
       (side === "creator" ? creatorFighter : challengerFighter)
         .fighterClass === "juggernaut";
+    const isChogzilla = (side: Side): boolean =>
+      (side === "creator" ? creatorFighter : challengerFighter)
+        .fighterClass === "berserker";
+    const isSamurai = (side: Side): boolean =>
+      (side === "creator" ? creatorFighter : challengerFighter)
+        .fighterClass === "samurai";
     return {
       finalWinnerSide,
       loserSide,
@@ -145,6 +164,8 @@ export function BattleArenaModal({
       revivedWins,
       isJames,
       isKeone,
+      isChogzilla,
+      isSamurai,
     };
   }, [
     outcome,
@@ -181,6 +202,24 @@ export function BattleArenaModal({
     return () => clearTimeout(timeout);
   }, [portalFx]);
 
+  /* Clear the Chogzilla ground-pound + Samurai slash bursts. */
+  useEffect(() => {
+    if (!chogFx) return;
+    const timeout = setTimeout(() => setChogFx(null), 750);
+    return () => clearTimeout(timeout);
+  }, [chogFx]);
+  useEffect(() => {
+    if (!samuraiFx) return;
+    const timeout = setTimeout(() => setSamuraiFx(null), 800);
+    return () => clearTimeout(timeout);
+  }, [samuraiFx]);
+  /* Clear the impact starburst. */
+  useEffect(() => {
+    if (!impactFx) return;
+    const timeout = setTimeout(() => setImpactFx(null), 380);
+    return () => clearTimeout(timeout);
+  }, [impactFx]);
+
   /* ================= SINGLE ASYNC MATCH SEQUENCER =================
    * Runs the full 3-round fight sequentially. Never re-triggered by
    * round/HP state updates — only by isOpen + a fresh confirmed outcome. */
@@ -216,19 +255,24 @@ export function BattleArenaModal({
     ) {
       const target: Side = attacker === "creator" ? "challenger" : "creator";
       const crit = Boolean(opts.lethal) || Math.random() < 0.25;
-      const signature = script!.isJames(attacker) && (opts.lethal || crit);
-      const keoneSig = script!.isKeone(attacker) && (opts.lethal || crit);
+      const heavy = crit; // lethal always sets crit
+      const signature = script!.isJames(attacker) && heavy;
+      const keoneSig = script!.isKeone(attacker) && heavy;
+      const chogSig = script!.isChogzilla(attacker) && heavy;
+      const samuraiSig = script!.isSamurai(attacker) && heavy;
 
       setFx({ id: Date.now(), attacker, target, dmg, crit });
       playDashSfx();
       await wait(180);
       if (aborted()) return;
       playHitSfx();
+      /* Anime impact starburst between the fighters on every clean hit. */
+      setImpactFx({ id: Date.now() });
       if (signature) {
         playImpactSfx("slam");
         setSlamFx({ id: Date.now(), target });
         setHitStop(true);
-        setTimeout(() => setHitStop(false), 90);
+        setTimeout(() => setHitStop(false), 100);
         setCamShake(true);
         setTimeout(() => setCamShake(false), 420);
       } else if (keoneSig) {
@@ -236,11 +280,34 @@ export function BattleArenaModal({
         playImpactSfx("slam");
         setPortalFx({ id: Date.now(), target });
         setHitStop(true);
-        setTimeout(() => setHitStop(false), 90);
+        setTimeout(() => setHitStop(false), 100);
+        setCamShake(true);
+        setTimeout(() => setCamShake(false), 420);
+      } else if (chogSig) {
+        /* Warlord Chogzilla — ground-pound shockwave + magma eruption. */
+        playImpactSfx("slam");
+        setChogFx({ id: Date.now(), target });
+        setHitStop(true);
+        setTimeout(() => setHitStop(false), 100);
+        setCamShake(true);
+        setTimeout(() => setCamShake(false), 420);
+      } else if (samuraiSig) {
+        /* Chog Samurai — multi-slash afterimages + crescent plasma beam. */
+        playImpactSfx("crit");
+        setSamuraiFx({ id: Date.now(), target });
+        setHitStop(true);
+        setTimeout(() => setHitStop(false), 100);
         setCamShake(true);
         setTimeout(() => setCamShake(false), 420);
       } else {
         playImpactSfx(crit ? "crit" : "slash");
+        if (heavy) {
+          /* Every heavy blow gets arcade-authentic freeze + shake. */
+          setHitStop(true);
+          setTimeout(() => setHitStop(false), 100);
+          setCamShake(true);
+          setTimeout(() => setCamShake(false), 360);
+        }
       }
 
       if (opts.lethal || opts.suddenDeath) {
@@ -262,11 +329,19 @@ export function BattleArenaModal({
           ? `💜🔥 ${attackerName} — VOID CLAW SLAM knocks ${nameOf(target)} out!!`
           : keoneSig
             ? `🌀⚡ ${attackerName} — DIGITAL PORTAL SLAM K.O.s ${nameOf(target)}!!`
-            : `💥 ${attackerName} lands the K.O. blow!!`;
+            : chogSig
+              ? `🌋 ${attackerName} — MAGMA ERUPTION K.O.s ${nameOf(target)}!!`
+              : samuraiSig
+                ? `⚔️🌙 ${attackerName} — CRESCENT SLASH K.O.s ${nameOf(target)}!!`
+                : `💥 ${attackerName} lands the K.O. blow!!`;
       } else if (signature) {
         line = `💜🔥 ${attackerName} — VOID CLAW SLAM for ${dmg} DMG!!`;
       } else if (keoneSig) {
         line = `🌀⚡ ${attackerName} — DIGITAL PORTAL SLAM for ${dmg} DMG!!`;
+      } else if (chogSig) {
+        line = `🌋 ${attackerName} — GROUND POUND MAGMA ERUPTION for ${dmg} DMG!!`;
+      } else if (samuraiSig) {
+        line = `⚔️🌙 ${attackerName} — CRESCENT MULTI-SLASH for ${dmg} DMG!!`;
       } else if (crit) {
         line = `💥 ${attackerName} CRITS for ${dmg} DMG!`;
       } else {
@@ -343,6 +418,9 @@ export function BattleArenaModal({
       setBanner(null);
       setSlamFx(null);
       setPortalFx(null);
+      setChogFx(null);
+      setSamuraiFx(null);
+      setImpactFx(null);
       setFinalBlowLog("");
       setTimer(99);
       setLogLines([
@@ -431,6 +509,9 @@ export function BattleArenaModal({
     setFx(null);
     setSlamFx(null);
     setPortalFx(null);
+    setChogFx(null);
+    setSamuraiFx(null);
+    setImpactFx(null);
     setStage("verdict");
   }
 
@@ -485,6 +566,8 @@ export function BattleArenaModal({
             revivedName={revivedName}
             finalBlowLog={finalBlowLog}
             explorerTxUrl={explorerTxUrl}
+            onPlayAgain={onPlayAgain}
+            onPlayAgainBusy={onPlayAgainBusy}
             onClose={onClose}
           />
         ) : (
@@ -620,7 +703,7 @@ export function BattleArenaModal({
                 )}
               </div>
 
-              {/* VOID CLAW SLAM — shockwave ring + jagged lightning on defender */}
+              {/* VOID CLAW SLAM — shockwave ring + jagged lightning + void runes */}
               {slamFx && (
                 <>
                   <div
@@ -633,6 +716,22 @@ export function BattleArenaModal({
                     aria-hidden
                   />
                   <VoidLightning key={`bolt-${slamFx.id}`} side={slamFx.target} />
+                  {/* Floating void runes */}
+                  {["ᚠ", "ᚢ", "ᚦ", "ᚨ"].map((glyph, i) => (
+                    <span
+                      key={`${slamFx.id}-${glyph}`}
+                      className="rune-float pointer-events-none absolute z-[26] text-xl font-bold text-purple-300"
+                      style={{
+                        left: `calc(${slamFx.target === "creator" ? "22%" : "78%"} + ${(i - 1.5) * 30}px)`,
+                        top: "62%",
+                        animationDelay: `${i * 120}ms`,
+                        textShadow: "0 0 10px rgba(168,85,247,0.9)",
+                      }}
+                      aria-hidden
+                    >
+                      {glyph}
+                    </span>
+                  ))}
                 </>
               )}
 
@@ -640,6 +739,19 @@ export function BattleArenaModal({
               {portalFx && (
                 <KeonePortalFx key={`portal-${portalFx.id}`} side={portalFx.target} />
               )}
+
+              {/* Warlord Chogzilla — ground-pound + magma eruption */}
+              {chogFx && (
+                <ChogzillaSlamFx key={`chog-${chogFx.id}`} side={chogFx.target} />
+              )}
+
+              {/* Chog Samurai — multi-slash afterimages + crescent plasma beam */}
+              {samuraiFx && (
+                <SamuraiSlashFx key={`sam-${samuraiFx.id}`} side={samuraiFx.target} />
+              )}
+
+              {/* Anime impact starburst between the fighters */}
+              {impactFx && <ImpactStarburst key={`burst-${impactFx.id}`} />}
 
               {/* Banner overlays: ROUND N // FIGHT!, K.O., SUDDEN DEATH */}
               {banner && (
@@ -819,7 +931,7 @@ function DamageNumber({ fx }: { fx: Fx }) {
   return (
     <p
       className={cn(
-        "animate-damage-float pointer-events-none absolute -top-3 left-1/2 z-10 -translate-x-1/2 whitespace-nowrap font-black",
+        "animate-damage-arc pointer-events-none absolute -top-3 left-1/2 z-10 whitespace-nowrap font-black",
         fx.crit
           ? "text-lg text-amber-300 drop-shadow-[0_0_10px_rgba(251,191,36,0.9)]"
           : "text-base text-red-300 drop-shadow-[0_0_8px_rgba(239,68,68,0.9)]",
@@ -827,6 +939,122 @@ function DamageNumber({ fx }: { fx: Fx }) {
     >
       -{fx.dmg} HP{fx.crit ? " 💥 CRIT!" : ""}
     </p>
+  );
+}
+
+/** Anime impact starburst between the two fighters on every clean strike. */
+function ImpactStarburst() {
+  return (
+    <div
+      className="pointer-events-none absolute left-1/2 top-[52%] z-[27] -translate-x-1/2 -translate-y-1/2"
+      aria-hidden
+    >
+      <span className="impact-starburst block text-4xl leading-none">💥</span>
+    </div>
+  );
+}
+
+/** Warlord Chogzilla — ground-pound shockwave, blade trail, magma particles. */
+function ChogzillaSlamFx({ side }: { side: Side }) {
+  const center = side === "creator" ? "22%" : "78%";
+  return (
+    <div className="pointer-events-none absolute inset-0 z-[25]" aria-hidden>
+      {/* Ground-pound shockwave ring */}
+      <div
+        className="ground-pound-ring absolute h-44 w-44 rounded-full"
+        style={{
+          left: center,
+          top: "58%",
+          background:
+            "radial-gradient(circle, transparent 42%, rgba(251,146,60,0.95) 50%, rgba(239,68,68,0.75) 58%, transparent 70%)",
+          boxShadow: "0 0 44px rgba(249,115,22,0.75)",
+        }}
+      />
+      {/* Burning orange blade trail */}
+      <div
+        className="blade-trail absolute h-14 w-56"
+        style={{
+          left: center,
+          top: "40%",
+          background:
+            "linear-gradient(105deg, transparent 18%, rgba(251,146,60,0.9) 45%, rgba(239,68,68,0.95) 55%, transparent 82%)",
+          borderRadius: "9999px",
+          filter: "blur(2px)",
+        }}
+      />
+      {/* Explosive magma eruption particles */}
+      {Array.from({ length: 8 }).map((_, i) => (
+        <span
+          key={i}
+          className="magma-particle absolute h-2 w-2 rounded-full"
+          style={{
+            left: `calc(${center} + ${((i % 4) - 1.5) * 26}px)`,
+            bottom: "20%",
+            background: i % 2 ? "#f97316" : "#ef4444",
+            boxShadow: "0 0 8px rgba(249,115,22,0.95)",
+            animationDelay: `${i * 60}ms`,
+          }}
+        />
+      ))}
+    </div>
+  );
+}
+
+/** Chog Samurai — multi-slash streaks, crescent plasma beam, sparks. */
+function SamuraiSlashFx({ side }: { side: Side }) {
+  const center = side === "creator" ? "22%" : "78%";
+  return (
+    <div className="pointer-events-none absolute inset-0 z-[25]" aria-hidden>
+      {/* High-speed multi-slash afterimage streaks */}
+      {[0, 1, 2].map((i) => (
+        <div
+          key={i}
+          className="slash-streak absolute h-1.5 w-44"
+          style={{
+            left: center,
+            top: `calc(46% + ${i * 14}px)`,
+            background:
+              "linear-gradient(90deg, transparent, #e9d5ff 40%, #a855f7 62%, transparent)",
+            transform: `rotate(${-18 + i * 10}deg)`,
+            animationDelay: `${i * 90}ms`,
+            boxShadow: "0 0 14px rgba(168,85,247,0.95)",
+          }}
+        />
+      ))}
+      {/* Crescent purple plasma beam */}
+      <svg
+        className="crescent-beam absolute h-40 w-64"
+        style={{ left: center, top: "36%", transform: "translateX(-50%)" }}
+        viewBox="0 0 200 120"
+        aria-hidden
+      >
+        <defs>
+          <linearGradient id="crescentGrad" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0%" stopColor="#7c3aed" />
+            <stop offset="50%" stopColor="#f0abfc" />
+            <stop offset="100%" stopColor="#a855f7" />
+          </linearGradient>
+        </defs>
+        <path
+          d="M10 100 Q 100 0 190 100 Q 100 40 10 100 Z"
+          fill="url(#crescentGrad)"
+          opacity="0.9"
+        />
+      </svg>
+      {/* Spark particles */}
+      {Array.from({ length: 6 }).map((_, i) => (
+        <span
+          key={i}
+          className="spark-particle absolute h-1.5 w-1.5 rounded-full bg-yellow-200"
+          style={{
+            left: `calc(${center} + ${((i % 3) - 1) * 34}px)`,
+            top: `calc(50% + ${(i % 2 ? -1 : 1) * 18}px)`,
+            boxShadow: "0 0 8px #fde047",
+            animationDelay: `${i * 50}ms`,
+          }}
+        />
+      ))}
+    </div>
   );
 }
 
@@ -934,6 +1162,41 @@ function KeonePortalFx({ side }: { side: Side }) {
           opacity="0.85"
         />
       </svg>
+      {/* Holographic data-pane barrage */}
+      {[0, 1, 2].map((i) => (
+        <div
+          key={i}
+          className="data-pane absolute h-8 w-11 rounded border border-cyan-400/60 bg-cyan-400/10"
+          style={{
+            left: `calc(${center} + ${(i - 1) * 48}px)`,
+            top: `${26 + i * 11}%`,
+            animationDelay: `${i * 80}ms`,
+          }}
+        />
+      ))}
+      {/* Purple laser beam */}
+      <div
+        className="laser-beam absolute h-2.5 w-72"
+        style={{
+          left: center,
+          top: "52%",
+          background:
+            "linear-gradient(90deg, transparent, #d946ef 28%, #f0abfc 50%, #a855f7 72%, transparent)",
+          boxShadow: "0 0 20px rgba(217,70,239,0.95)",
+        }}
+      />
+      {/* Digital glitch distortion strips */}
+      {[0, 1].map((i) => (
+        <div
+          key={`glitch-${i}`}
+          className="glitch-strip absolute h-3 w-40 bg-gradient-to-r from-transparent via-fuchsia-400/55 to-transparent"
+          style={{
+            left: center,
+            top: `${42 + i * 13}%`,
+            animationDelay: `${i * 70}ms`,
+          }}
+        />
+      ))}
     </div>
   );
 }
@@ -949,6 +1212,8 @@ function VerdictScreen({
   revivedName,
   finalBlowLog,
   explorerTxUrl,
+  onPlayAgain,
+  onPlayAgainBusy = false,
   onClose,
 }: {
   outcome: DuelOutcome;
@@ -959,6 +1224,8 @@ function VerdictScreen({
   revivedName: string | null;
   finalBlowLog: string;
   explorerTxUrl?: string;
+  onPlayAgain?: () => void;
+  onPlayAgainBusy?: boolean;
   onClose: () => void;
 }) {
   const won = outcome.userWon;
@@ -1079,11 +1346,21 @@ function VerdictScreen({
         <div className="mt-6 flex w-full flex-col items-center justify-center gap-4 sm:flex-row">
           <button
             type="button"
-            onClick={onClose}
-            className="flex w-full flex-1 items-center justify-center gap-2 rounded-xl border border-pink-400/30 bg-gradient-to-r from-pink-600 to-purple-600 px-6 py-3.5 font-bold uppercase tracking-wider text-white shadow-lg shadow-pink-600/30 transition-all hover:from-pink-500 hover:to-purple-500 sm:w-auto"
+            onClick={onPlayAgain ?? onClose}
+            disabled={onPlayAgainBusy}
+            className="flex w-full flex-1 items-center justify-center gap-2 rounded-xl border border-pink-400/30 bg-gradient-to-r from-pink-600 to-purple-600 px-6 py-3.5 font-bold uppercase tracking-wider text-white shadow-lg shadow-pink-600/30 transition-all hover:from-pink-500 hover:to-purple-500 disabled:cursor-wait disabled:opacity-60 sm:w-auto"
           >
-            <Swords className="h-4 w-4" aria-hidden />
-            Play Again / Rematch
+            {onPlayAgainBusy ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+                Confirm stake in wallet…
+              </>
+            ) : (
+              <>
+                <Swords className="h-4 w-4" aria-hidden />
+                Play Again / Rematch
+              </>
+            )}
           </button>
           <button
             type="button"

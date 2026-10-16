@@ -55,6 +55,7 @@ export function AcceptDuelModal({ duel, onClose, onSettled }: AcceptDuelModalPro
   const [phase, setPhase] = useState<"matchup" | "settling">("matchup");
   const [outcome, setOutcome] = useState<DuelOutcome | null>(null);
   const [showConnectors, setShowConnectors] = useState(false);
+  const [playAgainBusy, setPlayAgainBusy] = useState(false);
   const toastIdRef = useRef<number | null>(null);
   const demoSettleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -445,6 +446,42 @@ export function AcceptDuelModal({ duel, onClose, onSettled }: AcceptDuelModalPro
     onClose();
   }
 
+  /* "Play Again" from the verdict: re-runs the exact same on-chain stake
+   * flow (wallet prompt → receipt → cinematic rematch). NPC duels re-stake;
+   * settled PvP duels can't be re-opened, so they return to the lobby. */
+  async function playAgain() {
+    if (!duel) return;
+    if (!duel.npc) {
+      closeOutcome();
+      return;
+    }
+    if (!isConnected || !address) {
+      pushToast({ kind: "error", message: "Connect a wallet to fight" });
+      return;
+    }
+    if (chainId !== monad.id && chainId !== monadTestnet.id) {
+      pushToast({
+        kind: "error",
+        message: "Switch to the Monad network to enter the arena",
+      });
+      return;
+    }
+    /* Dismiss the finished battle, return to the VS screen, re-stake. */
+    setOutcome(null);
+    setPhase("matchup");
+    reset();
+    toastIdRef.current = pushToast({
+      kind: "pending",
+      message: "Confirm the rematch stake in your wallet…",
+    });
+    setPlayAgainBusy(true);
+    try {
+      await acceptNpc();
+    } finally {
+      setPlayAgainBusy(false);
+    }
+  }
+
   if (!duel) return null;
 
   // Both Monad Mainnet (143) and Monad Testnet (10143) are valid; anything
@@ -662,6 +699,8 @@ export function AcceptDuelModal({ duel, onClose, onSettled }: AcceptDuelModalPro
           isOpen
           creatorFighter={creatorFighter}
           challengerFighter={challengerFighter}
+          onPlayAgain={playAgain}
+          onPlayAgainBusy={playAgainBusy || busy}
           explorerTxUrl={
             outcome.txHash
               ? `${

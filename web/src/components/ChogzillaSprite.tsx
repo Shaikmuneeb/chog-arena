@@ -142,7 +142,7 @@ export function ChogzillaSprite({
     state === "idle"
       ? "sprite-idle"
       : state === "attack"
-        ? "sprite-dash"
+        ? "chog-combo-attack"
         : state === "hit"
           ? "sprite-recoil"
           : state === "dead"
