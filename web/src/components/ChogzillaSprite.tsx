@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type CSSProperties } from "react";
 import { cn } from "@/lib/utils";
 import type { FighterClass } from "@/config/fighterClasses";
 import { getFighterMoveSet, type SpecialMove } from "@/data/fighterMoves";
@@ -50,9 +50,12 @@ const FRAME_COUNT = 4;
 const processedCache = new Map<string, Promise<HTMLCanvasElement>>();
 
 /**
- * Load a sprite sheet once: crop the bottom 12% caption strip, then
- * chroma-key the dark charcoal background (r<38 && g<38 && b<45) to alpha 0.
- * Results are cached per source URL for every component instance.
+ * Load a sprite sheet once: crop the bottom 12% caption strip, then remove
+ * the backdrop via a border-connected flood fill (each sheet has its own
+ * charcoal or pure-black background). Only pixels CONNECTED to the border
+ * and matching the sampled corner color are keyed out — dark interior
+ * details (armor, shadows, black outfits) are preserved instead of being
+ * punched full of holes. Results are cached per source URL.
  */
 function getProcessedImage(src: string): Promise<HTMLCanvasElement> {
   const cached = processedCache.get(src);
@@ -74,11 +77,64 @@ function getProcessedImage(src: string): Promise<HTMLCanvasElement> {
 
         const data = ctx.getImageData(0, 0, off.width, off.height);
         const px = data.data;
-        for (let i = 0; i < px.length; i += 4) {
-          if (px[i] < 38 && px[i + 1] < 38 && px[i + 2] < 45) {
-            px[i + 3] = 0;
-          }
+        const W = off.width;
+        const H = off.height;
+
+        /* Sample the backdrop from the four corners (average). */
+        const cornerIdx = [
+          0,
+          (W - 1) * 4,
+          (H - 1) * W * 4,
+          ((H - 1) * W + (W - 1)) * 4,
+        ];
+        let br = 0;
+        let bg = 0;
+        let bb = 0;
+        for (const i of cornerIdx) {
+          br += px[i];
+          bg += px[i + 1];
+          bb += px[i + 2];
         }
+        br = Math.round(br / 4);
+        bg = Math.round(bg / 4);
+        bb = Math.round(bb / 4);
+        const TOL_SQ = 42 * 42;
+
+        const matchesBg = (i: number) => {
+          const dr = px[i] - br;
+          const dg = px[i + 1] - bg;
+          const db = px[i + 2] - bb;
+          return dr * dr + dg * dg + db * db <= TOL_SQ;
+        };
+
+        /* BFS flood fill from every border pixel that matches the backdrop. */
+        const visited = new Uint8Array(W * H);
+        const stack: number[] = [];
+        const push = (idx: number) => {
+          if (visited[idx]) return;
+          if (!matchesBg(idx * 4)) return;
+          visited[idx] = 1;
+          stack.push(idx);
+        };
+        for (let x = 0; x < W; x += 1) {
+          push(x);
+          push((H - 1) * W + x);
+        }
+        for (let y = 0; y < H; y += 1) {
+          push(y * W);
+          push(y * W + W - 1);
+        }
+        while (stack.length > 0) {
+          const idx = stack.pop()!;
+          px[idx * 4 + 3] = 0;
+          const x = idx % W;
+          const y = (idx / W) | 0;
+          if (x > 0) push(idx - 1);
+          if (x < W - 1) push(idx + 1);
+          if (y > 0) push(idx - W);
+          if (y < H - 1) push(idx + W);
+        }
+
         ctx.putImageData(data, 0, 0);
         resolve(off);
       } catch (error) {
@@ -110,11 +166,15 @@ export function ChogzillaSprite({
   className,
 }: ChogzillaSpriteProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const ghostRef = useRef<HTMLCanvasElement | null>(null);
+  const lastFrameRef = useRef<number | null>(null);
   const signatureMove: SpecialMove | null = fighterClass
     ? getFighterMoveSet(fighterClass).signatureMove
     : null;
 
-  /* Draw the matching frame from the processed sheet. */
+  /* Draw the matching frame from the processed sheet. On pose changes the
+   * previous frame is held on the ghost canvas and dissolved into the new
+   * one (Web Animations API) so state swaps never hard-snap. */
   useEffect(() => {
     let cancelled = false;
     getProcessedImage(spriteSheetSrc)
@@ -123,6 +183,8 @@ export function ChogzillaSprite({
         const frameW = Math.floor(processed.width / FRAME_COUNT);
         const frameH = processed.height;
         const canvas = canvasRef.current;
+        const next = FRAME[state];
+        const prev = lastFrameRef.current;
         canvas.width = frameW;
         canvas.height = frameH;
         const ctx = canvas.getContext("2d");
@@ -130,7 +192,7 @@ export function ChogzillaSprite({
         ctx.clearRect(0, 0, frameW, frameH);
         ctx.drawImage(
           processed,
-          FRAME[state] * frameW,
+          next * frameW,
           0,
           frameW,
           frameH,
@@ -139,6 +201,37 @@ export function ChogzillaSprite({
           frameW,
           frameH,
         );
+
+        /* Pose crossfade: ghost holds the outgoing pose and dissolves away
+         * behind the new pose. The live canvas stays at full opacity —
+         * only the ghost animates — so the fighter is never translucent. */
+        if (prev !== null && prev !== next && ghostRef.current) {
+          const ghost = ghostRef.current;
+          ghost.getAnimations().forEach((a) => a.cancel());
+          ghost.width = frameW;
+          ghost.height = frameH;
+          const gctx = ghost.getContext("2d");
+          if (gctx) {
+            gctx.clearRect(0, 0, frameW, frameH);
+            gctx.drawImage(
+              processed,
+              prev * frameW,
+              0,
+              frameW,
+              frameH,
+              0,
+              0,
+              frameW,
+              frameH,
+            );
+            ghost.animate([{ opacity: 1 }, { opacity: 0 }], {
+              duration: 170,
+              easing: "ease-out",
+              fill: "forwards",
+            });
+          }
+        }
+        lastFrameRef.current = next;
       })
       .catch(() => {
         /* asset missing — leave canvas blank */
@@ -177,9 +270,9 @@ export function ChogzillaSprite({
 
   return (
     <div
-      key={`${state}-${animKey ?? "static"}`}
+      key={animKey ?? "static"}
       className={cn(
-        "sprite-pixelated relative inline-block select-none",
+        "sprite-pixelated relative inline-block select-none opacity-100",
         facing === "left" && "sprite-mirror",
         className,
       )}
@@ -197,6 +290,17 @@ export function ChogzillaSprite({
             "radial-gradient(circle at 50% 65%, rgba(249,115,22,0.5), rgba(168,85,247,0.35) 55%, transparent 75%)",
         }}
       />
+      {/* Subtle white/purple rim backlight — a separate layer BEHIND the
+       * sprite so fighters read cleanly against the dark arena floor. It
+       * never filters or blends the sprite pixels themselves. */}
+      <div
+        className="pointer-events-none absolute inset-x-[-10%] inset-y-[8%] rounded-[45%] blur-xl"
+        style={{
+          background:
+            "radial-gradient(circle at 50% 42%, rgba(255,255,255,0.14), rgba(196,181,253,0.10) 55%, transparent 75%)",
+        }}
+        aria-hidden
+      />
       {/* Purple/gold lightning surge for Second Wind / Victory */}
       {(state === "secondWind" || state === "victory") && (
         <div
@@ -204,22 +308,39 @@ export function ChogzillaSprite({
           aria-hidden
         />
       )}
-      {/* Red/white damage flash on hit & stagger */}
+      {/* Red damage flash on hit & stagger (plain opacity fade, no blend
+       * modes — keeps the sprite fully solid underneath) */}
       {(state === "hit" || state === "stagger") && (
         <div
-          className="sprite-flash pointer-events-none absolute inset-0 z-20 bg-red-500/60 mix-blend-screen"
+          className="sprite-flash pointer-events-none absolute inset-0 z-20 bg-red-500/45"
           aria-hidden
         />
       )}
 
-      <canvas
-        ref={canvasRef}
-        className={cn("sprite-pixelated relative z-10", motionClass)}
-        style={{ height: size, width: "auto", imageRendering: "pixelated" }}
-      />
+      {/* Motion wrapper: carries the 3-step physics curves (wind-up →
+       * rush & strike → impact & recoil) as smooth CSS transforms +
+       * drop-shadow glow, while the canvases stay crisp pixel art. */}
+      <div className={cn("relative will-change-transform", motionClass)}>
+        {/* Ghost canvas: outgoing pose dissolving away on state changes */}
+        <canvas
+          ref={ghostRef}
+          className="sprite-pixelated pointer-events-none absolute left-0 top-0 z-0"
+          style={{
+            height: size,
+            width: "auto",
+            imageRendering: "pixelated",
+            opacity: 0,
+          }}
+        />
+        <canvas
+          ref={canvasRef}
+          className="sprite-pixelated relative z-10"
+          style={{ height: size, width: "auto", imageRendering: "pixelated" }}
+        />
+      </div>
 
-      {/* Moveset-driven attack VFX: particles + floating signature-move name */}
-      {state === "attack" && signatureMove && (
+      {/* Moveset-driven attack VFX: layered particles + signature-move tag */}
+      {(state === "attack" || state === "dashOut") && signatureMove && (
         <>
           <MoveVfxParticles
             key={`vfx-${animKey ?? "static"}`}
@@ -228,6 +349,7 @@ export function ChogzillaSprite({
           <span
             key={`mv-${animKey ?? "static"}`}
             className="animate-damage-float pointer-events-none absolute -top-1 left-1/2 z-20 -translate-x-1/2 whitespace-nowrap text-[10px] font-black uppercase tracking-wider text-fuchsia-200 drop-shadow-[0_0_8px_rgba(232,121,249,0.9)]"
+            style={{ animationDuration: "0.42s" }}
             aria-hidden
           >
             {signatureMove.name}
@@ -246,8 +368,13 @@ export function ChogzillaSprite({
 /* ------------------------------------------------- moveset VFX particles */
 
 /**
- * Lightweight attack particles styled per SpecialMove.vfxType from
- * fighterMoves.ts — slash streaks, magma embers, laser beams, void rings.
+ * Layered, soft special-move FX per SpecialMove.vfxType from fighterMoves.ts:
+ *   magma     — Warlord Chogzilla: floating ember particles + heat bloom
+ *   slash     — Chog Samurai: plasma slash lines (white core, fuchsia bloom)
+ *   laser     — Keone Mage: soft neon electrical arcs around a charged core
+ *   void_rift — Void Lord James: dark void ripples + swirling dark core
+ * All layers stay crisp against the pixel sprite and finish within the
+ * attack+dashOut particle window (~360ms of un-paused time).
  */
 function MoveVfxParticles({
   vfxType,
@@ -260,78 +387,191 @@ function MoveVfxParticles({
         {[0, 1, 2].map((i) => (
           <span
             key={i}
-            className="slash-streak absolute h-0.5 w-16 bg-gradient-to-r from-transparent via-purple-300 to-transparent"
+            className="slash-streak absolute h-0.5 w-16 rounded-full"
             style={{
-              left: "55%",
-              top: `${34 + i * 14}%`,
-              transform: `rotate(${-22 + i * 12}deg)`,
-              animationDelay: `${i * 80}ms`,
-              boxShadow: "0 0 8px rgba(168,85,247,0.9)",
+              left: "54%",
+              top: `${32 + i * 15}%`,
+              transform: `rotate(${-24 + i * 13}deg)`,
+              animationDelay: `${i * 50}ms`,
+              background:
+                "linear-gradient(90deg, transparent, rgba(240,171,252,0.95) 30%, #fff 50%, rgba(168,85,247,0.95) 72%, transparent)",
+              boxShadow:
+                "0 0 10px rgba(232,121,249,0.9), 0 0 22px rgba(168,85,247,0.55)",
+              filter: "drop-shadow(0 0 4px rgba(255,255,255,0.8))",
             }}
           />
         ))}
+        <svg
+          className="absolute inset-0 h-full w-full"
+          viewBox="0 0 100 100"
+          preserveAspectRatio="none"
+          aria-hidden
+        >
+          {["M 40 74 Q 66 60 92 34", "M 36 46 Q 64 52 90 70"].map((d, i) => (
+            <g key={d}>
+              <path
+                d={d}
+                fill="none"
+                stroke="rgba(232,121,249,0.75)"
+                strokeWidth="3.2"
+                strokeLinecap="round"
+                pathLength={120}
+                strokeDasharray={120}
+                className="plasma-arc-sweep"
+                style={{
+                  animationDelay: `${i * 60}ms`,
+                  filter: "drop-shadow(0 0 5px rgba(232,121,249,0.95))",
+                }}
+              />
+              <path
+                d={d}
+                fill="none"
+                stroke="rgba(255,255,255,0.95)"
+                strokeWidth="1"
+                strokeLinecap="round"
+                pathLength={120}
+                strokeDasharray={120}
+                className="plasma-arc-sweep"
+                style={{ animationDelay: `${i * 60 + 30}ms` }}
+              />
+            </g>
+          ))}
+        </svg>
       </div>
     );
   }
   if (vfxType === "magma") {
     return (
       <div className="pointer-events-none absolute inset-0 z-20" aria-hidden>
-        {Array.from({ length: 5 }).map((_, i) => (
-          <span
-            key={i}
-            className="magma-particle absolute h-1.5 w-1.5 rounded-full"
-            style={{
-              left: `${48 + (i % 3) * 10}%`,
-              bottom: "12%",
-              background: i % 2 ? "#f97316" : "#ef4444",
-              boxShadow: "0 0 6px rgba(249,115,22,0.95)",
-              animationDelay: `${i * 60}ms`,
-            }}
-          />
-        ))}
+        {/* Heat bloom at the feet */}
+        <div
+          className="ember-heat absolute bottom-[6%] left-1/2 h-10 w-24 -translate-x-1/2 rounded-full"
+          style={{
+            background:
+              "radial-gradient(ellipse at 50% 80%, rgba(249,115,22,0.75), rgba(239,68,68,0.35) 55%, transparent 78%)",
+            filter: "blur(6px)",
+          }}
+        />
+        {/* Floating embers with per-particle drift */}
+        {Array.from({ length: 9 }).map((_, i) => {
+          const drift = (i % 2 === 0 ? 1 : -1) * (6 + (i % 3) * 5);
+          const d = 3 + (i % 3) * 2.5;
+          return (
+            <span
+              key={i}
+              className="ember-particle absolute rounded-full"
+              style={
+                {
+                  left: `${44 + ((i * 7) % 24)}%`,
+                  bottom: `${8 + ((i * 5) % 18)}%`,
+                  width: d,
+                  height: d,
+                  background:
+                    "radial-gradient(circle at 35% 35%, #fde68a, #f97316 55%, rgba(239,68,68,0.6) 78%, transparent 100%)",
+                  boxShadow: "0 0 7px rgba(249,115,22,0.95)",
+                  "--drift": `${drift}px`,
+                  "--rise": `${-36 - (i % 4) * 8}px`,
+                  "--dur": "0.28s",
+                  animationDelay: `${i * 10}ms`,
+                } as CSSProperties
+              }
+            />
+          );
+        })}
       </div>
     );
   }
   if (vfxType === "laser") {
+    const bolts = ["M 44 22 L 54 38 L 46 46 L 58 64", "M 48 74 L 56 60 L 50 52 L 62 34"];
     return (
       <div className="pointer-events-none absolute inset-0 z-20" aria-hidden>
-        {[0, 1].map((i) => (
-          <span
-            key={i}
-            className="laser-beam absolute h-1 w-20"
-            style={{
-              left: "58%",
-              top: `${42 + i * 12}%`,
-              background:
-                "linear-gradient(90deg, transparent, #22d3ee 40%, #e879f9 70%, transparent)",
-              boxShadow: "0 0 10px rgba(34,211,238,0.9)",
-              animationDelay: `${i * 90}ms`,
-            }}
-          />
-        ))}
+        {/* Charged core orb */}
+        <div
+          className="arc-orb-pop absolute left-1/2 top-1/2 h-16 w-16 rounded-full"
+          style={{
+            background:
+              "radial-gradient(circle, rgba(255,255,255,0.95) 0%, rgba(34,211,238,0.8) 32%, rgba(232,121,249,0.5) 60%, transparent 78%)",
+            filter: "blur(2px)",
+          }}
+        />
+        {/* Soft neon electrical arcs — cyan outer glow, white hot core */}
+        <svg
+          className="absolute inset-0 h-full w-full"
+          viewBox="0 0 100 100"
+          preserveAspectRatio="none"
+          aria-hidden
+        >
+          {bolts.map((d, i) => (
+            <g key={d}>
+              <path
+                d={d}
+                fill="none"
+                stroke="rgba(103,232,249,0.85)"
+                strokeWidth="2.4"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                pathLength={60}
+                strokeDasharray={60}
+                className="neon-crackle"
+                style={{
+                  animationDelay: `${i * 50}ms`,
+                  filter: "drop-shadow(0 0 6px rgba(34,211,238,0.95))",
+                }}
+              />
+              <path
+                d={d}
+                fill="none"
+                stroke="rgba(255,255,255,0.9)"
+                strokeWidth="0.9"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                pathLength={60}
+                strokeDasharray={60}
+                className="neon-crackle"
+                style={{ animationDelay: `${i * 50 + 30}ms` }}
+              />
+            </g>
+          ))}
+        </svg>
       </div>
     );
   }
-  /* void_rift */
+  /* void_rift — dark void ripples with violet rims + swirling dark core */
   return (
     <div className="pointer-events-none absolute inset-0 z-20" aria-hidden>
       <div
-        className="void-slam-ring absolute h-14 w-14 rounded-full"
+        className="void-swirl absolute left-1/2 top-1/2 h-20 w-20 rounded-full"
         style={{
-          left: "52%",
-          top: "40%",
           background:
-            "radial-gradient(circle, transparent 40%, rgba(168,85,247,0.9) 55%, rgba(88,28,135,0.6) 70%, transparent 80%)",
+            "conic-gradient(from 0deg, rgba(88,28,135,0.9), rgba(10,5,20,0.95) 40%, rgba(168,85,247,0.7) 70%, rgba(88,28,135,0.9))",
+          filter: "blur(3px)",
         }}
       />
+      {[0, 1, 2].map((i) => (
+        <span
+          key={i}
+          className="void-ripple absolute left-1/2 top-1/2 rounded-full"
+          style={{
+            width: 44 + i * 22,
+            height: 44 + i * 22,
+            border: "2px solid rgba(168,85,247,0.85)",
+            background:
+              "radial-gradient(circle, rgba(6,3,12,0.85) 0%, rgba(6,3,12,0.55) 55%, transparent 75%)",
+            boxShadow:
+              "0 0 14px rgba(168,85,247,0.6), inset 0 0 12px rgba(168,85,247,0.5)",
+            animationDelay: `${i * 60}ms`,
+          }}
+        />
+      ))}
       {["ᚠ", "ᚦ"].map((glyph, i) => (
         <span
           key={glyph}
           className="rune-float absolute text-xs font-bold text-purple-300"
           style={{
             left: `${58 + i * 12}%`,
-            top: "30%",
-            animationDelay: `${i * 110}ms`,
+            top: "28%",
+            animationDelay: `${i * 60}ms`,
+            animationDuration: "0.24s",
             textShadow: "0 0 6px rgba(168,85,247,0.9)",
           }}
         >

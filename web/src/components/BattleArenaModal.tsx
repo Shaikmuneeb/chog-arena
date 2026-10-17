@@ -60,8 +60,12 @@ const CLASS_SIZE_SCALE: Record<FighterClass, number> = {
   juggernaut: 1.1,
 };
 
-function stageSize(f: FighterDescriptor): number {
-  return Math.round(225 * (CLASS_SIZE_SCALE[f.fighterClass] ?? 1));
+function stageSize(f: FighterDescriptor, narrow = false): number {
+  /* Narrow viewports (< 640px) scale both fighters down proportionally so
+   * there is room to dash and trade combos cleanly on a phone. */
+  return Math.round(
+    225 * (CLASS_SIZE_SCALE[f.fighterClass] ?? 1) * (narrow ? 0.68 : 1),
+  );
 }
 
 type Stage =
@@ -158,8 +162,26 @@ export function BattleArenaModal({
   const [timer, setTimer] = useState(99);
   const [finalBlowLog, setFinalBlowLog] = useState<string>("");
 
+  /* ---- Manual arcade controls (cosmetic assist over the scripted match) ----
+   * The on-chain duel is already settled; these bindings give the player a
+   * real PC (keyboard/mouse) + mobile (touch gamepad) feel — stance leans,
+   * guard blocks, strike flourishes, and a super meter gating Special /
+   * Critical Art flair — WITHOUT altering the scripted winner or pacing. */
+  const [playerStance, setPlayerStance] = useState<
+    "neutral" | "back" | "block" | "dash"
+  >("neutral");
+  const [superMeter, setSuperMeter] = useState(0);
+  const [assistFlourish, setAssistFlourish] = useState<{
+    id: number;
+    kind: "light" | "heavy" | "special" | "critical";
+  } | null>(null);
+  const [narrow, setNarrow] = useState(false);
+
   const matchRunningRef = useRef(false);
   const comboRef = useRef(0);
+  const playerStanceRef = useRef(playerStance);
+  playerStanceRef.current = playerStance;
+  const assistTimersRef = useRef<number[]>([]);
 
   const nameOf = (side: Side): string =>
     side === "creator" ? creatorFighter.name : challengerFighter.name;
@@ -463,6 +485,10 @@ export function BattleArenaModal({
       comboRef.current = 0;
       setFinalBlowLog("");
       setTimer(99);
+      /* Fresh manual-control state for every match. */
+      setPlayerStance("neutral");
+      setAssistFlourish(null);
+      setSuperMeter(0);
       await wait(1000);
       if (aborted()) return;
 
@@ -577,15 +603,117 @@ export function BattleArenaModal({
     return "";
   }
 
+  /* ================= MANUAL ARCADE CONTROLS ================= */
+
+  const strike = (
+    kind: "light" | "heavy" | "special" | "critical",
+  ): void => {
+    if (!isOpen || stage === "verdict") return;
+    if (kind === "special" && superMeter < 40) return;
+    if (kind === "critical" && superMeter < 100) return;
+    if (kind === "special") setSuperMeter((m) => Math.max(0, m - 40));
+    if (kind === "critical") setSuperMeter(0);
+    if (kind === "light") setSuperMeter((m) => Math.min(100, m + 8));
+    if (kind === "heavy") setSuperMeter((m) => Math.min(100, m + 14));
+    const id = Date.now() + Math.random();
+    setAssistFlourish({ id, kind });
+    const t = window.setTimeout(
+      () => {
+        setAssistFlourish((f) => (f?.id === id ? null : f));
+        assistTimersRef.current = assistTimersRef.current.filter(
+          (x) => x !== t,
+        );
+      },
+      kind === "critical" ? 950 : 480,
+    );
+    assistTimersRef.current.push(t);
+  };
+  const strikeRef = useRef(strike);
+  strikeRef.current = strike;
+
+  /* PC keyboard: hold-to-stance on keydown/keyup, strikes fire on keydown. */
+  useEffect(() => {
+    if (!isOpen) return;
+    const movement = new Map<string, "back" | "dash" | "block">([
+      ["a", "back"],
+      ["arrowleft", "back"],
+      ["d", "dash"],
+      ["arrowright", "dash"],
+      ["s", "block"],
+      ["arrowdown", "block"],
+      ["shift", "block"],
+    ]);
+    const strikes = new Map<string, "light" | "heavy" | "special" | "critical">(
+      [
+        ["j", "light"],
+        ["k", "heavy"],
+        ["l", "special"],
+        ["u", "critical"],
+      ],
+    );
+    const onDown = (e: KeyboardEvent) => {
+      const k = e.key.toLowerCase();
+      const stance = movement.get(k);
+      if (stance) {
+        e.preventDefault();
+        setPlayerStance(stance);
+      }
+      const kind = strikes.get(k);
+      if (kind) {
+        e.preventDefault();
+        if (!e.repeat) strikeRef.current(kind);
+      }
+    };
+    const onUp = (e: KeyboardEvent) => {
+      const stance = movement.get(e.key.toLowerCase());
+      if (stance) {
+        setPlayerStance((cur) => (cur === stance ? "neutral" : cur));
+      }
+    };
+    window.addEventListener("keydown", onDown);
+    window.addEventListener("keyup", onUp);
+    return () => {
+      window.removeEventListener("keydown", onDown);
+      window.removeEventListener("keyup", onUp);
+    };
+  }, [isOpen]);
+
+  /* Super meter fills with every exchange; blocking through an incoming
+   * strike grants a perfect-guard bonus. */
+  useEffect(() => {
+    if (!fx) return;
+    setSuperMeter((m) => Math.min(100, m + 6));
+    if (playerStanceRef.current === "block" && fx.target === "creator") {
+      setSuperMeter((m) => Math.min(100, m + 10));
+    }
+  }, [fx]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  /* Clear pending flourish timers on unmount. */
+  useEffect(
+    () => () => {
+      assistTimersRef.current.forEach((t) => window.clearTimeout(t));
+    },
+    [],
+  );
+
+  /* Narrow-viewport tracking for proportional sprite scaling. */
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 639px)");
+    const sync = () => setNarrow(mq.matches);
+    sync();
+    mq.addEventListener("change", sync);
+    return () => mq.removeEventListener("change", sync);
+  }, []);
+
   if (!outcome || !script) return null;
 
   const revivedName = script.revivedSide ? nameOf(script.revivedSide) : null;
   const spriteAnimKey = `${stage}-${fx?.id ?? 0}`;
 
   return (
-    <div className="fixed inset-0 z-[95] flex items-center justify-center bg-black/90 p-3 backdrop-blur-sm sm:p-4">
+    <div className="fixed inset-0 z-[95] flex h-[100dvh] items-center justify-center bg-black/90 p-2 backdrop-blur-sm sm:h-[90vh] sm:p-4">
       <div
-        className="relative flex w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-red-500/30 bg-zinc-950 shadow-[0_0_70px_-10px_rgba(239,68,68,0.3)]"
+        className="relative flex max-h-full w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-red-500/30 bg-zinc-950 shadow-[0_0_70px_-10px_rgba(239,68,68,0.3)]"
         role="dialog"
         aria-modal="true"
       >
@@ -633,7 +761,7 @@ export function BattleArenaModal({
             {/* ============ 2D BATTLE STAGE ============ */}
             <div
               className={cn(
-                "relative h-[400px] overflow-hidden sm:h-[470px]",
+                "relative h-[38dvh] min-h-[260px] overflow-hidden sm:h-[470px]",
                 camShake && "arena-cam-shake",
                 hitStop && "arena-hit-stop",
                 cinematic && "arena-cinematic-zoom",
@@ -700,6 +828,48 @@ export function BattleArenaModal({
                 ))}
               </div>
 
+              {/* Ambient fighter lighting — soft white/purple backlight
+                  spots + floor light pools so the sprites read cleanly
+                  against the darkened arena without any filters on them. */}
+              {(["creator", "challenger"] as const).map((side) => {
+                const anchor =
+                  side === "creator"
+                    ? { left: "32%", transform: "-translate-x-1/2" }
+                    : { right: "32%", transform: "translate-x-1/2" };
+                return (
+                  <div key={`light-${side}`} aria-hidden>
+                    {/* Backlight spot */}
+                    <div
+                      className={cn(
+                        "pointer-events-none absolute bottom-8 h-56 w-56 rounded-full blur-xl",
+                        anchor.transform,
+                      )}
+                      style={{
+                        ...(side === "creator"
+                          ? { left: anchor.left }
+                          : { right: anchor.right }),
+                        background:
+                          "radial-gradient(circle, rgba(255,255,255,0.10), rgba(139,92,246,0.08) 50%, transparent 72%)",
+                      }}
+                    />
+                    {/* Floor light pool */}
+                    <div
+                      className={cn(
+                        "pointer-events-none absolute bottom-3 h-7 w-48 rounded-[50%] blur-md",
+                        anchor.transform,
+                      )}
+                      style={{
+                        ...(side === "creator"
+                          ? { left: anchor.left }
+                          : { right: anchor.right }),
+                        background:
+                          "radial-gradient(ellipse, rgba(196,181,253,0.22), rgba(168,85,247,0.10) 55%, transparent 75%)",
+                      }}
+                    />
+                  </div>
+                );
+              })}
+
               {/* Fighters — face-to-face in the center foreground */}
               <div
                 key={`creator-${fx?.id ?? "idle"}`}
@@ -708,17 +878,41 @@ export function BattleArenaModal({
                   motionFor("creator"),
                 )}
               >
-                <SheetFighter
-                  fighterClass={creatorFighter.fighterClass}
-                  state={sideState("creator")}
-                  facing="right"
-                  size={stageSize(creatorFighter)}
-                  animKey={spriteAnimKey}
-                />
+                {/* Manual-control stance lean (back / dash / block) — a
+                    nested transform so it composes with the exchange
+                    choreography on the wrapper above. */}
+                <div
+                  className={cn(
+                    "assist-stance",
+                    playerStance === "back" && "assist-back",
+                    playerStance === "dash" && "assist-dash",
+                    playerStance === "block" && "assist-block",
+                  )}
+                >
+                  <SheetFighter
+                    fighterClass={creatorFighter.fighterClass}
+                    state={sideState("creator")}
+                    facing="right"
+                    size={stageSize(creatorFighter, narrow)}
+                    animKey={spriteAnimKey}
+                  />
+                </div>
                 {fx && fx.target === "creator" && (
                   <DamageNumber key={fx.id} fx={fx} />
                 )}
               </div>
+              {/* Guard shimmer — only while the player is holding Block
+                  through an incoming strike. */}
+              {playerStance === "block" &&
+                fx &&
+                fx.target === "creator" &&
+                (fx.phase === "strike" || fx.phase === "stagger") && (
+                  <div
+                    className="pointer-events-none absolute bottom-5 left-[32%] z-[25] h-28 w-28 -translate-x-1/2 rounded-full border-2 border-cyan-300/70 bg-cyan-300/10"
+                    style={{ boxShadow: "0 0 20px rgba(34,211,238,0.5)" }}
+                    aria-hidden
+                  />
+                )}
               <div
                 key={`challenger-${fx?.id ?? "idle"}`}
                 className={cn(
@@ -730,7 +924,7 @@ export function BattleArenaModal({
                   fighterClass={challengerFighter.fighterClass}
                   state={sideState("challenger")}
                   facing="left"
-                  size={stageSize(challengerFighter)}
+                  size={stageSize(challengerFighter, narrow)}
                   animKey={spriteAnimKey}
                 />
                 {fx && fx.target === "challenger" && (
@@ -823,6 +1017,78 @@ export function BattleArenaModal({
                       ? `${combo.count} HITS!`
                       : `${combo.count} Hit${combo.count > 1 ? "s" : ""}...`}
                   </p>
+                </div>
+              )}
+
+              {/* Player strike flourishes — instant visual feedback for the
+                  manual Light/Heavy/Special/Critical Art buttons. */}
+              {assistFlourish && (
+                <div
+                  key={`assist-${assistFlourish.id}`}
+                  className="pointer-events-none absolute inset-0 z-[31]"
+                  aria-hidden
+                >
+                  {(assistFlourish.kind === "light" ||
+                    assistFlourish.kind === "heavy") && (
+                    <div className="absolute bottom-24 right-[30%]">
+                      <span
+                        className={cn(
+                          "hit-marker-slash-a absolute h-1 w-16 rounded-full",
+                          assistFlourish.kind === "heavy" && "scale-125",
+                        )}
+                        style={{
+                          background:
+                            "linear-gradient(90deg, transparent, #fff 50%, transparent)",
+                          boxShadow: "0 0 12px rgba(251,191,36,0.9)",
+                        }}
+                      />
+                      <span
+                        className={cn(
+                          "hit-marker-slash-b absolute h-1 w-16 rounded-full",
+                          assistFlourish.kind === "heavy" && "scale-125",
+                        )}
+                        style={{
+                          background:
+                            "linear-gradient(90deg, transparent, #fde68a 50%, transparent)",
+                          boxShadow: "0 0 12px rgba(251,191,36,0.9)",
+                        }}
+                      />
+                      <span
+                        className="hit-marker-core absolute h-6 w-6 rounded-full bg-amber-200"
+                        style={{
+                          boxShadow: "0 0 24px rgba(251,191,36,0.95)",
+                        }}
+                      />
+                      <span className="absolute -top-7 left-1/2 -translate-x-1/2 whitespace-nowrap text-[10px] font-black uppercase tracking-widest text-amber-200 drop-shadow-[0_0_8px_rgba(251,191,36,0.9)]">
+                        {assistFlourish.kind === "heavy" ? "HEAVY!" : "STRIKE!"}
+                      </span>
+                    </div>
+                  )}
+                  {assistFlourish.kind === "special" && (
+                    <>
+                      <div className="absolute inset-0 bg-fuchsia-500/10" />
+                      <div className="absolute inset-0 flex items-center justify-center">
+                        <p className="animate-round-banner whitespace-nowrap bg-gradient-to-r from-purple-300 via-white to-fuchsia-300 bg-clip-text text-3xl font-black italic tracking-[0.18em] text-transparent drop-shadow-[0_0_24px_rgba(168,85,247,0.9)] sm:text-4xl">
+                          {getFighterMoveSet(creatorFighter.fighterClass)
+                            .signatureMove.name
+                            .toUpperCase()}
+                          !
+                        </p>
+                      </div>
+                    </>
+                  )}
+                  {assistFlourish.kind === "critical" && (
+                    <div className="absolute inset-0 flex flex-col items-center justify-center gap-1">
+                      <div className="cinematic-flash absolute inset-0" />
+                      <p className="cinematic-text whitespace-nowrap text-5xl bg-gradient-to-r from-red-400 via-amber-300 to-red-500 bg-clip-text font-black italic tracking-[0.12em] text-transparent drop-shadow-[0_0_24px_rgba(239,68,68,0.9)] sm:text-6xl">
+                        CRITICAL ART
+                      </p>
+                      <p className="cinematic-move-name whitespace-nowrap text-xs font-black uppercase tracking-[0.35em] text-white/90 drop-shadow-[0_0_12px_rgba(255,255,255,0.6)] sm:text-sm">
+                        {getFighterMoveSet(creatorFighter.fighterClass)
+                          .criticalArt.name}
+                      </p>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -923,6 +1189,132 @@ export function BattleArenaModal({
                 </>
               )}
             </div>
+
+            {/* ===== ARCADE CONTROL DECK — split two-thumb layout =====
+                PC: A/S/D + J/K/L/U keys (badges shown on sm+).
+                Mobile: touch-action:none buttons, zero tap delay via
+                pointerdown — holds for movement/guard, instant for strikes. */}
+              <div
+                className="arcade-ctl border-t border-white/10 bg-zinc-950/95"
+                style={{ WebkitUserSelect: "none", userSelect: "none" }}
+              >
+                {/* Super meter */}
+                <div className="flex items-center gap-2 px-3 pt-2 sm:px-6">
+                  <span className="text-[9px] font-black uppercase tracking-widest text-zinc-500">
+                    Super
+                  </span>
+                  <div className="h-2 flex-1 overflow-hidden rounded-full bg-white/10">
+                    <div
+                      className="h-full rounded-full bg-gradient-to-r from-purple-500 via-fuchsia-400 to-amber-300 transition-[width] duration-200"
+                      style={{ width: `${superMeter}%` }}
+                    />
+                  </div>
+                  <span className="w-10 text-right font-mono text-[10px] text-zinc-400">
+                    {Math.round(superMeter)}%
+                  </span>
+                </div>
+
+                <div className="flex flex-row items-center justify-between gap-2 px-3 py-2 sm:px-6 sm:py-4">
+                  {/* LEFT THUMB — movement & guard */}
+                  <div className="flex items-center gap-1.5 sm:gap-2">
+                    {(
+                      [
+                        { stance: "back", label: "Back", badge: "A" },
+                        { stance: "block", label: "Block", badge: "S" },
+                        { stance: "dash", label: "Dash", badge: "D" },
+                      ] as const
+                    ).map((b) => (
+                      <button
+                        key={b.stance}
+                        type="button"
+                        aria-label={`${b.label} (${b.badge})`}
+                        className={cn(
+                          "arcade-ctl-btn flex min-w-[62px] flex-col items-center justify-center rounded-xl border px-2.5 py-3 text-[11px] font-black uppercase tracking-wider transition-all active:scale-95 sm:min-w-[78px] sm:px-4",
+                          playerStance === b.stance
+                            ? "border-amber-400/80 bg-amber-500/25 text-amber-100 shadow-[0_0_16px_rgba(251,191,36,0.35)]"
+                            : "border-white/15 bg-zinc-900/80 text-zinc-300",
+                        )}
+                        onPointerDown={(e) => {
+                          e.preventDefault();
+                          e.currentTarget.setPointerCapture(e.pointerId);
+                          setPlayerStance(b.stance);
+                        }}
+                        onPointerUp={() =>
+                          setPlayerStance((cur) =>
+                            cur === b.stance ? "neutral" : cur,
+                          )
+                        }
+                        onPointerCancel={() =>
+                          setPlayerStance((cur) =>
+                            cur === b.stance ? "neutral" : cur,
+                          )
+                        }
+                        onPointerLeave={() =>
+                          setPlayerStance((cur) =>
+                            cur === b.stance ? "neutral" : cur,
+                          )
+                        }
+                      >
+                        <span>{b.label}</span>
+                        <span className="mt-0.5 hidden rounded bg-white/10 px-1.5 py-0.5 text-[9px] font-bold tracking-normal text-zinc-400 sm:inline">
+                          {b.badge}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* RIGHT THUMB — attacks & specials
+                      2×2 grid on mobile, horizontal row on desktop */}
+                  <div className="grid grid-cols-2 gap-1.5 sm:flex sm:gap-2">
+                    {(
+                      [
+                        { kind: "light", label: "Light", badge: "J" },
+                        { kind: "heavy", label: "Heavy", badge: "K" },
+                        { kind: "special", label: "Special", badge: "L" },
+                        { kind: "critical", label: "Crit Art", badge: "U" },
+                      ] as const
+                    ).map((b) => {
+                      const ready =
+                        b.kind === "special"
+                          ? superMeter >= 40
+                          : b.kind === "critical"
+                            ? superMeter >= 100
+                            : true;
+                      return (
+                        <button
+                          key={b.kind}
+                          type="button"
+                          aria-label={`${b.label} (${b.badge})`}
+                          className={cn(
+                            "arcade-ctl-btn flex min-w-[62px] flex-col items-center justify-center rounded-xl border px-2.5 py-3 text-[11px] font-black uppercase tracking-wider transition-all active:scale-95 sm:min-w-[78px] sm:px-4",
+                            b.kind === "special" &&
+                              ready &&
+                              "special-ready text-fuchsia-100",
+                            b.kind === "critical" &&
+                              ready &&
+                              "super-ready text-amber-100",
+                            b.kind === "light" &&
+                              "border-white/15 bg-zinc-900/80 text-zinc-200",
+                            b.kind === "heavy" &&
+                              "border-white/15 bg-zinc-900/80 text-zinc-200",
+                            !ready &&
+                              "border-white/10 bg-zinc-900/40 text-zinc-600",
+                          )}
+                          onPointerDown={(e) => {
+                            e.preventDefault();
+                            strikeRef.current(b.kind);
+                          }}
+                        >
+                          <span>{b.label}</span>
+                          <span className="mt-0.5 hidden rounded bg-white/10 px-1.5 py-0.5 text-[9px] font-bold tracking-normal text-zinc-400 sm:inline">
+                            {b.badge}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
           </>
         )}
       </div>

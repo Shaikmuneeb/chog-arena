@@ -278,184 +278,259 @@ body {
   animation: sprite-dash 0.55s ease-out;
 }
 
-/* Multi-step combo: dash → thrust → spin-slash → recoil → recover. */
-@keyframes chog-combo-attack {
-  0% {
-    transform: translateX(0) scale(1);
-  }
-  12% {
-    transform: translateX(14px) scale(1.04) skewX(-4deg);
-  }
-  28% {
-    transform: translateX(6px) scale(0.98) skewX(3deg);
-  }
-  44% {
-    transform: translateX(18px) rotate(-6deg) scale(1.06);
-  }
-  62% {
-    transform: translateX(4px) rotate(4deg) scale(0.97);
-  }
-  80% {
-    transform: translateX(-6px) scale(1.02);
-  }
-  100% {
-    transform: translateX(0) scale(1);
-  }
-}
-
-.chog-combo-attack {
-  animation: chog-combo-attack 0.7s cubic-bezier(0.22, 1, 0.36, 1);
-}
-
-/* ---- Arcade combo choreography: dash-in / stagger / dash-out ---- */
+/* ---- Smooth combat motion curves (shared by canvas sheet + SVG rig) ----
+ * One continuous 3-step physics arc across the exchange:
+ *   wind-up  (dashIn)      — backward coil, exponential release
+ *   rush     (dashIn end)  — stretch closing distance
+ *   strike   (attack start) — full extension at impact
+ *   recoil   (attack)      — spring-back with overshoot past rest, settling
+ *   settle   (dashOut)     — retreat flick back to neutral
+ * Transforms ONLY — no filters/blur/blend on the sprite pixels so the
+ * fighter stays fully solid and crisp at every frame. */
 
 @keyframes fighter-dash-in {
   0% {
-    transform: translateX(0) skewX(0) scaleY(1);
+    transform: translateX(0) rotate(0deg) scale(1);
+    animation-timing-function: ease-in-out;
   }
-  55% {
-    transform: translateX(8px) skewX(-7deg) scaleY(0.96);
+  34% {
+    transform: translateX(-7px) rotate(-4deg) scale(0.965);
+    animation-timing-function: ease-in-out;
+  }
+  68% {
+    transform: translateX(-9px) rotate(-5.5deg) scale(0.95);
+    animation-timing-function: cubic-bezier(0.55, 0, 1, 0.45); /* exponential launch */
   }
   100% {
-    transform: translateX(2px) skewX(0) scaleY(1);
+    transform: translateX(9px) rotate(3.5deg) scale(1.07, 0.94);
   }
 }
 
 .fighter-dash-in {
-  animation: fighter-dash-in 0.22s ease-out;
+  animation: fighter-dash-in 0.22s linear;
 }
 
-@keyframes fighter-stagger {
+/* RUSH & STRIKE → IMPACT & RECOIL — one continuous 260ms curve (the 80ms
+ * hit-stop pause eats the rest of the 340ms strike+hold phase, so this
+ * lands exactly when the dashOut phase class swaps on). */
+@keyframes chog-combo-attack {
   0% {
-    transform: translateX(0) rotate(0deg);
+    transform: translateX(10px) rotate(4deg) scale(1.08, 0.93);
+    animation-timing-function: cubic-bezier(0.2, 0.85, 0.3, 1);
   }
-  30% {
-    transform: translateX(-5px) rotate(-4deg);
+  16% {
+    transform: translateX(15px) rotate(5.5deg) scale(1.1, 0.91);
+    animation-timing-function: cubic-bezier(0.34, 1.56, 0.64, 1); /* spring */
   }
-  60% {
-    transform: translateX(3px) rotate(3deg);
+  38% {
+    transform: translateX(4px) rotate(1deg) scale(1.03);
+    animation-timing-function: ease-in-out;
+  }
+  58% {
+    transform: translateX(-6px) rotate(-3.5deg) scale(1.015); /* overshoot past rest */
+    animation-timing-function: ease-out;
+  }
+  78% {
+    transform: translateX(3px) rotate(1.5deg) scale(1.005);
   }
   100% {
-    transform: translateX(0) rotate(0deg);
+    transform: translateX(0) rotate(0deg) scale(1);
+  }
+}
+
+.chog-combo-attack {
+  animation: chog-combo-attack 0.26s linear;
+}
+
+/* ---- Arcade combo choreography: dash-in / stagger / dash-out ---- */
+
+/* Stagger picks up where the hit recoil left off (~-9px) with spring physics. */
+@keyframes fighter-stagger {
+  0% {
+    transform: translateX(-9px) rotate(-5deg) scale(0.97);
+    animation-timing-function: cubic-bezier(0.34, 1.56, 0.64, 1);
+  }
+  30% {
+    transform: translateX(2px) rotate(3deg) scale(1.015);
+    animation-timing-function: ease-in-out;
+  }
+  55% {
+    transform: translateX(-4px) rotate(-2deg);
+    animation-timing-function: ease-out;
+  }
+  78% {
+    transform: translateX(1.5px) rotate(1deg);
+  }
+  100% {
+    transform: translateX(0) rotate(0deg) scale(1);
   }
 }
 
 .fighter-stagger {
-  animation: fighter-stagger 0.3s ease-in-out;
+  animation: fighter-stagger 0.28s linear;
 }
 
+/* Retreat flick: completes exactly inside the 100ms dashOut phase. */
 @keyframes fighter-dash-out {
   0% {
-    transform: translateX(0) skewX(0);
+    transform: translateX(-3px) skewX(3deg) scale(0.99);
+    animation-timing-function: ease-out;
   }
-  40% {
-    transform: translateX(-6px) skewX(5deg);
+  45% {
+    transform: translateX(-5.5px) skewX(4deg);
+    animation-timing-function: cubic-bezier(0.34, 1.56, 0.64, 1);
   }
   100% {
-    transform: translateX(0) skewX(0);
+    transform: translateX(0) skewX(0deg) scale(1);
   }
 }
 
 .fighter-dash-out {
-  animation: fighter-dash-out 0.2s ease-out;
+  animation: fighter-dash-out 0.1s linear;
 }
 
 /* Wrapper positional timelines — one 640ms run per exchange.
- * Attacker: dash-in → impact lunge → hold → recovery slide back.
+ * Attacker: coil (wind-up) → exponential rush → impact peak → spring settle.
  * Distances sized so fighters close to striking range WITHOUT overlapping. */
 @keyframes combo-advance-right {
   0% {
-    transform: translateX(0);
+    transform: translateX(0) scale(1);
+    animation-timing-function: ease-in-out;
+  }
+  8% {
+    transform: translateX(-5px) rotate(-1.5deg) scale(0.985); /* wind-up coil */
+    animation-timing-function: cubic-bezier(0.55, 0, 1, 0.45); /* exponential rush */
   }
   34% {
-    transform: translateX(30px);
+    transform: translateX(30px) rotate(1.5deg) scale(1.03);
+    animation-timing-function: linear;
   }
   42% {
-    transform: translateX(38px);
+    transform: translateX(38px) rotate(2deg) scale(1.035); /* impact peak */
+    animation-timing-function: cubic-bezier(0.34, 1.56, 0.64, 1); /* spring */
   }
   62% {
-    transform: translateX(36px);
+    transform: translateX(36px) scale(1.01);
+    animation-timing-function: ease-out;
+  }
+  78% {
+    transform: translateX(14px);
+  }
+  90% {
+    transform: translateX(-3px); /* overshoot back */
   }
   100% {
-    transform: translateX(0);
+    transform: translateX(0) scale(1);
   }
 }
 
 .combo-advance-right {
-  animation: combo-advance-right 0.64s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  animation: combo-advance-right 0.64s linear forwards;
 }
 
 @keyframes combo-advance-left {
   0% {
-    transform: translateX(0);
+    transform: translateX(0) scale(1);
+    animation-timing-function: ease-in-out;
+  }
+  8% {
+    transform: translateX(5px) rotate(1.5deg) scale(0.985);
+    animation-timing-function: cubic-bezier(0.55, 0, 1, 0.45);
   }
   34% {
-    transform: translateX(-30px);
+    transform: translateX(-30px) rotate(-1.5deg) scale(1.03);
+    animation-timing-function: linear;
   }
   42% {
-    transform: translateX(-38px);
+    transform: translateX(-38px) rotate(-2deg) scale(1.035);
+    animation-timing-function: cubic-bezier(0.34, 1.56, 0.64, 1);
   }
   62% {
-    transform: translateX(-36px);
+    transform: translateX(-36px) scale(1.01);
+    animation-timing-function: ease-out;
+  }
+  78% {
+    transform: translateX(-14px);
+  }
+  90% {
+    transform: translateX(3px);
   }
   100% {
-    transform: translateX(0);
+    transform: translateX(0) scale(1);
   }
 }
 
 .combo-advance-left {
-  animation: combo-advance-left 0.64s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  animation: combo-advance-left 0.64s linear forwards;
 }
 
-/* Defender: brace → impact knockback → stagger reel → settle. */
+/* Defender: brace INTO the hit → impact shove → spring knockback → settle. */
 @keyframes combo-recoil-left {
   0% {
-    transform: translateX(0);
+    transform: translateX(0) scale(1);
+    animation-timing-function: ease-out;
+  }
+  8% {
+    transform: translateX(3px) rotate(1deg) scale(0.98); /* brace */
+    animation-timing-function: cubic-bezier(0.5, 0, 0.8, 0.45);
   }
   34% {
-    transform: translateX(0);
+    transform: translateX(0) scale(1);
+    animation-timing-function: cubic-bezier(0.34, 1.56, 0.64, 1); /* spring */
   }
   42% {
-    transform: translateX(-8px);
+    transform: translateX(-9px) rotate(-2.5deg) scale(1.015);
+    animation-timing-function: linear;
   }
   62% {
-    transform: translateX(-22px);
+    transform: translateX(-22px) rotate(-3.5deg);
+    animation-timing-function: cubic-bezier(0.34, 1.56, 0.64, 1);
   }
   80% {
-    transform: translateX(-16px);
+    transform: translateX(-15px) rotate(1deg);
+    animation-timing-function: ease-out;
   }
   100% {
-    transform: translateX(0);
+    transform: translateX(0) rotate(0deg);
   }
 }
 
 .combo-recoil-left {
-  animation: combo-recoil-left 0.64s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  animation: combo-recoil-left 0.64s linear forwards;
 }
 
 @keyframes combo-recoil-right {
   0% {
-    transform: translateX(0);
+    transform: translateX(0) scale(1);
+    animation-timing-function: ease-out;
+  }
+  8% {
+    transform: translateX(-3px) rotate(-1deg) scale(0.98);
+    animation-timing-function: cubic-bezier(0.5, 0, 0.8, 0.45);
   }
   34% {
-    transform: translateX(0);
+    transform: translateX(0) scale(1);
+    animation-timing-function: cubic-bezier(0.34, 1.56, 0.64, 1);
   }
   42% {
-    transform: translateX(8px);
+    transform: translateX(9px) rotate(2.5deg) scale(1.015);
+    animation-timing-function: linear;
   }
   62% {
-    transform: translateX(22px);
+    transform: translateX(22px) rotate(3.5deg);
+    animation-timing-function: cubic-bezier(0.34, 1.56, 0.64, 1);
   }
   80% {
-    transform: translateX(16px);
+    transform: translateX(15px) rotate(-1deg);
+    animation-timing-function: ease-out;
   }
   100% {
-    transform: translateX(0);
+    transform: translateX(0) rotate(0deg);
   }
 }
 
 .combo-recoil-right {
-  animation: combo-recoil-right 0.64s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  animation: combo-recoil-right 0.64s linear forwards;
 }
 
 /* Dash-in dust/smoke puffs. */
@@ -658,20 +733,29 @@ body {
   animation: cinematic-move-name 0.75s ease-out forwards;
 }
 
+/* Hit recoil: hard jolt to the peak, spring settle. At the 80ms mark (when
+ * the 80ms hit-stop ends and the stagger class swaps on) it sits at ~-11px,
+ * which the stagger curve continues from — no snap between the two poses. */
 @keyframes sprite-recoil {
   0% {
-    transform: translateX(0);
+    transform: translateX(0) rotate(0deg) scale(1);
+    animation-timing-function: cubic-bezier(0.3, 0.9, 0.4, 1);
   }
-  30% {
-    transform: translateX(-12px) rotate(-4deg);
+  28% {
+    transform: translateX(-11px) rotate(-4deg) scale(0.985);
+    animation-timing-function: cubic-bezier(0.34, 1.56, 0.64, 1);
+  }
+  60% {
+    transform: translateX(4px) rotate(2deg);
+    animation-timing-function: ease-out;
   }
   100% {
-    transform: translateX(0);
+    transform: translateX(0) rotate(0deg);
   }
 }
 
 .sprite-recoil {
-  animation: sprite-recoil 0.5s ease-out;
+  animation: sprite-recoil 0.3s linear;
 }
 
 @keyframes sprite-dead-fall {
@@ -1380,6 +1464,219 @@ body {
 
 .hit-marker-core {
   animation: hit-marker-core 0.28s ease-out forwards;
+}
+
+/* ---- Layered special-move FX (soft, clean particle layers) ----
+ * Durations stay inside the ~360ms attack+dashOut particle window (minus
+ * the 80ms hit-stop pause) so every effect finishes before unmounting. */
+
+@keyframes ember-rise {
+  0% {
+    opacity: 0;
+    transform: translate(0, 0) scale(0.4);
+  }
+  18% {
+    opacity: 1;
+    transform: translate(calc(var(--drift, 6px) * 0.3), -8px) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(var(--drift, 6px), var(--rise, -42px)) scale(0.35);
+  }
+}
+
+.ember-particle {
+  animation: ember-rise var(--dur, 0.28s) ease-out forwards;
+  filter: blur(0.4px);
+}
+
+@keyframes ember-heat {
+  0% {
+    opacity: 0;
+    transform: translateY(6px) scale(0.6);
+  }
+  25% {
+    opacity: 0.9;
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-16px) scale(1.4);
+  }
+}
+
+.ember-heat {
+  animation: ember-heat 0.3s ease-out forwards;
+}
+
+@keyframes plasma-arc-sweep {
+  0% {
+    opacity: 0;
+    stroke-dashoffset: 120;
+  }
+  22% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    stroke-dashoffset: -40;
+  }
+}
+
+.plasma-arc-sweep {
+  animation: plasma-arc-sweep 0.26s ease-out forwards;
+}
+
+@keyframes neon-crackle {
+  0% {
+    opacity: 0;
+    stroke-dashoffset: 60;
+  }
+  15% {
+    opacity: 1;
+    stroke-dashoffset: 30;
+  }
+  40% {
+    opacity: 0.35;
+    stroke-dashoffset: 12;
+  }
+  55% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    stroke-dashoffset: -50;
+  }
+}
+
+.neon-crackle {
+  animation: neon-crackle 0.25s linear forwards;
+}
+
+@keyframes arc-orb-pop {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.2);
+  }
+  25% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1.15);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(1.7);
+  }
+}
+
+.arc-orb-pop {
+  animation: arc-orb-pop 0.3s ease-out forwards;
+}
+
+@keyframes void-ripple {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.25);
+  }
+  20% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(2.3);
+  }
+}
+
+.void-ripple {
+  animation: void-ripple 0.24s ease-out forwards;
+}
+
+@keyframes void-swirl {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -50%) rotate(0deg) scale(0.3);
+  }
+  25% {
+    opacity: 1;
+    transform: translate(-50%, -50%) rotate(90deg) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -50%) rotate(240deg) scale(1.5);
+  }
+}
+
+.void-swirl {
+  animation: void-swirl 0.34s ease-out forwards;
+}
+
+/* ---- Manual arcade controls (PC keyboard/mouse + mobile touch) ---- */
+
+/* Applied to the whole control deck + every button: stops scroll/zoom
+ * gestures and text selection so rapid thumb tapping never moves the page. */
+.arcade-ctl {
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.arcade-ctl-btn {
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Player stance lean — nested inside the exchange wrapper so it composes
+ * with the combo choreography instead of fighting it. */
+.assist-stance {
+  transition: transform 120ms ease-out;
+  will-change: transform;
+}
+
+.assist-back {
+  transform: translateX(-12px) rotate(-2deg);
+}
+
+.assist-dash {
+  transform: translateX(12px) rotate(2deg);
+}
+
+.assist-block {
+  transform: translateY(4px) scale(0.96);
+}
+
+/* Special button glow — arms (purple) once Super Meter >= 40%. */
+@keyframes special-ready-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 8px rgba(168, 85, 247, 0.5);
+    border-color: rgba(168, 85, 247, 0.7);
+  }
+  50% {
+    box-shadow: 0 0 18px rgba(168, 85, 247, 0.9);
+    border-color: rgba(232, 121, 249, 1);
+  }
+}
+
+.special-ready {
+  animation: special-ready-pulse 1.4s ease-in-out infinite;
+}
+
+/* Critical Art pulse — gold/crimson once Super Meter hits 100%. */
+@keyframes super-ready-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 10px rgba(251, 191, 36, 0.55);
+    border-color: rgba(251, 191, 36, 0.8);
+  }
+  50% {
+    box-shadow: 0 0 22px rgba(239, 68, 68, 0.95);
+    border-color: rgba(239, 68, 68, 1);
+  }
+}
+
+.super-ready {
+  animation: super-ready-pulse 0.8s ease-in-out infinite;
 }
 
 

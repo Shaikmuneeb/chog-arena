@@ -66,7 +66,7 @@ export function FighterSprite({
     <div
       key={`${state}-${animKey ?? "static"}`}
       className={cn(
-        "relative select-none",
+        "relative select-none opacity-100",
         facing === "left" && "sprite-mirror",
         className,
       )}
