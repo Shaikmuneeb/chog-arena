@@ -5,7 +5,10 @@ import { FIGHTER_CLASS_META, type FighterClass } from "@/config/fighterClasses";
 
 export type SpriteState =
   | "idle"
+  | "dashIn"
   | "attack"
+  | "stagger"
+  | "dashOut"
   | "hit"
   | "secondWind"
   | "dead"
@@ -43,7 +46,10 @@ export function FighterSprite({
   const bodyClass = cn(
     "sprite-body",
     state === "idle" && "sprite-idle",
-    state === "attack" && "sprite-dash",
+    state === "dashIn" && "fighter-dash-in",
+    state === "attack" && "chog-combo-attack",
+    state === "stagger" && "fighter-stagger",
+    state === "dashOut" && "fighter-dash-out",
     state === "hit" && "sprite-recoil",
     state === "dead" && "sprite-dead",
     state === "secondWind" && "sprite-levitate",
@@ -261,10 +267,18 @@ export function FighterSprite({
           </>
         )}
 
-        {/* Hit sparks + flash */}
-        {state === "hit" && (
+        {/* Hit sparks + red flash (hit & stagger) */}
+        {(state === "hit" || state === "stagger") && (
           <>
-            <rect className="sprite-flash" x="0" y="0" width="100" height="140" fill="#ffffff" opacity="0" />
+            <rect
+              className="sprite-flash"
+              x="0"
+              y="0"
+              width="100"
+              height="140"
+              fill={state === "stagger" ? "#ef4444" : "#ffffff"}
+              opacity="0"
+            />
             {[0, 1, 2, 3, 4].map((i) => (
               <circle
                 key={i}

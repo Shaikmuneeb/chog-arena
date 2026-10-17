@@ -3,6 +3,7 @@
 import { useEffect, useRef } from "react";
 import { cn } from "@/lib/utils";
 import type { FighterClass } from "@/config/fighterClasses";
+import { getFighterMoveSet, type SpecialMove } from "@/data/fighterMoves";
 import { FighterSprite, type SpriteState } from "./FighterSprite";
 
 const DEFAULT_SHEET = "/assets/chog-slash.png";
@@ -24,13 +25,18 @@ type ChogzillaSpriteProps = {
   animKey?: number | string;
   /** Horizontal 4-pose sprite sheet on a dark charcoal background. */
   spriteSheetSrc?: string;
+  /** Drives attack VFX particles + floating move-name tag from fighterMoves. */
+  fighterClass?: FighterClass;
   className?: string;
 };
 
 /** 4-pose sprite sheet: column per state (bottom12% captions cropped out). */
 const FRAME: Record<SpriteState, number> = {
   idle: 0,
+  dashIn: 0,
   attack: 1,
+  stagger: 2,
+  dashOut: 0,
   hit: 2,
   dead: 2,
   secondWind: 3,
@@ -100,9 +106,13 @@ export function ChogzillaSprite({
   size = 160,
   animKey,
   spriteSheetSrc = DEFAULT_SHEET,
+  fighterClass,
   className,
 }: ChogzillaSpriteProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const signatureMove: SpecialMove | null = fighterClass
+    ? getFighterMoveSet(fighterClass).signatureMove
+    : null;
 
   /* Draw the matching frame from the processed sheet. */
   useEffect(() => {
@@ -141,20 +151,29 @@ export function ChogzillaSprite({
   const motionClass =
     state === "idle"
       ? "sprite-idle"
-      : state === "attack"
-        ? "chog-combo-attack"
-        : state === "hit"
-          ? "sprite-recoil"
-          : state === "dead"
-            ? "sprite-dead"
-            : state === "secondWind"
-              ? "sprite-levitate"
-              : state === "victory"
-                ? "sprite-victory-body"
-                : "";
+      : state === "dashIn"
+        ? "fighter-dash-in"
+        : state === "attack"
+          ? "chog-combo-attack"
+          : state === "stagger"
+            ? "fighter-stagger"
+            : state === "dashOut"
+              ? "fighter-dash-out"
+              : state === "hit"
+                ? "sprite-recoil"
+                : state === "dead"
+                  ? "sprite-dead"
+                  : state === "secondWind"
+                    ? "sprite-levitate"
+                    : state === "victory"
+                      ? "sprite-victory-body"
+                      : "";
 
   const hotAura =
-    state === "secondWind" || state === "victory" || state === "attack";
+    state === "secondWind" ||
+    state === "victory" ||
+    state === "attack" ||
+    state === "dashIn";
 
   return (
     <div
@@ -185,8 +204,8 @@ export function ChogzillaSprite({
           aria-hidden
         />
       )}
-      {/* Red/white damage flash on hit */}
-      {state === "hit" && (
+      {/* Red/white damage flash on hit & stagger */}
+      {(state === "hit" || state === "stagger") && (
         <div
           className="sprite-flash pointer-events-none absolute inset-0 z-20 bg-red-500/60 mix-blend-screen"
           aria-hidden
@@ -199,10 +218,126 @@ export function ChogzillaSprite({
         style={{ height: size, width: "auto", imageRendering: "auto" }}
       />
 
+      {/* Moveset-driven attack VFX: particles + floating signature-move name */}
+      {state === "attack" && signatureMove && (
+        <>
+          <MoveVfxParticles
+            key={`vfx-${animKey ?? "static"}`}
+            vfxType={signatureMove.vfxType}
+          />
+          <span
+            key={`mv-${animKey ?? "static"}`}
+            className="animate-damage-float pointer-events-none absolute -top-1 left-1/2 z-20 -translate-x-1/2 whitespace-nowrap text-[10px] font-black uppercase tracking-wider text-fuchsia-200 drop-shadow-[0_0_8px_rgba(232,121,249,0.9)]"
+            aria-hidden
+          >
+            {signatureMove.name}
+          </span>
+        </>
+      )}
+
       {/* Impact shake while dashing */}
       {state === "attack" && (
         <div className="pointer-events-none absolute inset-0 z-20 animate-hit-shake" />
       )}
+    </div>
+  );
+}
+
+/* ------------------------------------------------- moveset VFX particles */
+
+/**
+ * Lightweight attack particles styled per SpecialMove.vfxType from
+ * fighterMoves.ts — slash streaks, magma embers, laser beams, void rings.
+ */
+function MoveVfxParticles({
+  vfxType,
+}: {
+  vfxType: SpecialMove["vfxType"];
+}) {
+  if (vfxType === "slash") {
+    return (
+      <div className="pointer-events-none absolute inset-0 z-20" aria-hidden>
+        {[0, 1, 2].map((i) => (
+          <span
+            key={i}
+            className="slash-streak absolute h-0.5 w-16 bg-gradient-to-r from-transparent via-purple-300 to-transparent"
+            style={{
+              left: "55%",
+              top: `${34 + i * 14}%`,
+              transform: `rotate(${-22 + i * 12}deg)`,
+              animationDelay: `${i * 80}ms`,
+              boxShadow: "0 0 8px rgba(168,85,247,0.9)",
+            }}
+          />
+        ))}
+      </div>
+    );
+  }
+  if (vfxType === "magma") {
+    return (
+      <div className="pointer-events-none absolute inset-0 z-20" aria-hidden>
+        {Array.from({ length: 5 }).map((_, i) => (
+          <span
+            key={i}
+            className="magma-particle absolute h-1.5 w-1.5 rounded-full"
+            style={{
+              left: `${48 + (i % 3) * 10}%`,
+              bottom: "12%",
+              background: i % 2 ? "#f97316" : "#ef4444",
+              boxShadow: "0 0 6px rgba(249,115,22,0.95)",
+              animationDelay: `${i * 60}ms`,
+            }}
+          />
+        ))}
+      </div>
+    );
+  }
+  if (vfxType === "laser") {
+    return (
+      <div className="pointer-events-none absolute inset-0 z-20" aria-hidden>
+        {[0, 1].map((i) => (
+          <span
+            key={i}
+            className="laser-beam absolute h-1 w-20"
+            style={{
+              left: "58%",
+              top: `${42 + i * 12}%`,
+              background:
+                "linear-gradient(90deg, transparent, #22d3ee 40%, #e879f9 70%, transparent)",
+              boxShadow: "0 0 10px rgba(34,211,238,0.9)",
+              animationDelay: `${i * 90}ms`,
+            }}
+          />
+        ))}
+      </div>
+    );
+  }
+  /* void_rift */
+  return (
+    <div className="pointer-events-none absolute inset-0 z-20" aria-hidden>
+      <div
+        className="void-slam-ring absolute h-14 w-14 rounded-full"
+        style={{
+          left: "52%",
+          top: "40%",
+          background:
+            "radial-gradient(circle, transparent 40%, rgba(168,85,247,0.9) 55%, rgba(88,28,135,0.6) 70%, transparent 80%)",
+        }}
+      />
+      {["ᚠ", "ᚦ"].map((glyph, i) => (
+        <span
+          key={glyph}
+          className="rune-float absolute text-xs font-bold text-purple-300"
+          style={{
+            left: `${58 + i * 12}%`,
+            top: "30%",
+            animationDelay: `${i * 110}ms`,
+            textShadow: "0 0 6px rgba(168,85,247,0.9)",
+          }}
+        >
+          {glyph}
+        </span>
+      ))}
     </div>
   );
 }
@@ -238,6 +373,7 @@ export function SheetFighter({
         facing={facing}
         size={size}
         animKey={animKey}
+        fighterClass={fighterClass}
         className={className}
       />
     );

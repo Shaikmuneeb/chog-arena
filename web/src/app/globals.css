@@ -301,6 +301,358 @@ body {
   animation: chog-combo-attack 0.7s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
+/* ---- Arcade combo choreography: dash-in / stagger / dash-out ---- */
+
+@keyframes fighter-dash-in {
+  0% {
+    transform: translateX(0) skewX(0) scaleY(1);
+  }
+  55% {
+    transform: translateX(8px) skewX(-7deg) scaleY(0.96);
+  }
+  100% {
+    transform: translateX(2px) skewX(0) scaleY(1);
+  }
+}
+
+.fighter-dash-in {
+  animation: fighter-dash-in 0.22s ease-out;
+}
+
+@keyframes fighter-stagger {
+  0% {
+    transform: translateX(0) rotate(0deg);
+  }
+  30% {
+    transform: translateX(-5px) rotate(-4deg);
+  }
+  60% {
+    transform: translateX(3px) rotate(3deg);
+  }
+  100% {
+    transform: translateX(0) rotate(0deg);
+  }
+}
+
+.fighter-stagger {
+  animation: fighter-stagger 0.3s ease-in-out;
+}
+
+@keyframes fighter-dash-out {
+  0% {
+    transform: translateX(0) skewX(0);
+  }
+  40% {
+    transform: translateX(-6px) skewX(5deg);
+  }
+  100% {
+    transform: translateX(0) skewX(0);
+  }
+}
+
+.fighter-dash-out {
+  animation: fighter-dash-out 0.2s ease-out;
+}
+
+/* Wrapper positional timelines — one 640ms run per exchange.
+ * Attacker: dash-in → impact lunge → hold → recovery slide back.
+ * Distances sized so fighters close to striking range WITHOUT overlapping. */
+@keyframes combo-advance-right {
+  0% {
+    transform: translateX(0);
+  }
+  34% {
+    transform: translateX(30px);
+  }
+  42% {
+    transform: translateX(38px);
+  }
+  62% {
+    transform: translateX(36px);
+  }
+  100% {
+    transform: translateX(0);
+  }
+}
+
+.combo-advance-right {
+  animation: combo-advance-right 0.64s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+@keyframes combo-advance-left {
+  0% {
+    transform: translateX(0);
+  }
+  34% {
+    transform: translateX(-30px);
+  }
+  42% {
+    transform: translateX(-38px);
+  }
+  62% {
+    transform: translateX(-36px);
+  }
+  100% {
+    transform: translateX(0);
+  }
+}
+
+.combo-advance-left {
+  animation: combo-advance-left 0.64s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+/* Defender: brace → impact knockback → stagger reel → settle. */
+@keyframes combo-recoil-left {
+  0% {
+    transform: translateX(0);
+  }
+  34% {
+    transform: translateX(0);
+  }
+  42% {
+    transform: translateX(-8px);
+  }
+  62% {
+    transform: translateX(-22px);
+  }
+  80% {
+    transform: translateX(-16px);
+  }
+  100% {
+    transform: translateX(0);
+  }
+}
+
+.combo-recoil-left {
+  animation: combo-recoil-left 0.64s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+@keyframes combo-recoil-right {
+  0% {
+    transform: translateX(0);
+  }
+  34% {
+    transform: translateX(0);
+  }
+  42% {
+    transform: translateX(8px);
+  }
+  62% {
+    transform: translateX(22px);
+  }
+  80% {
+    transform: translateX(16px);
+  }
+  100% {
+    transform: translateX(0);
+  }
+}
+
+.combo-recoil-right {
+  animation: combo-recoil-right 0.64s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+/* Dash-in dust/smoke puffs. */
+@keyframes dust-puff {
+  0% {
+    opacity: 0.7;
+    transform: translateY(0) scale(0.5);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-16px) translateX(-14px) scale(1.7);
+  }
+}
+
+.dust-puff {
+  animation: dust-puff 0.5s ease-out forwards;
+}
+
+/* Red/white stagger flash frame. */
+@keyframes stagger-flash {
+  0% {
+    opacity: 0;
+  }
+  18% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+.stagger-flash {
+  animation: stagger-flash 0.3s ease-out forwards;
+}
+
+/* Damage sparks off the staggered defender. */
+@keyframes damage-spark {
+  0% {
+    opacity: 0;
+    transform: scale(0.4) translate(0, 0);
+  }
+  25% {
+    opacity: 1;
+    transform: scale(1.2) translate(4px, -6px);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(0.4) translate(10px, -18px);
+  }
+}
+
+.damage-spark {
+  animation: damage-spark 0.4s ease-out forwards;
+}
+
+/* Floating combo hit counter pop. */
+@keyframes combo-pop {
+  0% {
+    opacity: 0;
+    transform: translateX(-50%) scale(0.4) rotate(-8deg);
+  }
+  22% {
+    opacity: 1;
+    transform: translateX(-50%) scale(1.25) rotate(3deg);
+  }
+  40% {
+    transform: translateX(-50%) scale(1);
+  }
+  75% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translateX(-50%) scale(0.96) translateY(-10px);
+  }
+}
+
+.combo-pop {
+  animation: combo-pop 0.95s ease-out forwards;
+}
+
+.combo-count-text {
+  -webkit-text-stroke: 1px rgba(69, 26, 3, 0.85);
+  text-shadow:
+    0 2px 0 rgba(69, 26, 3, 0.9),
+    0 0 18px rgba(251, 146, 60, 0.55);
+}
+
+/* ---- Cinematic super-move camera ---- */
+
+/* Uses the independent `scale` property (not transform) so it composes
+ * with the transform-based arena-cam-shake on the same element. */
+@keyframes arena-cinematic-zoom {
+  0% {
+    scale: 1;
+  }
+  35% {
+    scale: 1.15;
+  }
+  100% {
+    scale: 1;
+  }
+}
+
+.arena-cinematic-zoom {
+  animation: arena-cinematic-zoom 0.75s ease-out;
+}
+
+@keyframes cinematic-vignette {
+  0% {
+    opacity: 0;
+  }
+  30% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+.cinematic-vignette {
+  background: radial-gradient(
+    ellipse at center,
+    transparent 30%,
+    rgba(0, 0, 0, 0.78) 100%
+  );
+  animation: cinematic-vignette 0.75s ease-out forwards;
+}
+
+@keyframes cinematic-flash {
+  0% {
+    opacity: 0;
+  }
+  12% {
+    opacity: 0.85;
+  }
+  40% {
+    opacity: 0.2;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+.cinematic-flash {
+  background: linear-gradient(
+    115deg,
+    rgba(255, 255, 255, 0.85),
+    rgba(255, 60, 60, 0.45) 48%,
+    rgba(255, 255, 255, 0.85)
+  );
+  mix-blend-mode: screen;
+  animation: cinematic-flash 0.32s ease-out forwards;
+}
+
+@keyframes cinematic-text {
+  0% {
+    opacity: 0;
+    transform: scale(3.2) rotate(-6deg);
+  }
+  30% {
+    opacity: 1;
+    transform: scale(0.92) rotate(1deg);
+  }
+  45% {
+    transform: scale(1.05) rotate(-1deg);
+  }
+  80% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.12);
+  }
+}
+
+.cinematic-text {
+  animation: cinematic-text 0.75s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+@keyframes cinematic-move-name {
+  0% {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  30% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  80% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+}
+
+.cinematic-move-name {
+  animation: cinematic-move-name 0.75s ease-out forwards;
+}
+
 @keyframes sprite-recoil {
   0% {
     transform: translateX(0);

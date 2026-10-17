@@ -7,6 +7,12 @@ import type { FighterClass } from "@/config/fighterClasses";
 import { FIGHTER_CLASS_META } from "@/config/fighterClasses";
 import type { SpriteState } from "./FighterSprite";
 import { SheetFighter } from "./ChogzillaSprite";
+import {
+  getFighterMoveSet,
+  impactCueFor,
+  MOVE_EMOJI,
+  type SpecialMove,
+} from "@/data/fighterMoves";
 import { cn, formatMon, truncateAddress } from "@/lib/utils";
 import {
   playDashSfx,
@@ -46,6 +52,19 @@ export type FighterDescriptor = {
 
 type Side = "creator" | "challenger";
 
+/** Per-class visual scale — sheet art fills its frame very differently
+ * (Chogzilla art is edge-to-edge; Keone/James art sits small in-frame). */
+const CLASS_SIZE_SCALE: Record<FighterClass, number> = {
+  berserker: 0.72,
+  samurai: 0.92,
+  mage: 1.1,
+  juggernaut: 1.1,
+};
+
+function stageSize(f: FighterDescriptor): number {
+  return Math.round(190 * (CLASS_SIZE_SCALE[f.fighterClass] ?? 1));
+}
+
 type Stage =
   | "faceoff"
   | "roundintro"
@@ -62,6 +81,12 @@ type Fx = {
   target: Side;
   dmg: number;
   crit: boolean;
+  /** Combo choreography phase — dashIn → strike → stagger → dashOut. */
+  phase: "dashIn" | "strike" | "stagger" | "dashOut";
+  /** Multi-hit count for signature/critical moves (displays as ×N). */
+  hits?: number;
+  /** Active character's exact move name from fighterMoves config. */
+  moveName?: string;
 };
 
 type BattleArenaModalProps = {
@@ -118,6 +143,17 @@ export function BattleArenaModal({
     null,
   );
   const [impactFx, setImpactFx] = useState<{ id: number } | null>(null);
+  const [dustFx, setDustFx] = useState<{ id: number; side: Side } | null>(null);
+  const [combo, setCombo] = useState<{
+    id: number;
+    count: number;
+    side: Side;
+  } | null>(null);
+  const [cinematic, setCinematic] = useState<{
+    id: number;
+    kind: "critical" | "counter" | "ko";
+    moveName?: string;
+  } | null>(null);
   const [hitStop, setHitStop] = useState(false);
   const [camShake, setCamShake] = useState(false);
   const [logLines, setLogLines] = useState<string[]>([]);
@@ -126,6 +162,7 @@ export function BattleArenaModal({
 
   const matchRunningRef = useRef(false);
   const skipRef = useRef(false);
+  const comboRef = useRef(0);
   const logEndRef = useRef<HTMLDivElement | null>(null);
 
   const nameOf = (side: Side): string =>
@@ -220,6 +257,20 @@ export function BattleArenaModal({
     return () => clearTimeout(timeout);
   }, [impactFx]);
 
+  /* Clear the dash-in dust puffs. */
+  useEffect(() => {
+    if (!dustFx) return;
+    const timeout = setTimeout(() => setDustFx(null), 500);
+    return () => clearTimeout(timeout);
+  }, [dustFx]);
+
+  /* Clear the cinematic camera zoom + big text. */
+  useEffect(() => {
+    if (!cinematic) return;
+    const timeout = setTimeout(() => setCinematic(null), 750);
+    return () => clearTimeout(timeout);
+  }, [cinematic]);
+
   /* ================= SINGLE ASYNC MATCH SEQUENCER =================
    * Runs the full 3-round fight sequentially. Never re-triggered by
    * round/HP state updates — only by isOpen + a fresh confirmed outcome. */
@@ -256,58 +307,79 @@ export function BattleArenaModal({
       const target: Side = attacker === "creator" ? "challenger" : "creator";
       const crit = Boolean(opts.lethal) || Math.random() < 0.25;
       const heavy = crit; // lethal always sets crit
-      const signature = script!.isJames(attacker) && heavy;
-      const keoneSig = script!.isKeone(attacker) && heavy;
-      const chogSig = script!.isChogzilla(attacker) && heavy;
-      const samuraiSig = script!.isSamurai(attacker) && heavy;
+      /* Data-driven moveset: signature on heavy, critical art on finishers. */
+      const moveSet = getFighterMoveSet(
+        (attacker === "creator" ? creatorFighter : challengerFighter)
+          .fighterClass,
+      );
+      const move: SpecialMove | null = heavy
+        ? opts.lethal || opts.suddenDeath
+          ? moveSet.criticalArt
+          : moveSet.signatureMove
+        : null;
 
-      setFx({ id: Date.now(), attacker, target, dmg, crit });
+      /* ---- PHASE 1 — DASH IN (attacker slides across the floor, dust) ---- */
+      setFx({
+        id: Date.now(),
+        attacker,
+        target,
+        dmg,
+        crit,
+        phase: "dashIn",
+        hits: move?.hitCount,
+        moveName: move?.name,
+      });
+      setDustFx({ id: Date.now(), side: attacker });
       playDashSfx();
-      await wait(180);
+      await wait(220);
       if (aborted()) return;
+
+      /* ---- PHASE 2 — STRIKE (80ms hit-stop, shake, splash, combo++) ---- */
       playHitSfx();
-      /* Anime impact starburst between the fighters on every clean hit. */
+      setFx((prev) => (prev ? { ...prev, phase: "strike" } : prev));
+      /* Multi-hit supers add their full hitCount to the combo counter. */
+      comboRef.current += move ? move.hitCount : 1;
+      setCombo({ id: Date.now(), count: comboRef.current, side: attacker });
       setImpactFx({ id: Date.now() });
-      if (signature) {
-        playImpactSfx("slam");
-        setSlamFx({ id: Date.now(), target });
-        setHitStop(true);
-        setTimeout(() => setHitStop(false), 100);
+      setHitStop(true);
+      setTimeout(() => setHitStop(false), 80);
+      if (!move || move.screenShake) {
         setCamShake(true);
-        setTimeout(() => setCamShake(false), 420);
-      } else if (keoneSig) {
-        /* Keone Mage — holographic portal + magenta lightning burst. */
-        playImpactSfx("slam");
-        setPortalFx({ id: Date.now(), target });
-        setHitStop(true);
-        setTimeout(() => setHitStop(false), 100);
-        setCamShake(true);
-        setTimeout(() => setCamShake(false), 420);
-      } else if (chogSig) {
-        /* Warlord Chogzilla — ground-pound shockwave + magma eruption. */
-        playImpactSfx("slam");
-        setChogFx({ id: Date.now(), target });
-        setHitStop(true);
-        setTimeout(() => setHitStop(false), 100);
-        setCamShake(true);
-        setTimeout(() => setCamShake(false), 420);
-      } else if (samuraiSig) {
-        /* Chog Samurai — multi-slash afterimages + crescent plasma beam. */
-        playImpactSfx("crit");
-        setSamuraiFx({ id: Date.now(), target });
-        setHitStop(true);
-        setTimeout(() => setHitStop(false), 100);
-        setCamShake(true);
-        setTimeout(() => setCamShake(false), 420);
+        setTimeout(() => setCamShake(false), heavy ? 420 : 300);
+      }
+
+      /* Cinematic camera: K.O. > COUNTER HIT (3+ combo) > CRITICAL ART. */
+      if (heavy) {
+        setCinematic({
+          id: Date.now(),
+          kind:
+            opts.lethal || opts.suddenDeath
+              ? "ko"
+              : comboRef.current >= 3
+                ? "counter"
+                : "critical",
+          moveName: move?.name,
+        });
+      }
+
+      if (move) {
+        playImpactSfx(impactCueFor(move.soundCue));
+        switch (move.vfxType) {
+          case "void_rift":
+            setSlamFx({ id: Date.now(), target });
+            break;
+          case "laser":
+            setPortalFx({ id: Date.now(), target });
+            break;
+          case "magma":
+            setChogFx({ id: Date.now(), target });
+            break;
+          case "slash":
+            setSamuraiFx({ id: Date.now(), target });
+            break;
+        }
       } else {
         playImpactSfx(crit ? "crit" : "slash");
-        if (heavy) {
-          /* Every heavy blow gets arcade-authentic freeze + shake. */
-          setHitStop(true);
-          setTimeout(() => setHitStop(false), 100);
-          setCamShake(true);
-          setTimeout(() => setCamShake(false), 360);
-        }
       }
 
       if (opts.lethal || opts.suddenDeath) {
@@ -321,27 +393,18 @@ export function BattleArenaModal({
       }
 
       const attackerName = nameOf(attacker);
+      const emoji = move ? MOVE_EMOJI[move.vfxType] : "";
       let line: string;
       if (opts.suddenDeath) {
-        line = `☠️ SUDDEN DEATH — ${attackerName} lands the finishing blow!`;
+        line = move
+          ? `☠️ SUDDEN DEATH — ${attackerName} uses ${move.name} (${move.hitCount}-HIT) to finish ${nameOf(target)}!`
+          : `☠️ SUDDEN DEATH — ${attackerName} lands the finishing blow!`;
       } else if (opts.lethal) {
-        line = signature
-          ? `💜🔥 ${attackerName} — VOID CLAW SLAM knocks ${nameOf(target)} out!!`
-          : keoneSig
-            ? `🌀⚡ ${attackerName} — DIGITAL PORTAL SLAM K.O.s ${nameOf(target)}!!`
-            : chogSig
-              ? `🌋 ${attackerName} — MAGMA ERUPTION K.O.s ${nameOf(target)}!!`
-              : samuraiSig
-                ? `⚔️🌙 ${attackerName} — CRESCENT SLASH K.O.s ${nameOf(target)}!!`
-                : `💥 ${attackerName} lands the K.O. blow!!`;
-      } else if (signature) {
-        line = `💜🔥 ${attackerName} — VOID CLAW SLAM for ${dmg} DMG!!`;
-      } else if (keoneSig) {
-        line = `🌀⚡ ${attackerName} — DIGITAL PORTAL SLAM for ${dmg} DMG!!`;
-      } else if (chogSig) {
-        line = `🌋 ${attackerName} — GROUND POUND MAGMA ERUPTION for ${dmg} DMG!!`;
-      } else if (samuraiSig) {
-        line = `⚔️🌙 ${attackerName} — CRESCENT MULTI-SLASH for ${dmg} DMG!!`;
+        line = move
+          ? `${emoji} ${attackerName} uses ${move.name} (${move.hitCount}-HIT) to K.O. ${nameOf(target)}!!`
+          : `💥 ${attackerName} lands the K.O. blow!!`;
+      } else if (move) {
+        line = `${emoji} ${attackerName} uses ${move.name} for ${dmg} DMG!`;
       } else if (crit) {
         line = `💥 ${attackerName} CRITS for ${dmg} DMG!`;
       } else {
@@ -349,10 +412,19 @@ export function BattleArenaModal({
       }
       log(line);
 
-      await wait(270);
+      /* ---- PHASE 3 — STAGGER (defender reels back, sparks + red flash) ---- */
+      await wait(160);
+      if (aborted()) return;
+      setFx((prev) => (prev ? { ...prev, phase: "stagger" } : prev));
+      await wait(180);
+      if (aborted()) return;
+
+      /* ---- PHASE 4 — DASH OUT (attacker recovers to spacing) ---- */
+      setFx((prev) => (prev ? { ...prev, phase: "dashOut" } : prev));
+      await wait(100);
       if (aborted()) return;
       setFx(null);
-      await wait(300);
+      await wait(80);
     }
 
     async function runRound(
@@ -361,6 +433,8 @@ export function BattleArenaModal({
     ) {
       if (aborted()) return;
       refill();
+      comboRef.current = 0;
+      setCombo(null);
       setRound(roundNo);
       setStage("roundintro");
       setBanner(roundNo === 3 ? "ROUND 3 // FINAL ROUND!" : `ROUND ${roundNo} // FIGHT!`);
@@ -421,6 +495,10 @@ export function BattleArenaModal({
       setChogFx(null);
       setSamuraiFx(null);
       setImpactFx(null);
+      setDustFx(null);
+      setCombo(null);
+      setCinematic(null);
+      comboRef.current = 0;
       setFinalBlowLog("");
       setTimer(99);
       setLogLines([
@@ -478,12 +556,14 @@ export function BattleArenaModal({
           `☠️ SUDDEN DEATH — ${nameOf(finisher)} landed the finishing blow`,
         );
       } else {
+        const winnerMoveSet = getFighterMoveSet(
+          (script!.finalWinnerSide === "creator"
+            ? creatorFighter
+            : challengerFighter
+          ).fighterClass,
+        );
         setFinalBlowLog(
-          script!.isJames(script!.finalWinnerSide)
-            ? `💜🔥 ${nameOf(script!.finalWinnerSide)} landed the VOID CLAW SLAM final blow`
-            : script!.isKeone(script!.finalWinnerSide)
-              ? `🌀⚡ ${nameOf(script!.finalWinnerSide)} landed the DIGITAL PORTAL SLAM final blow`
-              : `💥 ${nameOf(script!.finalWinnerSide)} landed the K.O. final blow`,
+          `💥 ${nameOf(script!.finalWinnerSide)} landed ${winnerMoveSet.criticalArt.name} for the K.O. final blow`,
         );
       }
 
@@ -512,10 +592,13 @@ export function BattleArenaModal({
     setChogFx(null);
     setSamuraiFx(null);
     setImpactFx(null);
+    setDustFx(null);
+    setCombo(null);
+    setCinematic(null);
     setStage("verdict");
   }
 
-  /* Sprite state machine per side. */
+  /* Sprite state machine per side — tracks the combo choreography phases. */
   function sideState(side: Side): SpriteState {
     if (!script) return "idle";
     if (stage === "verdict")
@@ -525,9 +608,34 @@ export function BattleArenaModal({
     if (stage === "secondwind")
       return side === script.revivedSide ? "secondWind" : "idle";
     if (!fx) return "idle";
-    if (fx.attacker === side) return "attack";
-    if (fx.target === side) return "hit";
+    if (fx.attacker === side) {
+      if (fx.phase === "dashIn") return "dashIn";
+      if (fx.phase === "dashOut") return "dashOut";
+      return "attack"; // strike + stagger-hold
+    }
+    if (fx.target === side) {
+      if (fx.phase === "dashIn") return "idle";
+      if (fx.phase === "strike") return "hit";
+      return "stagger"; // stagger + dashOut
+    }
     return "idle";
+  }
+
+  /* Wrapper-level positional choreography for one exchange (single
+   * 640ms keyframe per side: dash-in → impact lunge → knockback → recovery). */
+  const inCombat = stage === "combat" || stage === "suddendeath";
+  function attackerMotion(side: Side): string {
+    if (!fx || !inCombat) return "";
+    return side === "creator" ? "combo-advance-right" : "combo-advance-left";
+  }
+  function targetMotion(side: Side): string {
+    if (!fx || !inCombat) return "";
+    return side === "creator" ? "combo-recoil-left" : "combo-recoil-right";
+  }
+  function motionFor(side: Side): string {
+    if (fx?.attacker === side) return attackerMotion(side);
+    if (fx?.target === side) return targetMotion(side);
+    return "";
   }
 
   if (!outcome || !script) return null;
@@ -543,18 +651,6 @@ export function BattleArenaModal({
         role="dialog"
         aria-modal="true"
       >
-        {/* Skip control (pre-verdict only) */}
-        {fighting && (
-          <button
-            type="button"
-            onClick={skipToVerdict}
-            className="absolute right-3 top-3 z-30 inline-flex items-center gap-1.5 rounded-lg border border-white/10 bg-black/60 px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-wider text-zinc-400 transition hover:border-white/30 hover:text-zinc-200"
-          >
-            <SkipForward className="h-3 w-3" aria-hidden />
-            Skip
-          </button>
-        )}
-
         {/* ================= FINAL VERDICT ================= */}
         {stage === "verdict" ? (
           <VerdictScreen
@@ -602,8 +698,20 @@ export function BattleArenaModal({
                 "relative h-[320px] overflow-hidden sm:h-[360px]",
                 camShake && "arena-cam-shake",
                 hitStop && "arena-hit-stop",
+                cinematic && "arena-cinematic-zoom",
               )}
             >
+              {/* Skip control — tucked into the stage corner (pre-verdict only) */}
+              {fighting && (
+                <button
+                  type="button"
+                  onClick={skipToVerdict}
+                  className="absolute bottom-2 right-2 z-[33] inline-flex items-center gap-1.5 rounded-lg border border-white/10 bg-black/70 px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-wider text-zinc-400 transition hover:border-white/30 hover:text-zinc-200"
+                >
+                  <SkipForward className="h-3 w-3" aria-hidden />
+                  Skip
+                </button>
+              )}
               {/* Arena background art */}
               <div
                 className="absolute inset-0 bg-cover bg-center"
@@ -661,21 +769,19 @@ export function BattleArenaModal({
                 ))}
               </div>
 
-              {/* Fighters — close-range spacing (18% in) */}
+              {/* Fighters — face-to-face in the center foreground */}
               <div
                 key={`creator-${fx?.id ?? "idle"}`}
                 className={cn(
-                  "absolute bottom-6 left-[18%]",
-                  fx?.attacker === "creator" &&
-                    (stage === "combat" || stage === "suddendeath") &&
-                    "battle-lunge-right",
+                  "absolute bottom-5 left-[32%]",
+                  motionFor("creator"),
                 )}
               >
                 <SheetFighter
                   fighterClass={creatorFighter.fighterClass}
                   state={sideState("creator")}
                   facing="right"
-                  size={180}
+                  size={stageSize(creatorFighter)}
                   animKey={spriteAnimKey}
                 />
                 {fx && fx.target === "creator" && (
@@ -685,23 +791,37 @@ export function BattleArenaModal({
               <div
                 key={`challenger-${fx?.id ?? "idle"}`}
                 className={cn(
-                  "absolute bottom-6 right-[18%]",
-                  fx?.attacker === "challenger" &&
-                    (stage === "combat" || stage === "suddendeath") &&
-                    "battle-lunge-left",
+                  "absolute bottom-5 right-[32%]",
+                  motionFor("challenger"),
                 )}
               >
                 <SheetFighter
                   fighterClass={challengerFighter.fighterClass}
                   state={sideState("challenger")}
                   facing="left"
-                  size={180}
+                  size={stageSize(challengerFighter)}
                   animKey={spriteAnimKey}
                 />
                 {fx && fx.target === "challenger" && (
                   <DamageNumber key={fx.id} fx={fx} />
                 )}
               </div>
+
+              {/* Dash-in dust/smoke behind the attacker */}
+              {dustFx && <DustFx key={`dust-${dustFx.id}`} side={dustFx.side} />}
+
+              {/* Defender stagger: red flash frame + damage sparks */}
+              {fx &&
+                (fx.phase === "strike" || fx.phase === "stagger") && (
+                  <>
+                    <StaggerFlash
+                      key={`flash-${fx.id}`}
+                      side={fx.target}
+                      bright={fx.phase === "strike"}
+                    />
+                    <DamageSparks key={`sparks-${fx.id}`} side={fx.target} />
+                  </>
+                )}
 
               {/* VOID CLAW SLAM — shockwave ring + jagged lightning + void runes */}
               {slamFx && (
@@ -710,7 +830,7 @@ export function BattleArenaModal({
                     key={`ring-${slamFx.id}`}
                     className="void-slam-ring pointer-events-none absolute z-20 h-44 w-44"
                     style={{
-                      left: slamFx.target === "creator" ? "22%" : "78%",
+                      left: slamFx.target === "creator" ? "32%" : "68%",
                       top: "58%",
                     }}
                     aria-hidden
@@ -722,7 +842,7 @@ export function BattleArenaModal({
                       key={`${slamFx.id}-${glyph}`}
                       className="rune-float pointer-events-none absolute z-[26] text-xl font-bold text-purple-300"
                       style={{
-                        left: `calc(${slamFx.target === "creator" ? "22%" : "78%"} + ${(i - 1.5) * 30}px)`,
+                        left: `calc(${slamFx.target === "creator" ? "32%" : "68%"} + ${(i - 1.5) * 30}px)`,
                         top: "62%",
                         animationDelay: `${i * 120}ms`,
                         textShadow: "0 0 10px rgba(168,85,247,0.9)",
@@ -752,6 +872,64 @@ export function BattleArenaModal({
 
               {/* Anime impact starburst between the fighters */}
               {impactFx && <ImpactStarburst key={`burst-${impactFx.id}`} />}
+
+              {/* Floating combo hit counter */}
+              {combo && (
+                <div
+                  key={`combo-${combo.id}`}
+                  className="combo-pop pointer-events-none absolute left-1/2 top-2 z-[31] -translate-x-1/2 text-center"
+                  aria-live="polite"
+                >
+                  <p
+                    className={cn(
+                      "whitespace-nowrap font-black italic tracking-wider drop-shadow-[0_0_14px_rgba(251,146,60,0.8)]",
+                      combo.count >= 10
+                        ? "combo-count-text text-4xl text-amber-300"
+                        : "combo-count-text text-2xl text-orange-300",
+                    )}
+                  >
+                    {combo.count >= 10
+                      ? `${combo.count} HITS!`
+                      : `${combo.count} Hit${combo.count > 1 ? "s" : ""}...`}
+                  </p>
+                </div>
+              )}
+
+              {/* Cinematic camera: vignette + color flash + big arcade text */}
+              {cinematic && (
+                <div
+                  key={`cine-${cinematic.id}`}
+                  className="pointer-events-none absolute inset-0 z-[32]"
+                  aria-live="assertive"
+                >
+                  <div className="cinematic-vignette absolute inset-0" />
+                  <div className="cinematic-flash absolute inset-0" />
+                  <div className="absolute inset-0 flex flex-col items-center justify-center gap-1">
+                    <p
+                      className={cn(
+                        "cinematic-text whitespace-nowrap font-black italic tracking-[0.12em]",
+                        cinematic.kind === "ko" &&
+                          "text-6xl text-amber-300 drop-shadow-[0_0_30px_rgba(251,191,36,0.95)] sm:text-7xl",
+                        cinematic.kind === "critical" &&
+                          "text-5xl bg-gradient-to-r from-red-400 via-amber-300 to-red-500 bg-clip-text text-transparent drop-shadow-[0_0_24px_rgba(239,68,68,0.9)] sm:text-6xl",
+                        cinematic.kind === "counter" &&
+                          "text-5xl bg-gradient-to-r from-cyan-300 via-white to-fuchsia-400 bg-clip-text text-transparent drop-shadow-[0_0_24px_rgba(34,211,238,0.9)] sm:text-6xl",
+                      )}
+                    >
+                      {cinematic.kind === "ko"
+                        ? "K.O."
+                        : cinematic.kind === "critical"
+                          ? "CRITICAL ART"
+                          : "COUNTER HIT"}
+                    </p>
+                    {cinematic.moveName && (
+                      <p className="cinematic-move-name whitespace-nowrap text-xs font-black uppercase tracking-[0.35em] text-white/90 drop-shadow-[0_0_12px_rgba(255,255,255,0.6)] sm:text-sm">
+                        {cinematic.moveName}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              )}
 
               {/* Banner overlays: ROUND N // FIGHT!, K.O., SUDDEN DEATH */}
               {banner && (
@@ -937,7 +1115,14 @@ function DamageNumber({ fx }: { fx: Fx }) {
           : "text-base text-red-300 drop-shadow-[0_0_8px_rgba(239,68,68,0.9)]",
       )}
     >
-      -{fx.dmg} HP{fx.crit ? " 💥 CRIT!" : ""}
+      -{fx.dmg} HP
+      {fx.hits && fx.hits > 1 ? ` ×${fx.hits}` : ""}
+      {fx.crit ? " 💥 CRIT!" : ""}
+      {fx.moveName && (
+        <span className="mt-0.5 block text-center text-[10px] font-bold uppercase tracking-wider text-fuchsia-200 drop-shadow-[0_0_8px_rgba(232,121,249,0.85)]">
+          {fx.moveName}
+        </span>
+      )}
     </p>
   );
 }
@@ -954,9 +1139,79 @@ function ImpactStarburst() {
   );
 }
 
+/** Dash-in dust/smoke puffs kicked up behind the attacker. */
+function DustFx({ side }: { side: Side }) {
+  return (
+    <div
+      className="pointer-events-none absolute bottom-4 z-[18]"
+      style={{
+        left: side === "creator" ? "26%" : "auto",
+        right: side === "creator" ? "auto" : "26%",
+      }}
+      aria-hidden
+    >
+      {[0, 1, 2, 3].map((i) => (
+        <span
+          key={i}
+          className="dust-puff absolute h-3.5 w-3.5 rounded-full bg-zinc-300/55 blur-[2px]"
+          style={{
+            left: `${(i - 1.5) * 12}px`,
+            animationDelay: `${i * 55}ms`,
+          }}
+        />
+      ))}
+    </div>
+  );
+}
+
+/** Soft radial red/white flash over the staggered defender (blurred — no hard box). */
+function StaggerFlash({
+  side,
+  bright,
+}: {
+  side: Side;
+  /** true = strike phase (white-hot flash); false = stagger phase (red). */
+  bright: boolean;
+}) {
+  return (
+    <div
+      className="stagger-flash pointer-events-none absolute bottom-12 z-[26] h-40 w-40 rounded-full blur-xl"
+      style={{
+        left: side === "creator" ? "24%" : "60%",
+        background: bright
+          ? "radial-gradient(circle, rgba(255,255,255,0.55) 0%, rgba(255,255,255,0.2) 45%, transparent 70%)"
+          : "radial-gradient(circle, rgba(239,68,68,0.55) 0%, rgba(239,68,68,0.22) 45%, transparent 70%)",
+      }}
+      aria-hidden
+    />
+  );
+}
+
+/** Damage sparks radiating off the staggered defender. */
+function DamageSparks({ side }: { side: Side }) {
+  const center = side === "creator" ? "32%" : "68%";
+  return (
+    <div className="pointer-events-none absolute inset-0 z-[27]" aria-hidden>
+      {Array.from({ length: 6 }).map((_, i) => (
+        <span
+          key={i}
+          className="damage-spark absolute h-1.5 w-1.5 rounded-full"
+          style={{
+            left: `calc(${center} + ${((i % 3) - 1) * 28}px)`,
+            top: `calc(46% + ${(i % 2 ? -1 : 1) * 16}px)`,
+            background: i % 2 ? "#fca5a5" : "#fde68a",
+            boxShadow: "0 0 8px rgba(252,165,165,0.9)",
+            animationDelay: `${i * 40}ms`,
+          }}
+        />
+      ))}
+    </div>
+  );
+}
+
 /** Warlord Chogzilla — ground-pound shockwave, blade trail, magma particles. */
 function ChogzillaSlamFx({ side }: { side: Side }) {
-  const center = side === "creator" ? "22%" : "78%";
+  const center = side === "creator" ? "32%" : "68%";
   return (
     <div className="pointer-events-none absolute inset-0 z-[25]" aria-hidden>
       {/* Ground-pound shockwave ring */}
@@ -1002,7 +1257,7 @@ function ChogzillaSlamFx({ side }: { side: Side }) {
 
 /** Chog Samurai — multi-slash streaks, crescent plasma beam, sparks. */
 function SamuraiSlashFx({ side }: { side: Side }) {
-  const center = side === "creator" ? "22%" : "78%";
+  const center = side === "creator" ? "32%" : "68%";
   return (
     <div className="pointer-events-none absolute inset-0 z-[25]" aria-hidden>
       {/* High-speed multi-slash afterimage streaks */}
@@ -1104,7 +1359,7 @@ function VoidLightning({ side }: { side: Side }) {
 
 /** Keone Mage signature — holographic purple/magenta portal + lightning burst. */
 function KeonePortalFx({ side }: { side: Side }) {
-  const center = side === "creator" ? "22%" : "78%";
+  const center = side === "creator" ? "32%" : "68%";
   return (
     <div className="pointer-events-none absolute inset-0 z-[25]" aria-hidden>
       {/* Holographic portal ring */}
@@ -1133,7 +1388,7 @@ function KeonePortalFx({ side }: { side: Side }) {
       {/* Magenta/cyan lightning bolts across the target */}
       <svg
         className="void-lightning absolute bottom-4 h-48 w-40"
-        style={{ left: side === "creator" ? "14%" : "auto", right: side === "creator" ? "auto" : "14%" }}
+        style={{ left: side === "creator" ? "24%" : "auto", right: side === "creator" ? "auto" : "24%" }}
         viewBox="0 0 100 160"
         preserveAspectRatio="none"
       >
