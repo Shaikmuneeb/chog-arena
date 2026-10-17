@@ -10,7 +10,6 @@ import { SheetFighter } from "./ChogzillaSprite";
 import {
   getFighterMoveSet,
   impactCueFor,
-  MOVE_EMOJI,
   type SpecialMove,
 } from "@/data/fighterMoves";
 import { cn, formatMon, truncateAddress } from "@/lib/utils";
@@ -156,13 +155,11 @@ export function BattleArenaModal({
   } | null>(null);
   const [hitStop, setHitStop] = useState(false);
   const [camShake, setCamShake] = useState(false);
-  const [logLines, setLogLines] = useState<string[]>([]);
   const [timer, setTimer] = useState(99);
   const [finalBlowLog, setFinalBlowLog] = useState<string>("");
 
   const matchRunningRef = useRef(false);
   const comboRef = useRef(0);
-  const logEndRef = useRef<HTMLDivElement | null>(null);
 
   const nameOf = (side: Side): string =>
     side === "creator" ? creatorFighter.name : challengerFighter.name;
@@ -218,11 +215,6 @@ export function BattleArenaModal({
     }, 1000);
     return () => clearInterval(interval);
   }, [stage]);
-
-  /* Keep the combat log pinned to the latest line. */
-  useEffect(() => {
-    logEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-  }, [logLines]);
 
   /* Clear the Void Claw slam shockwave after its ring plays out. */
   useEffect(() => {
@@ -294,8 +286,6 @@ export function BattleArenaModal({
       setHpBoth(next);
     };
     const refill = () => setHpBoth({ creator: 100, challenger: 100 });
-
-    const log = (line: string) => setLogLines((l) => [...l, line]);
 
     async function runExchange(
       attacker: Side,
@@ -390,26 +380,6 @@ export function BattleArenaModal({
         setHpBoth(next);
       }
 
-      const attackerName = nameOf(attacker);
-      const emoji = move ? MOVE_EMOJI[move.vfxType] : "";
-      let line: string;
-      if (opts.suddenDeath) {
-        line = move
-          ? `☠️ SUDDEN DEATH — ${attackerName} uses ${move.name} (${move.hitCount}-HIT) to finish ${nameOf(target)}!`
-          : `☠️ SUDDEN DEATH — ${attackerName} lands the finishing blow!`;
-      } else if (opts.lethal) {
-        line = move
-          ? `${emoji} ${attackerName} uses ${move.name} (${move.hitCount}-HIT) to K.O. ${nameOf(target)}!!`
-          : `⚡ ${attackerName} lands the K.O. blow!!`;
-      } else if (move) {
-        line = `${emoji} ${attackerName} uses ${move.name} for ${dmg} DMG!`;
-      } else if (crit) {
-        line = `⚡ ${attackerName} CRITS for ${dmg} DMG!`;
-      } else {
-        line = `⚡ ${attackerName} strikes for ${dmg} DMG!`;
-      }
-      log(line);
-
       /* ---- PHASE 3 — STAGGER (defender reels back, sparks + red flash) ---- */
       await wait(160);
       if (aborted()) return;
@@ -437,11 +407,6 @@ export function BattleArenaModal({
       setStage("roundintro");
       setBanner(roundNo === 3 ? "ROUND 3 // FINAL ROUND!" : `ROUND ${roundNo} // FIGHT!`);
       playRoundAnnouncement(roundNo); // exactly once per round per match
-      log(
-        roundNo === 3
-          ? "🔊 ROUND 3 — FINAL ROUND — FIGHT!"
-          : `🔊 ROUND ${roundNo} — FIGHT!`,
-      );
       await wait(1200);
       if (aborted()) return;
 
@@ -474,7 +439,6 @@ export function BattleArenaModal({
       setFinalBlowLog(
         `⚡ ${nameOf(roundWinnerSide)} won Round ${roundNo} by K.O.`,
       );
-      log(`🏆 ROUND ${roundNo} K.O. — ${nameOf(roundWinnerSide)} takes the round!`);
       await wait(1600);
       if (aborted()) return;
       setBanner(null);
@@ -499,11 +463,6 @@ export function BattleArenaModal({
       comboRef.current = 0;
       setFinalBlowLog("");
       setTimer(99);
-      setLogLines([
-        `⚔️ Duel #${outcome!.duelId} — ${nameOf("creator")} vs ${nameOf("challenger")}!`,
-        `💰 Prize pot: ${formatMon(outcome!.pot)} MON on the line!`,
-        `🥊 Best of 3 rounds — Round 1 upcoming!`,
-      ]);
       await wait(1000);
       if (aborted()) return;
 
@@ -528,7 +487,6 @@ export function BattleArenaModal({
 
         setStage("secondwind");
         playSecondWindSfx();
-        log(`🛡️ SECOND WIND! ${nameOf(revived)} resurrects with 50 HP!`);
         setHpBoth({
           creator: revived === "creator" ? 50 : hpState.creator,
           challenger: revived === "challenger" ? 50 : hpState.challenger,
@@ -539,7 +497,6 @@ export function BattleArenaModal({
         /* Sudden-death clash — finisher honors revivedWins. */
         setStage("suddendeath");
         setBanner("☠️ SUDDEN DEATH!");
-        log("☠️ SUDDEN DEATH — next blow decides everything!");
         await wait(900);
         if (aborted()) return;
         setBanner(null);
@@ -965,37 +922,6 @@ export function BattleArenaModal({
                   </div>
                 </>
               )}
-            </div>
-
-            {/* Combat log */}
-            <div className="mx-4 mb-5 mt-3 rounded-xl border border-white/10 bg-black/60 sm:mx-6">
-              <p className="border-b border-white/5 px-4 py-2 text-[10px] font-bold uppercase tracking-widest text-zinc-500">
-                Combat Log
-              </p>
-              <div className="h-24 space-y-1 overflow-y-auto px-4 py-2.5">
-                {logLines.map((line, i) => (
-                  <p
-                    key={i}
-                    className={cn(
-                      "font-mono text-[11px] leading-relaxed",
-                      line.startsWith("🛡️") || line.startsWith("☠️")
-                        ? "text-purple-300"
-                        : line.startsWith("⚡") || line.startsWith("🏆")
-                          ? "text-amber-300"
-                          : line.startsWith("💜")
-                            ? "text-fuchsia-300"
-                            : line.startsWith("💰")
-                              ? "text-amber-200/80"
-                              : line.startsWith("🔊")
-                                ? "text-red-300"
-                                : "text-zinc-300",
-                    )}
-                  >
-                    {line}
-                  </p>
-                ))}
-                <div ref={logEndRef} />
-              </div>
             </div>
           </>
         )}
