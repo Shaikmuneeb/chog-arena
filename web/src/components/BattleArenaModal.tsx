@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import { ExternalLink, Loader2, SkipForward, Swords } from "lucide-react";
-import { FighterAvatarBadge } from "@/context/FighterProfileContext";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { ExternalLink, Loader2, Swords } from "lucide-react";
+import { useFighterProfile } from "@/context/FighterProfileContext";
 import type { FighterClass } from "@/config/fighterClasses";
 import { FIGHTER_CLASS_META } from "@/config/fighterClasses";
 import type { SpriteState } from "./FighterSprite";
@@ -62,7 +62,7 @@ const CLASS_SIZE_SCALE: Record<FighterClass, number> = {
 };
 
 function stageSize(f: FighterDescriptor): number {
-  return Math.round(190 * (CLASS_SIZE_SCALE[f.fighterClass] ?? 1));
+  return Math.round(225 * (CLASS_SIZE_SCALE[f.fighterClass] ?? 1));
 }
 
 type Stage =
@@ -161,7 +161,6 @@ export function BattleArenaModal({
   const [finalBlowLog, setFinalBlowLog] = useState<string>("");
 
   const matchRunningRef = useRef(false);
-  const skipRef = useRef(false);
   const comboRef = useRef(0);
   const logEndRef = useRef<HTMLDivElement | null>(null);
 
@@ -278,10 +277,9 @@ export function BattleArenaModal({
     if (!isOpen || !outcome || !script) return;
     if (matchRunningRef.current) return;
     matchRunningRef.current = true;
-    skipRef.current = false;
 
     let cancelled = false;
-    const aborted = () => cancelled || skipRef.current;
+    const aborted = () => cancelled;
     const wait = (ms: number) =>
       new Promise<void>((resolve) => setTimeout(resolve, ms));
 
@@ -402,11 +400,11 @@ export function BattleArenaModal({
       } else if (opts.lethal) {
         line = move
           ? `${emoji} ${attackerName} uses ${move.name} (${move.hitCount}-HIT) to K.O. ${nameOf(target)}!!`
-          : `💥 ${attackerName} lands the K.O. blow!!`;
+          : `⚡ ${attackerName} lands the K.O. blow!!`;
       } else if (move) {
         line = `${emoji} ${attackerName} uses ${move.name} for ${dmg} DMG!`;
       } else if (crit) {
-        line = `💥 ${attackerName} CRITS for ${dmg} DMG!`;
+        line = `⚡ ${attackerName} CRITS for ${dmg} DMG!`;
       } else {
         line = `⚡ ${attackerName} strikes for ${dmg} DMG!`;
       }
@@ -563,7 +561,7 @@ export function BattleArenaModal({
           ).fighterClass,
         );
         setFinalBlowLog(
-          `💥 ${nameOf(script!.finalWinnerSide)} landed ${winnerMoveSet.criticalArt.name} for the K.O. final blow`,
+          `⚡ ${nameOf(script!.finalWinnerSide)} landed ${winnerMoveSet.criticalArt.name} for the K.O. final blow`,
         );
       }
 
@@ -581,22 +579,6 @@ export function BattleArenaModal({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, outcome]);
-
-  function skipToVerdict() {
-    skipRef.current = true;
-    stopArenaAudio();
-    setBanner(null);
-    setFx(null);
-    setSlamFx(null);
-    setPortalFx(null);
-    setChogFx(null);
-    setSamuraiFx(null);
-    setImpactFx(null);
-    setDustFx(null);
-    setCombo(null);
-    setCinematic(null);
-    setStage("verdict");
-  }
 
   /* Sprite state machine per side — tracks the combo choreography phases. */
   function sideState(side: Side): SpriteState {
@@ -640,14 +622,13 @@ export function BattleArenaModal({
 
   if (!outcome || !script) return null;
 
-  const fighting = stage !== "verdict";
   const revivedName = script.revivedSide ? nameOf(script.revivedSide) : null;
   const spriteAnimKey = `${stage}-${fx?.id ?? 0}`;
 
   return (
     <div className="fixed inset-0 z-[95] flex items-center justify-center bg-black/90 p-3 backdrop-blur-sm sm:p-4">
       <div
-        className="relative flex w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-red-500/30 bg-zinc-950 shadow-[0_0_70px_-10px_rgba(239,68,68,0.3)]"
+        className="relative flex w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-red-500/30 bg-zinc-950 shadow-[0_0_70px_-10px_rgba(239,68,68,0.3)]"
         role="dialog"
         aria-modal="true"
       >
@@ -695,36 +676,29 @@ export function BattleArenaModal({
             {/* ============ 2D BATTLE STAGE ============ */}
             <div
               className={cn(
-                "relative h-[320px] overflow-hidden sm:h-[360px]",
+                "relative h-[400px] overflow-hidden sm:h-[470px]",
                 camShake && "arena-cam-shake",
                 hitStop && "arena-hit-stop",
                 cinematic && "arena-cinematic-zoom",
               )}
             >
-              {/* Skip control — tucked into the stage corner (pre-verdict only) */}
-              {fighting && (
-                <button
-                  type="button"
-                  onClick={skipToVerdict}
-                  className="absolute bottom-2 right-2 z-[33] inline-flex items-center gap-1.5 rounded-lg border border-white/10 bg-black/70 px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-wider text-zinc-400 transition hover:border-white/30 hover:text-zinc-200"
-                >
-                  <SkipForward className="h-3 w-3" aria-hidden />
-                  Skip
-                </button>
-              )}
-              {/* Arena background art */}
+              {/* Arena background art — heavily dimmed + softened */}
               <div
                 className="absolute inset-0 bg-cover bg-center"
-                style={{ backgroundImage: "url(/assets/arena-background.jpg)" }}
+                style={{
+                  backgroundImage: "url(/assets/arena-background.jpg)",
+                  filter: "brightness(0.5) contrast(0.9) blur(2px)",
+                }}
                 aria-hidden
               />
-              {/* Dark overlay — keeps HUD text, HP bars, and runes crisp */}
+              {/* Heavy dark gradient overlay — keeps HUD, fighters, and
+                  floating text crisp against a quiet backdrop */}
               <div
-                className="absolute inset-0 bg-gradient-to-b from-black/55 via-black/35 to-black/70"
+                className="absolute inset-0 bg-gradient-to-t from-zinc-950 via-zinc-950/80 to-zinc-950/60"
                 aria-hidden
               />
-              {/* Arena floor with glowing Monad runes */}
-              <div className="absolute inset-x-0 bottom-0 h-[38%] bg-gradient-to-b from-transparent via-[#241a3d]/60 to-[#120d22]/90">
+              {/* Arena floor — subtle gradient, no harsh graphics */}
+              <div className="absolute inset-x-0 bottom-0 h-[38%] bg-gradient-to-b from-transparent via-[#241a3d]/40 to-[#120d22]/70">
                 <svg
                   className="absolute inset-0 h-full w-full"
                   viewBox="0 0 800 160"
@@ -740,7 +714,7 @@ export function BattleArenaModal({
                       y2="160"
                       stroke="#7c3aed"
                       strokeWidth="0.8"
-                      opacity="0.25"
+                      opacity="0.12"
                     />
                   ))}
                   <line
@@ -750,7 +724,7 @@ export function BattleArenaModal({
                     y2="2"
                     stroke="#a855f7"
                     strokeWidth="2"
-                    opacity="0.5"
+                    opacity="0.25"
                   />
                 </svg>
                 {[
@@ -760,7 +734,7 @@ export function BattleArenaModal({
                 ].map((rune) => (
                   <span
                     key={rune.glyph}
-                    className="animate-pulse absolute select-none text-2xl text-purple-400/60 drop-shadow-[0_0_10px_rgba(168,85,247,0.8)]"
+                    className="animate-pulse absolute select-none text-2xl text-purple-400/30 drop-shadow-[0_0_10px_rgba(168,85,247,0.4)]"
                     style={{ left: rune.left, top: rune.top }}
                     aria-hidden
                   >
@@ -773,7 +747,7 @@ export function BattleArenaModal({
               <div
                 key={`creator-${fx?.id ?? "idle"}`}
                 className={cn(
-                  "absolute bottom-5 left-[32%]",
+                  "sprite-pixelated absolute bottom-5 left-[32%]",
                   motionFor("creator"),
                 )}
               >
@@ -791,7 +765,7 @@ export function BattleArenaModal({
               <div
                 key={`challenger-${fx?.id ?? "idle"}`}
                 className={cn(
-                  "absolute bottom-5 right-[32%]",
+                  "sprite-pixelated absolute bottom-5 right-[32%]",
                   motionFor("challenger"),
                 )}
               >
@@ -870,8 +844,8 @@ export function BattleArenaModal({
                 <SamuraiSlashFx key={`sam-${samuraiFx.id}`} side={samuraiFx.target} />
               )}
 
-              {/* Anime impact starburst between the fighters */}
-              {impactFx && <ImpactStarburst key={`burst-${impactFx.id}`} />}
+              {/* Cyberpunk hit-marker on every clean strike */}
+              {impactFx && <NeonHitMarker key={`burst-${impactFx.id}`} />}
 
               {/* Floating combo hit counter */}
               {combo && (
@@ -882,10 +856,10 @@ export function BattleArenaModal({
                 >
                   <p
                     className={cn(
-                      "whitespace-nowrap font-black italic tracking-wider drop-shadow-[0_0_14px_rgba(251,146,60,0.8)]",
+                      "combo-count-text whitespace-nowrap font-mono font-black italic tracking-[0.25em]",
                       combo.count >= 10
-                        ? "combo-count-text text-4xl text-amber-300"
-                        : "combo-count-text text-2xl text-orange-300",
+                        ? "text-4xl text-amber-300"
+                        : "text-2xl text-orange-300",
                     )}
                   >
                     {combo.count >= 10
@@ -904,6 +878,15 @@ export function BattleArenaModal({
                 >
                   <div className="cinematic-vignette absolute inset-0" />
                   <div className="cinematic-flash absolute inset-0" />
+                  {/* Subtle glitch strips */}
+                  <div
+                    className="glitch-strip absolute left-[16%] top-[38%] h-2.5 w-36 bg-gradient-to-r from-transparent via-cyan-400/45 to-transparent"
+                    style={{ animationDelay: "60ms" }}
+                  />
+                  <div
+                    className="glitch-strip absolute left-[54%] top-[58%] h-2 w-40 bg-gradient-to-r from-transparent via-fuchsia-400/45 to-transparent"
+                    style={{ animationDelay: "140ms" }}
+                  />
                   <div className="absolute inset-0 flex flex-col items-center justify-center gap-1">
                     <p
                       className={cn(
@@ -989,7 +972,7 @@ export function BattleArenaModal({
               <p className="border-b border-white/5 px-4 py-2 text-[10px] font-bold uppercase tracking-widest text-zinc-500">
                 Combat Log
               </p>
-              <div className="h-20 space-y-1 overflow-y-auto px-4 py-2.5">
+              <div className="h-24 space-y-1 overflow-y-auto px-4 py-2.5">
                 {logLines.map((line, i) => (
                   <p
                     key={i}
@@ -997,7 +980,7 @@ export function BattleArenaModal({
                       "font-mono text-[11px] leading-relaxed",
                       line.startsWith("🛡️") || line.startsWith("☠️")
                         ? "text-purple-300"
-                        : line.startsWith("💥") || line.startsWith("🏆")
+                        : line.startsWith("⚡") || line.startsWith("🏆")
                           ? "text-amber-300"
                           : line.startsWith("💜")
                             ? "text-fuchsia-300"
@@ -1023,6 +1006,49 @@ export function BattleArenaModal({
 
 /* ------------------------------------------------------------- arcade HUD */
 
+/**
+ * Circular HUD portrait: custom profile picture when set, otherwise a
+ * clean class-tinted sprite headshot (no initials, no clutter).
+ */
+function HudPortrait({ fighter }: { fighter: FighterDescriptor }) {
+  const { getProfile } = useFighterProfile();
+  const profile = getProfile(fighter.address);
+  const theme = FIGHTER_CLASS_META[fighter.fighterClass];
+  const [imgFailed, setImgFailed] = useState(false);
+
+  useEffect(() => {
+    setImgFailed(false);
+  }, [profile?.avatarUrl]);
+
+  const avatarUrl = profile?.avatarUrl && !imgFailed ? profile.avatarUrl : null;
+
+  return (
+    <span
+      className="relative flex h-8 w-8 shrink-0 items-start justify-center overflow-hidden rounded-full border"
+      style={{
+        borderColor: `${theme.secondary}88`,
+        background: "#09090b",
+        boxShadow: `0 0 10px ${theme.primary}55`,
+      }}
+      aria-hidden
+    >
+      {avatarUrl ? (
+        <img
+          src={avatarUrl}
+          alt=""
+          className="h-full w-full object-cover"
+          onError={() => setImgFailed(true)}
+        />
+      ) : (
+        /* Class sprite headshot — top crop of the idle fighter canvas */
+        <span className="sprite-pixelated -mt-0.5 flex items-start justify-center">
+          <SheetFighter fighterClass={fighter.fighterClass} state="idle" size={42} />
+        </span>
+      )}
+    </span>
+  );
+}
+
 function HudSide({
   fighter,
   hp,
@@ -1032,7 +1058,6 @@ function HudSide({
   hp: number;
   align: "left" | "right";
 }) {
-  const theme = FIGHTER_CLASS_META[fighter.fighterClass];
   const barColor =
     hp > 50
       ? "from-emerald-500 to-lime-400"
@@ -1047,17 +1072,10 @@ function HudSide({
         align === "right" && "flex-row-reverse",
       )}
     >
-      <FighterAvatarBadge address={fighter.address} size="sm" />
+      <HudPortrait fighter={fighter} />
       <div className={cn("min-w-0", align === "right" && "text-right")}>
         <p className="truncate text-xs font-extrabold text-zinc-100">
           {fighter.name}
-        </p>
-        <p
-          className="truncate text-[9px] font-bold uppercase tracking-wider"
-          style={{ color: theme.secondary }}
-        >
-          {theme.label}
-          {fighter.title ? ` · ${fighter.title}` : ""}
         </p>
       </div>
     </div>
@@ -1109,17 +1127,21 @@ function DamageNumber({ fx }: { fx: Fx }) {
   return (
     <p
       className={cn(
-        "animate-damage-arc pointer-events-none absolute -top-3 left-1/2 z-10 whitespace-nowrap font-black",
+        "animate-damage-arc pointer-events-none absolute -top-3 left-1/2 z-10 whitespace-nowrap font-mono text-base font-black italic tracking-wider",
         fx.crit
-          ? "text-lg text-amber-300 drop-shadow-[0_0_10px_rgba(251,191,36,0.9)]"
-          : "text-base text-red-300 drop-shadow-[0_0_8px_rgba(239,68,68,0.9)]",
+          ? "text-amber-300 drop-shadow-[0_0_10px_rgba(251,191,36,0.9)]"
+          : "text-red-300 drop-shadow-[0_0_8px_rgba(239,68,68,0.9)]",
       )}
     >
       -{fx.dmg} HP
       {fx.hits && fx.hits > 1 ? ` ×${fx.hits}` : ""}
-      {fx.crit ? " 💥 CRIT!" : ""}
+      {fx.crit ? (
+        <span className="ml-1 text-[11px] font-bold tracking-[0.2em] text-amber-200">
+          //CRIT
+        </span>
+      ) : ""}
       {fx.moveName && (
-        <span className="mt-0.5 block text-center text-[10px] font-bold uppercase tracking-wider text-fuchsia-200 drop-shadow-[0_0_8px_rgba(232,121,249,0.85)]">
+        <span className="mt-0.5 block text-center text-[10px] font-bold uppercase tracking-[0.25em] text-fuchsia-200 drop-shadow-[0_0_8px_rgba(232,121,249,0.85)]">
           {fx.moveName}
         </span>
       )}
@@ -1127,14 +1149,47 @@ function DamageNumber({ fx }: { fx: Fx }) {
   );
 }
 
-/** Anime impact starburst between the two fighters on every clean strike. */
-function ImpactStarburst() {
+/**
+ * Cyberpunk hit-marker: neon slash cross (cyan/fuchsia), violet/gold
+ * spark flyout, and a sleek white core flash — no cartoon explosions.
+ */
+function NeonHitMarker() {
   return (
     <div
-      className="pointer-events-none absolute left-1/2 top-[52%] z-[27] -translate-x-1/2 -translate-y-1/2"
+      className="pointer-events-none absolute left-1/2 top-[52%] z-[27]"
       aria-hidden
     >
-      <span className="impact-starburst block text-4xl leading-none">💥</span>
+      {/* Sharp neon slash lines */}
+      <span className="hit-marker-slash-a absolute left-0 top-0 h-0.5 w-16 bg-gradient-to-r from-transparent via-cyan-300 to-transparent shadow-[0_0_10px_rgba(34,211,238,0.95)]" />
+      <span
+        className="hit-marker-slash-b absolute left-0 top-0 h-0.5 w-12 bg-gradient-to-r from-transparent via-fuchsia-300 to-transparent shadow-[0_0_10px_rgba(232,121,249,0.95)]"
+        style={{ animationDelay: "40ms" }}
+      />
+      {/* Violet/gold energy sparks */}
+      {[
+        { dx: -26, dy: -18, c: "#a78bfa" },
+        { dx: 22, dy: -22, c: "#fbbf24" },
+        { dx: -18, dy: 20, c: "#fbbf24" },
+        { dx: 26, dy: 16, c: "#a78bfa" },
+        { dx: 0, dy: -28, c: "#22d3ee" },
+        { dx: 4, dy: 26, c: "#a78bfa" },
+      ].map((s, i) => (
+        <span
+          key={i}
+          className="hit-marker-spark absolute left-0 top-0 h-1.5 w-1.5 rounded-full"
+          style={
+            {
+              background: s.c,
+              boxShadow: `0 0 8px ${s.c}`,
+              "--dx": `${s.dx}px`,
+              "--dy": `${s.dy}px`,
+              animationDelay: `${i * 30}ms`,
+            } as CSSProperties
+          }
+        />
+      ))}
+      {/* Sleek hit-marker core flash */}
+      <span className="hit-marker-core absolute left-0 top-0 h-2.5 w-2.5 rounded-full bg-white shadow-[0_0_16px_rgba(255,255,255,0.95)]" />
     </div>
   );
 }
@@ -1199,8 +1254,8 @@ function DamageSparks({ side }: { side: Side }) {
           style={{
             left: `calc(${center} + ${((i % 3) - 1) * 28}px)`,
             top: `calc(46% + ${(i % 2 ? -1 : 1) * 16}px)`,
-            background: i % 2 ? "#fca5a5" : "#fde68a",
-            boxShadow: "0 0 8px rgba(252,165,165,0.9)",
+            background: i % 2 ? "#a78bfa" : "#fbbf24",
+            boxShadow: `0 0 8px ${i % 2 ? "rgba(167,139,250,0.95)" : "rgba(251,191,36,0.95)"}`,
             animationDelay: `${i * 40}ms`,
           }}
         />
@@ -1519,13 +1574,13 @@ function VerdictScreen({
             fighterClass={loserDescriptor.fighterClass}
             state="dead"
             facing="right"
-            size={110}
+            size={140}
           />
           <SheetFighter
             fighterClass={winnerDescriptor.fighterClass}
             state="victory"
             facing="left"
-            size={140}
+            size={185}
             animKey="verdict"
           />
         </div>

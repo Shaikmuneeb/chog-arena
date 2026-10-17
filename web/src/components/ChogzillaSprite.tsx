@@ -179,17 +179,17 @@ export function ChogzillaSprite({
     <div
       key={`${state}-${animKey ?? "static"}`}
       className={cn(
-        "relative inline-block select-none",
+        "sprite-pixelated relative inline-block select-none",
         facing === "left" && "sprite-mirror",
         className,
       )}
       style={{ height: size, lineHeight: 0 }}
       aria-hidden
     >
-      {/* Fiery orange/purple aura glow (idle breathing) */}
+      {/* Fiery orange/purple aura glow (idle breathing) — softened */}
       <div
         className={cn(
-          "pointer-events-none absolute inset-x-[-18%] bottom-[4%] top-[10%] rounded-full blur-2xl",
+          "pointer-events-none absolute inset-x-[-18%] bottom-[4%] top-[10%] rounded-full opacity-65 blur-2xl",
           hotAura ? "sprite-aura-hot" : "sprite-aura",
         )}
         style={{
@@ -214,8 +214,8 @@ export function ChogzillaSprite({
 
       <canvas
         ref={canvasRef}
-        className={cn("relative z-10", motionClass)}
-        style={{ height: size, width: "auto", imageRendering: "auto" }}
+        className={cn("sprite-pixelated relative z-10", motionClass)}
+        style={{ height: size, width: "auto", imageRendering: "pixelated" }}
       />
 
       {/* Moveset-driven attack VFX: particles + floating signature-move name */}
