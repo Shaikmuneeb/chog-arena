@@ -160,7 +160,6 @@ export function BattleArenaModal({
   const [hitStop, setHitStop] = useState(false);
   const [camShake, setCamShake] = useState(false);
   const [timer, setTimer] = useState(99);
-  const [finalBlowLog, setFinalBlowLog] = useState<string>("");
 
   /* ---- Manual arcade controls (cosmetic assist over the scripted match) ----
    * The on-chain duel is already settled; these bindings give the player a
@@ -458,9 +457,6 @@ export function BattleArenaModal({
       setStage("ko");
       setBanner(`ROUND ${roundNo} K.O.!`);
       setOrbScore((prev) => ({ ...prev, [roundWinnerSide]: prev[roundWinnerSide] + 1 }));
-      setFinalBlowLog(
-        `⚡ ${nameOf(roundWinnerSide)} won Round ${roundNo} by K.O.`,
-      );
       await wait(1600);
       if (aborted()) return;
       setBanner(null);
@@ -483,7 +479,6 @@ export function BattleArenaModal({
       setCombo(null);
       setCinematic(null);
       comboRef.current = 0;
-      setFinalBlowLog("");
       setTimer(99);
       /* Fresh manual-control state for every match. */
       setPlayerStance("neutral");
@@ -533,19 +528,6 @@ export function BattleArenaModal({
         if (aborted()) return;
         await runExchange(finisher, 0, { lethal: true, suddenDeath: true });
         if (aborted()) return;
-        setFinalBlowLog(
-          `☠️ SUDDEN DEATH — ${nameOf(finisher)} landed the finishing blow`,
-        );
-      } else {
-        const winnerMoveSet = getFighterMoveSet(
-          (script!.finalWinnerSide === "creator"
-            ? creatorFighter
-            : challengerFighter
-          ).fighterClass,
-        );
-        setFinalBlowLog(
-          `⚡ ${nameOf(script!.finalWinnerSide)} landed ${winnerMoveSet.criticalArt.name} for the K.O. final blow`,
-        );
       }
 
       setStage("verdict");
@@ -726,7 +708,6 @@ export function BattleArenaModal({
             creatorFighter={creatorFighter}
             challengerFighter={challengerFighter}
             revivedName={revivedName}
-            finalBlowLog={finalBlowLog}
             explorerTxUrl={explorerTxUrl}
             onPlayAgain={onPlayAgain}
             onPlayAgainBusy={onPlayAgainBusy}
@@ -1838,7 +1819,6 @@ function VerdictScreen({
   creatorFighter,
   challengerFighter,
   revivedName,
-  finalBlowLog,
   explorerTxUrl,
   onPlayAgain,
   onPlayAgainBusy = false,
@@ -1850,7 +1830,6 @@ function VerdictScreen({
   creatorFighter: FighterDescriptor;
   challengerFighter: FighterDescriptor;
   revivedName: string | null;
-  finalBlowLog: string;
   explorerTxUrl?: string;
   onPlayAgain?: () => void;
   onPlayAgainBusy?: boolean;
@@ -1937,19 +1916,6 @@ function VerdictScreen({
             🔥 CLUTCH RESURRECTION WIN
           </p>
         )}
-
-        {/* Final blow breakdown */}
-        <p className="mx-auto mt-5 max-w-md rounded-xl border border-white/10 bg-black/50 px-4 py-2.5 font-mono text-[11px] text-zinc-400">
-          {finalBlowLog}
-          {outcome.secondWind && revivedName && (
-            <>
-              {" · "}
-              <span className="text-purple-300">
-                {revivedName} was resurrected by Second Wind
-              </span>
-            </>
-          )}
-        </p>
 
         {/* Second Wind coaching prompt on a plain loss */}
         {!won && !outcome.secondWind && (
