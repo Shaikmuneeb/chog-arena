@@ -42,7 +42,7 @@ export const FIGHTER_CLASS_META: Record<
     primary: "#dc2626",
     secondary: "#fbbf24",
     dark: "#7f1d1d",
-    sprite: "/assets/chog-slash.png",
+    sprite: "/assets/chog-slash.png?zila",
     video: "/fighters/new chogzilla design.mp4",
   },
   samurai: {
@@ -72,7 +72,7 @@ export const FIGHTER_CLASS_META: Record<
     primary: "#991b1b",
     secondary: "#f87171",
     dark: "#450a0a",
-    sprite: "/assets/chog-slash.png",
+    sprite: "/assets/chog-slash.png?benja",
     video: "/fighters/crimson lord benja.mp4",
   },
   ladychog: {
@@ -82,7 +82,7 @@ export const FIGHTER_CLASS_META: Record<
     primary: "#be185d",
     secondary: "#f9a8d4",
     dark: "#500724",
-    sprite: "/assets/chog-samurai.png",
+    sprite: "/assets/chog-samurai.png?lady",
     video: "/fighters/new design lady chog.mp4",
   },
   princess: {
@@ -92,7 +92,7 @@ export const FIGHTER_CLASS_META: Record<
     primary: "#7c3aed",
     secondary: "#e9d5ff",
     dark: "#3b0764",
-    sprite: "/assets/keone-mage.png",
+    sprite: "/assets/keone-mage.png?princess",
     video: "/fighters/chog princess new design.mp4",
   },
 };
