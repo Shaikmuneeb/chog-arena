@@ -71,17 +71,10 @@ export function FighterProfileProvider({
             username: typeof value.username === "string" ? value.username : "",
             avatarUrl: typeof value.avatarUrl === "string" ? value.avatarUrl : "",
             title: typeof value.title === "string" ? value.title : "",
-            /* Class renames migrate stored profiles:
-             * 'ronin' → 'samurai', 'keone' → 'juggernaut' (Keone Mage). */
-            fighterClass:
-              value.fighterClass === ("ronin" as FighterClass) ||
-              value.fighterClass === ("keone" as FighterClass)
-                ? value.fighterClass === ("ronin" as FighterClass)
-                  ? "samurai"
-                  : "juggernaut"
-                : isFighterClass(value.fighterClass)
-                  ? value.fighterClass
-                  : "berserker",
+            /* Class renames migrate stored profiles. */
+            fighterClass: isFighterClass(value.fighterClass)
+              ? value.fighterClass
+              : "berserker",
           };
         }
       }

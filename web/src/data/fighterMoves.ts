@@ -21,31 +21,6 @@ export interface FighterMoveSet {
 }
 
 export const FIGHTER_MOVES: Record<string, FighterMoveSet> = {
-  keone: {
-    id: "keone",
-    name: "Keone Mage",
-    classBadge: "Cyber Mage",
-    idleFrames: 4,
-    attackFrames: 6,
-    signatureMove: {
-      id: "digital_slam",
-      name: "Digital Portal Slam",
-      damage: [14, 22],
-      hitCount: 3,
-      vfxType: "laser",
-      screenShake: true,
-      soundCue: "laser_burst",
-    },
-    criticalArt: {
-      id: "tps_overdrive",
-      name: "10,000 TPS Glitch Wave",
-      damage: [35, 45],
-      hitCount: 8,
-      vfxType: "laser",
-      screenShake: true,
-      soundCue: "critical_beam",
-    },
-  },
   berserker: {
     id: "berserker",
     name: "Warlord Chogzilla",
@@ -121,6 +96,81 @@ export const FIGHTER_MOVES: Record<string, FighterMoveSet> = {
       soundCue: "blackhole_boom",
     },
   },
+  benja: {
+    id: "benja",
+    name: "Crimson Lord Benja",
+    classBadge: "Crimson Lord",
+    idleFrames: 4,
+    attackFrames: 6,
+    signatureMove: {
+      id: "crimson_slash",
+      name: "Crimson Blade Cleave",
+      damage: [17, 25],
+      hitCount: 3,
+      vfxType: "slash",
+      screenShake: true,
+      soundCue: "katana_slash",
+    },
+    criticalArt: {
+      id: "crimson_overdrive",
+      name: "Crimson Apocalypse",
+      damage: [39, 49],
+      hitCount: 8,
+      vfxType: "magma",
+      screenShake: true,
+      soundCue: "volcano_boom",
+    },
+  },
+  ladychog: {
+    id: "ladychog",
+    name: "Lady Chog",
+    classBadge: "Royal Chog",
+    idleFrames: 4,
+    attackFrames: 6,
+    signatureMove: {
+      id: "royal_strike",
+      name: "Royal Grace Strike",
+      damage: [15, 23],
+      hitCount: 3,
+      vfxType: "slash",
+      screenShake: true,
+      soundCue: "katana_slash",
+    },
+    criticalArt: {
+      id: "royal_bloom",
+      name: "Royal Bloom Barrage",
+      damage: [37, 47],
+      hitCount: 7,
+      vfxType: "laser",
+      screenShake: true,
+      soundCue: "critical_beam",
+    },
+  },
+  princess: {
+    id: "princess",
+    name: "Chog Princess",
+    classBadge: "Chog Princess",
+    idleFrames: 4,
+    attackFrames: 6,
+    signatureMove: {
+      id: "radiant_burst",
+      name: "Radiant Princess Burst",
+      damage: [16, 24],
+      hitCount: 4,
+      vfxType: "laser",
+      screenShake: true,
+      soundCue: "laser_burst",
+    },
+    criticalArt: {
+      id: "princess_nova",
+      name: "Princess Nova",
+      damage: [38, 50],
+      hitCount: 9,
+      vfxType: "void_rift",
+      screenShake: true,
+      soundCue: "blackhole_boom",
+    },
+  },
 };
 
 /** Internal FighterClass keys → FIGHTER_MOVES ids. */
@@ -128,7 +178,9 @@ const CLASS_MOVESET_ID: Record<FighterClass, string> = {
   berserker: "berserker",
   samurai: "samurai",
   mage: "void-james",
-  juggernaut: "keone",
+  benja: "benja",
+  ladychog: "ladychog",
+  princess: "princess",
 };
 
 export function getFighterMoveSet(cls: FighterClass): FighterMoveSet {

@@ -190,18 +190,7 @@ export function FighterSprite({
           <FighterHead fighterClass={fighterClass} theme={theme} />
 
           {/* Off-hand arm (behind) */}
-          {fighterClass === "juggernaut" ? (
-            /* Mecha shield */
-            <g>
-              <path
-                d="M20 66 L32 62 L34 92 L22 96 Z"
-                fill={theme.dark}
-                stroke={theme.secondary}
-                strokeWidth="1.6"
-              />
-              <path d="M24 72 L30 70 L31 84 L25 86 Z" fill={theme.secondary} opacity="0.5" />
-            </g>
-          ) : fighterClass === "mage" ? (
+          {fighterClass === "mage" ? (
             /* Floating lightning orb */
             <g filter={`url(#glow-${fighterClass})`}>
               <circle
@@ -381,21 +370,17 @@ function FighterHead({
           <circle cx="53" cy="45" r="1.4" fill={theme.secondary} filter={`url(#glow-${fighterClass})`} />
         </g>
       );
-    case "juggernaut":
+    default:
       return (
         <g>
-          {/* Boxy mecha helm */}
           <path
-            d="M37 38 L63 38 L65 54 L35 54 Z"
-            fill={`url(#armor-${fighterClass})`}
+            d="M38 40 L42 30 L46 38 L50 26 L54 38 L58 30 L62 40 L62 54 L38 54 Z"
+            fill={theme.primary}
             stroke={theme.secondary}
-            strokeWidth="1.2"
+            strokeWidth="1.1"
+            strokeLinejoin="round"
           />
-          {/* Antenna */}
-          <line x1="60" y1="38" x2="64" y2="28" stroke={theme.secondary} strokeWidth="1.4" />
-          <circle cx="64" cy="27" r="1.8" fill={theme.secondary} filter={`url(#glow-${fighterClass})`} />
-          {/* Visor */}
-          <rect x="40" y="43" width="20" height="5" rx="1" fill={theme.secondary} filter={`url(#glow-${fighterClass})`} />
+          <rect x="41" y="44" width="18" height="4" rx="1.5" fill="#fef08a" filter={`url(#glow-${fighterClass})`} />
         </g>
       );
   }
@@ -456,13 +441,10 @@ function FighterWeapon({
           />
         </g>
       );
-    case "juggernaut":
-      /* Plasma warhammer */
+    default:
       return (
         <g filter={`url(#glow-${fighterClass})`}>
-          <rect x="76" y="34" width="4" height="50" rx="1.5" fill="#334155" stroke={theme.secondary} strokeWidth="0.6" />
-          <rect x="68" y="24" width="20" height="14" rx="2.5" fill={theme.dark} stroke={theme.secondary} strokeWidth="1.4" />
-          <rect x="70" y="27" width="16" height="4" rx="1" fill={theme.secondary} opacity="0.85" />
+          <rect x="76" y="28" width="3.5" height="52" rx="1.5" fill="#78350f" stroke={theme.secondary} strokeWidth="0.6" />
         </g>
       );
   }

@@ -15,12 +15,12 @@ export type ArenaNpc = {
 /** Distinct arena NPC challengers available in the demo lobby. */
 export const ARENA_NPCS: ArenaNpc[] = [
   {
-    key: "keone-mage",
+    key: "crimson-benja",
     npcId: 1,
     address: "0x1111111111111111111111111111111111110001",
-    name: "Keone Mage",
-    title: "10,000 TPS Grandmaster",
-    fighterClass: "juggernaut",
+    name: "Crimson Lord Benja",
+    title: "Crimson Lord",
+    fighterClass: "benja",
     wager: parseEther("0.1"),
   },
   {

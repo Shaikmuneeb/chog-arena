@@ -6,7 +6,7 @@ import { useFighterProfile } from "@/context/FighterProfileContext";
 import type { FighterClass } from "@/config/fighterClasses";
 import { FIGHTER_CLASS_META } from "@/config/fighterClasses";
 import type { SpriteState } from "./FighterSprite";
-import { SheetFighter } from "./ChogzillaSprite";
+
 import {
   getFighterMoveSet,
   impactCueFor,
@@ -42,6 +42,81 @@ export type DuelOutcome = {
 };
 
 /** One side of the battle: identity + full-body fighter class. */
+export function FighterVideo({
+  fighterClass,
+  state = "idle",
+  facing = "right",
+  size = 160,
+  animKey,
+  leanDir = null,
+  isBlocking = false,
+  activeMoveName = null,
+  className,
+}: {
+  fighterClass: FighterClass;
+  state?: SpriteState;
+  facing?: "left" | "right";
+  size?: number;
+  animKey?: number | string;
+  leanDir?: "forward" | "retreat" | null;
+  isBlocking?: boolean;
+  activeMoveName?: string | null;
+  className?: string;
+}) {
+  const theme = FIGHTER_CLASS_META[fighterClass];
+  const videoSrc = theme.video;
+  const motionClass =
+    state === "idle"
+      ? "procedural-idle-breathe"
+      : state === "dashIn"
+        ? "fighter-dash-in"
+        : state === "attack"
+          ? "spring-attack-strike"
+          : state === "stagger" || state === "hit"
+            ? "hit-knockback-slide"
+            : state === "dashOut"
+              ? "fighter-dash-out"
+              : state === "dead"
+                ? "sprite-dead"
+                : state === "secondWind"
+                  ? "sprite-levitate"
+                  : state === "victory"
+                    ? "sprite-victory-body"
+                    : "";
+  const leanClass =
+    leanDir === "forward"
+      ? "fighter-lean-forward"
+      : leanDir === "retreat"
+        ? "fighter-lean-retreat"
+        : isBlocking
+          ? "assist-block"
+          : "";
+  return (
+    <div
+      key={animKey ?? "static"}
+      className={cn(
+        "sprite-pixelated relative inline-block select-none opacity-100",
+        facing === "left" && "sprite-mirror",
+        className,
+      )}
+      style={{ height: size, lineHeight: 0 }}
+      aria-hidden
+    >
+      <div className={cn("relative will-change-transform", motionClass, leanClass)}>
+        <video
+          src={videoSrc}
+          muted
+          autoPlay
+          loop
+          playsInline
+          className="h-full w-auto object-contain"
+          style={{ height: size }}
+        />
+      </div>
+    </div>
+  );
+}
+
 export type FighterDescriptor = {
   address: `0x${string}`;
   name: string;
@@ -60,7 +135,9 @@ const CLASS_SIZE_SCALE: Record<FighterClass, number> = {
   berserker: 0.72,
   samurai: 0.92,
   mage: 1.1,
-  juggernaut: 1.1,
+  benja: 0.85,
+  ladychog: 0.9,
+  princess: 0.9,
 };
 
 /** Class-specific neon afterimage trail colors (shadow clones). */
@@ -68,11 +145,6 @@ const CLASS_AFTERIMAGE_CONFIG: Record<
   FighterClass,
   { name: string; color: string; glow: string }
 > = {
-  juggernaut: {
-    name: "Keone Mage",
-    color: "#22d3ee",
-    glow: "rgba(34, 211, 238, 0.85)",
-  },
   berserker: {
     name: "Warlord Chogzilla",
     color: "#f97316",
@@ -85,6 +157,21 @@ const CLASS_AFTERIMAGE_CONFIG: Record<
   },
   mage: {
     name: "Void Lord James",
+    color: "#c084fc",
+    glow: "rgba(192, 132, 252, 0.85)",
+  },
+  benja: {
+    name: "Crimson Lord Benja",
+    color: "#ef4444",
+    glow: "rgba(239, 68, 68, 0.85)",
+  },
+  ladychog: {
+    name: "Lady Chog",
+    color: "#f472b6",
+    glow: "rgba(244, 114, 182, 0.85)",
+  },
+  princess: {
+    name: "Chog Princess",
     color: "#c084fc",
     glow: "rgba(192, 132, 252, 0.85)",
   },
@@ -1537,14 +1624,14 @@ export function BattleArenaModal({
                             }}
                             aria-hidden
                           >
-                            <SheetFighter
-                              fighterClass={desc.fighterClass}
-                              state={f.pose}
-                              facing={f.facing}
-                              size={stageSize(desc, narrow)}
-                              animKey={`after-${side}-${idx}-${f.pose}`}
-                              leanDir={f.leanDir}
-                            />
+                             <FighterVideo
+                               fighterClass={desc.fighterClass}
+                               state={f.pose}
+                               facing={f.facing}
+                               size={stageSize(desc, narrow)}
+                               animKey={`after-${side}-${idx}-${f.pose}`}
+                               leanDir={f.leanDir}
+                             />
                           </div>
                         ))}
 
@@ -1554,7 +1641,7 @@ export function BattleArenaModal({
                         style={{ left: `${f.x}%`, transform: "translateX(-50%)" }}
                       >
                         <div className="assist-stance">
-                          <SheetFighter
+                          <FighterVideo
                             fighterClass={desc.fighterClass}
                             state={f.pose}
                             facing={f.facing}
@@ -1943,9 +2030,9 @@ function HudPortrait({ fighter }: { fighter: FighterDescriptor }) {
         />
       ) : (
         /* Class sprite headshot — top crop of the idle fighter canvas */
-        <span className="sprite-pixelated -mt-0.5 flex items-start justify-center">
-          <SheetFighter fighterClass={fighter.fighterClass} state="idle" size={42} />
-        </span>
+         <span className="sprite-pixelated -mt-0.5 flex items-start justify-center">
+           <FighterVideo fighterClass={fighter.fighterClass} state="idle" size={42} />
+         </span>
       )}
     </span>
   );
@@ -2502,13 +2589,13 @@ function VerdictScreen({
       <div className="relative z-10">
         {/* Winner / loser sprites flanking the verdict */}
         <div className="mb-2 flex items-end justify-center gap-8">
-          <SheetFighter
+          <FighterVideo
             fighterClass={loserDescriptor.fighterClass}
             state="dead"
             facing="right"
             size={140}
           />
-          <SheetFighter
+          <FighterVideo
             fighterClass={winnerDescriptor.fighterClass}
             state="victory"
             facing="left"

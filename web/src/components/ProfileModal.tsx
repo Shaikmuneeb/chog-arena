@@ -12,7 +12,7 @@ import {
   FIGHTER_CLASSES,
   FIGHTER_CLASS_META,
 } from "@/config/fighterClasses";
-import { SheetFighter } from "./ChogzillaSprite";
+
 import { cn, truncateAddress } from "@/lib/utils";
 import { pushToast } from "./Toast";
 
@@ -287,7 +287,7 @@ export function ProfileModal({ open, onClose }: ProfileModalProps) {
             <p className="mt-5 text-xs font-semibold uppercase tracking-wider text-zinc-500">
               Fighter Class
             </p>
-            <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
+            <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
               {FIGHTER_CLASSES.map((cls) => {
                 const meta = FIGHTER_CLASS_META[cls];
                 const selected = fighterClass === cls;
@@ -303,11 +303,15 @@ export function ProfileModal({ open, onClose }: ProfileModalProps) {
                         : "border-white/10 bg-black/40 hover:border-white/25",
                     )}
                   >
-                    <SheetFighter
-                      fighterClass={cls}
-                      state="idle"
-                      size={88}
-                    />
+                     <video
+                       src={meta.video}
+                       muted
+                       autoPlay
+                       loop
+                       playsInline
+                       style={{ height: 88 }}
+                       className="h-[88px] w-auto object-contain"
+                     />
                     <span
                       className="text-[10px] font-extrabold uppercase tracking-wider"
                       style={{ color: selected ? meta.secondary : "#a1a1aa" }}
