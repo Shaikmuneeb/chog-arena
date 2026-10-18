@@ -1,15 +1,14 @@
 "use client";
 
-import { memo, useEffect, useRef } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 
-const PROCESS_W = 240;
-const PROCESS_H = 240;
-const FRAME_INTERVAL = 33;
+const FRAME_CACHE = new Map<string, string>();
 
 /**
- * Chroma-keyed video: draws a muted looping <video> onto a small canvas and
- * zeroes the alpha of pixels matching the dark-gray studio background.
+ * Extracts a single front-facing frame from the MP4, chroma-keys the neutral
+ * gray studio background, and renders a cached static PNG <img>. No video
+ * decoding happens during combat.
  */
 export const ChromaVideo = memo(function ChromaVideo({
   src,
@@ -22,83 +21,90 @@ export const ChromaVideo = memo(function ChromaVideo({
   style?: React.CSSProperties;
   size?: number;
 }) {
+  const [dataUrl, setDataUrl] = useState<string | null>(
+    FRAME_CACHE.get(src) ?? null,
+  );
   const videoRef = useRef<HTMLVideoElement | null>(null);
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   useEffect(() => {
-    const video = videoRef.current;
-    const canvas = canvasRef.current;
-    if (!video || !canvas) return;
-    const ctx = canvas.getContext("2d", { willReadFrequently: true });
-    if (!ctx) return;
+    if (FRAME_CACHE.has(src)) {
+      setDataUrl(FRAME_CACHE.get(src)!);
+      return;
+    }
+    const video = document.createElement("video");
+    video.src = src;
+    video.muted = true;
+    video.playsInline = true;
+    video.preload = "auto";
+    videoRef.current = video;
 
-    canvas.width = PROCESS_W;
-    canvas.height = PROCESS_H;
-
-    let raf = 0;
-    let lastFrameTime = 0;
-
-    const draw = (timestamp: number) => {
-      if (timestamp - lastFrameTime >= FRAME_INTERVAL) {
-        lastFrameTime = timestamp;
-        if (video.readyState >= 2 && video.videoWidth > 0) {
-          ctx.drawImage(video, 0, 0, PROCESS_W, PROCESS_H);
-          const frame = ctx.getImageData(0, 0, PROCESS_W, PROCESS_H);
-          const data = frame.data;
-
-          // Sample the studio background color from the top-left corner.
-          const bgR = data[0];
-          const bgG = data[1];
-          const bgB = data[2];
-
-          for (let i = 0; i < data.length; i += 4) {
-            const r = data[i];
-            const g = data[i + 1];
-            const b = data[i + 2];
-
-            const dr = r - bgR;
-            const dg = g - bgG;
-            const db = b - bgB;
-            const dist = Math.sqrt(dr * dr + dg * dg + db * db);
-            const sat = Math.max(r, g, b) - Math.min(r, g, b);
-
-            if (dist < 26 && sat < 14) {
-              data[i + 3] = 0;
-            } else if (b - g > 12 || r - g > 12) {
-              data[i + 3] = 255;
-            }
-          }
-          ctx.putImageData(frame, 0, 0);
+    const extract = () => {
+      if (video.readyState < 2) return;
+      const w = video.videoWidth || 320;
+      const h = video.videoHeight || 320;
+      const canvas = document.createElement("canvas");
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext("2d", { willReadFrequently: true });
+      if (!ctx) return;
+      ctx.drawImage(video, 0, 0, w, h);
+      const frame = ctx.getImageData(0, 0, w, h);
+      const data = frame.data;
+      for (let i = 0; i < data.length; i += 4) {
+        const r = data[i];
+        const g = data[i + 1];
+        const b = data[i + 2];
+        const sat = Math.max(r, g, b) - Math.min(r, g, b);
+        if (sat < 15 && r < 65) {
+          data[i + 3] = 0;
         }
-        // If readyState < 2, keep the previous frame (do not clear).
       }
-      raf = requestAnimationFrame(draw);
+      ctx.putImageData(frame, 0, 0);
+      const url = canvas.toDataURL("image/png");
+      FRAME_CACHE.set(src, url);
+      setDataUrl(url);
+      video.pause();
+      video.removeAttribute("src");
+      video.load();
     };
 
-    video.muted = true;
-    video.loop = true;
-    video.playsInline = true;
-    void video.play().catch(() => {});
-    raf = requestAnimationFrame(draw);
-    return () => cancelAnimationFrame(raf);
+    const onLoaded = () => {
+      try {
+        video.currentTime = 0.1;
+      } catch {
+        extract();
+      }
+    };
+    const onSeeked = () => extract();
+
+    video.addEventListener("loadeddata", onLoaded);
+    video.addEventListener("seeked", onSeeked);
+    video.load();
+
+    return () => {
+      video.removeEventListener("loadeddata", onLoaded);
+      video.removeEventListener("seeked", onSeeked);
+      video.pause();
+      video.removeAttribute("src");
+    };
   }, [src]);
 
+  if (!dataUrl) {
+    return (
+      <div
+        className={cn("inline-block bg-transparent", className)}
+        style={{ height: size, width: size ? size * 0.7 : undefined, ...style }}
+      />
+    );
+  }
+
   return (
-    <div className={cn("relative inline-block", className)} style={style}>
-      <video
-        ref={videoRef}
-        src={src}
-        muted
-        loop
-        playsInline
-        autoPlay
-        className="hidden"
-      />
-      <canvas
-        ref={canvasRef}
-        className="w-full h-full object-contain"
-        style={size ? { height: size, width: "auto" } : undefined}
-      />
-    </div>
+    <img
+      src={dataUrl}
+      alt=""
+      className={cn("object-contain", className)}
+      style={{ height: size, width: "auto", ...style }}
+      draggable={false}
+    />
   );
 });

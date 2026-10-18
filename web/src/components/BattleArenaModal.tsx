@@ -66,24 +66,6 @@ export function ChromaFighter({
 }) {
   const theme = FIGHTER_CLASS_META[fighterClass];
   const videoSrc = theme.video;
-  const motionClass =
-    state === "idle"
-      ? "procedural-idle-breathe"
-      : state === "dashIn"
-        ? "fighter-dash-in"
-        : state === "attack"
-          ? "spring-attack-strike"
-          : state === "stagger" || state === "hit"
-            ? "hit-knockback-slide"
-            : state === "dashOut"
-              ? "fighter-dash-out"
-              : state === "dead"
-                ? "ko-drop"
-                : state === "secondWind"
-                  ? "sprite-levitate"
-                  : state === "victory"
-                    ? "sprite-victory-body"
-                    : "";
   const leanClass =
     leanDir === "forward"
       ? "fighter-lean-forward"
@@ -92,14 +74,37 @@ export function ChromaFighter({
         : isBlocking
           ? "assist-block"
           : "";
-  const koStyle =
-    state === "dead"
-      ? {
-          transform: "translateY(40px) rotate(-85deg)",
-          transformOrigin: "bottom center",
-          filter: "grayscale(1) sepia(1) hue-rotate(-50deg) saturate(3) brightness(0.7)",
-        }
-      : undefined;
+  let transform = "translateY(0px) scale(1)";
+  let transition = "transform 120ms ease-out";
+  let filter = "none";
+  if (state === "idle") {
+    transform = "translateY(0px) scale(1)";
+    transition = "none";
+  } else if (state === "dashIn" || state === "attack") {
+    transform = "translateX(45px) scale(1.08)";
+    transition = "transform 120ms ease-out";
+  } else if (state === "dashOut") {
+    transform = "translateX(-12px) scale(1)";
+    transition = "transform 120ms ease-out";
+  } else if (state === "stagger" || state === "hit") {
+    transform = "translateX(-18px) scale(1)";
+    transition = "transform 150ms ease-out";
+    filter = "brightness(1.5) drop-shadow(0 0 12px red)";
+  } else if (state === "dead") {
+    transform = "translateY(30px) rotate(-75deg)";
+    transition = "transform 400ms ease-out";
+    filter = "grayscale(1) brightness(0.7)";
+  } else if (state === "victory") {
+    transform = "translateY(-8px) scale(1.05)";
+    transition = "transform 200ms ease-out";
+  }
+  const motionStyle = {
+    transform,
+    transition,
+    filter,
+    transformOrigin: "bottom center",
+    opacity: state === "dead" ? 0.7 : 1,
+  };
   return (
     <div
       key={animKey ?? "static"}
@@ -112,8 +117,8 @@ export function ChromaFighter({
       aria-hidden
     >
       <div
-        className={cn("relative will-change-transform", motionClass, leanClass)}
-        style={koStyle}
+        className={cn("relative will-change-transform", leanClass, state === "idle" && "procedural-idle-breathe")}
+        style={motionStyle}
       >
         <ChromaVideo src={videoSrc} size={size} />
       </div>
@@ -2120,7 +2125,7 @@ function DamageNumber({ hit }: { hit: HitRT }) {
   return (
     <p
       className={cn(
-        "animate-damage-arc pointer-events-none absolute -top-3 left-1/2 z-10 whitespace-nowrap font-mono text-base font-black italic tracking-wider",
+        "animate-damage-arc pointer-events-none absolute -top-8 left-1/2 z-10 whitespace-nowrap font-mono text-sm font-black italic tracking-wider",
         hit.crit
           ? "text-amber-300 drop-shadow-[0_0_10px_rgba(251,191,36,0.9)]"
           : "text-red-300 drop-shadow-[0_0_8px_rgba(239,68,68,0.9)]",
