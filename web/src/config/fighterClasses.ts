@@ -97,6 +97,16 @@ export const FIGHTER_CLASS_META: Record<
   },
 };
 
+/** Direct MP4 path per character id (no fallbacks). */
+export const FIGHTER_VIDEO_PATHS: Record<string, string> = {
+  void_lord_james: "/fighters/new design void lord james.mp4",
+  crimson_lord_benja: "/fighters/crimson lord benja.mp4",
+  lady_chog: "/fighters/new design lady chog.mp4",
+  chog_samurai: "/fighters/chog samuri new design.mp4",
+  chog_princess: "/fighters/chog princess new design.mp4",
+  chogzila: "/fighters/new chogzilla design.mp4",
+};
+
 export function isFighterClass(value: unknown): value is FighterClass {
   return (
     typeof value === "string" && (FIGHTER_CLASSES as string[]).includes(value)

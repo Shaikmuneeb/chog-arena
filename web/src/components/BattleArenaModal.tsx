@@ -5,7 +5,16 @@ import { ExternalLink, Loader2, Swords } from "lucide-react";
 import { useFighterProfile } from "@/context/FighterProfileContext";
 import type { FighterClass } from "@/config/fighterClasses";
 import { FIGHTER_CLASS_META } from "@/config/fighterClasses";
-import type { SpriteState } from "./FighterSprite";
+export type SpriteState =
+  | "idle"
+  | "dashIn"
+  | "attack"
+  | "stagger"
+  | "dashOut"
+  | "hit"
+  | "secondWind"
+  | "dead"
+  | "victory";
 
 import {
   getFighterMoveSet,
