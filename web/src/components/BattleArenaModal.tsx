@@ -289,6 +289,34 @@ function stageSize(f: FighterDescriptor, narrow = false): number {
 const MOVE_SPEED = 24; // %/s player slide speed
 const AI_APPROACH_SPEED = 24; // %/s AI closes distance aggressively
 const AI_BACKSTEP_SPEED = 18; // %/s AI retreats
+
+/** Per-archetype movement speed (%/s). */
+const FIGHTER_SPEED: Record<FighterClass, number> = {
+  berserker: 14,
+  samurai: 24,
+  mage: 18,
+  benja: 34,
+  ladychog: 26,
+  princess: 20,
+};
+
+/** Per-archetype windup timings (ms). */
+const WINDUP_FOR: Record<FighterClass, Record<AttackKind, number>> = {
+  berserker: { light: 160, heavy: 400, special: 420, critical: 500 },
+  samurai: { light: 110, heavy: 220, special: 300, critical: 380 },
+  mage: { light: 150, heavy: 260, special: 320, critical: 400 },
+  benja: { light: 90, heavy: 180, special: 260, critical: 320 },
+  ladychog: { light: 100, heavy: 200, special: 280, critical: 360 },
+  princess: { light: 120, heavy: 220, special: 300, critical: 380 },
+};
+const RECOVER_FOR: Record<FighterClass, Record<AttackKind, number>> = {
+  berserker: { light: 220, heavy: 420, special: 360, critical: 440 },
+  samurai: { light: 140, heavy: 240, special: 280, critical: 340 },
+  mage: { light: 180, heavy: 260, special: 300, critical: 360 },
+  benja: { light: 100, heavy: 200, special: 260, critical: 320 },
+  ladychog: { light: 120, heavy: 220, special: 280, critical: 340 },
+  princess: { light: 140, heavy: 240, special: 300, critical: 360 },
+};
 const LUNGE_SPEED = 12; // %/s forward lunge during an attack windup
 const WINDUP: Record<AttackKind, number> = {
   light: 120,
@@ -452,10 +480,10 @@ function createMatch(script: MatchScript, playerSide: PlayerSide): MatchState {
   const oppX = playerSide === "left" ? 68 : 32;
   const playerFacing: "left" | "right" = playerSide === "left" ? "right" : "left";
   const oppFacing: "left" | "right" = playerSide === "left" ? "left" : "right";
-  const blank = (side: FighterSide, x: number, facing: "left" | "right"): FighterRT => ({
+   const blank = (side: FighterSide, x: number, facing: "left" | "right", hp = 100): FighterRT => ({
     side,
     x,
-    hp: 100,
+    hp,
     meter: 0,
     pose: "idle",
     seq: 0,
@@ -481,8 +509,8 @@ function createMatch(script: MatchScript, playerSide: PlayerSide): MatchState {
     timer: 99,
     orbs: { creator: 0, challenger: 0 },
     fighters: {
-      creator: blank("creator", oppX, oppFacing),
-      challenger: blank("challenger", playerX, playerFacing),
+      creator: blank("creator", oppX, oppFacing, script.creatorClass === "berserker" ? 130 : 100),
+      challenger: blank("challenger", playerX, playerFacing, script.challengerClass === "berserker" ? 130 : 100),
     },
     moves: {
       creator: getFighterMoveSet(script.creatorClass),
@@ -782,7 +810,7 @@ function triggerOverdrive(m: MatchState, ai: FighterRT) {
   m.aiNextMs = 400;
 }
 
-function tryStartPlayerAttack(m: MatchState, kind: AttackKind) {
+function tryStartPlayerAttack(m: MatchState, kind: AttackKind, script: MatchScript) {
   const p = m.fighters.challenger;
   if (m.stage !== "fight" || p.down || p.stunMs > 0 || p.attack) return;
   const cost = kind === "special" ? 40 : kind === "critical" ? 100 : 0;
@@ -795,10 +823,11 @@ function tryStartPlayerAttack(m: MatchState, kind: AttackKind) {
       : kind === "critical"
         ? moves.criticalArt
         : null;
+  const cls = script.challengerClass;
   p.attack = {
     kind,
-    windup: WINDUP[kind],
-    recover: RECOVER[kind],
+    windup: WINDUP_FOR[cls][kind],
+    recover: RECOVER_FOR[cls][kind],
     move,
   };
   p.activeMoveName = move ? move.name : null;
@@ -981,7 +1010,7 @@ function updateAI(
     ai.moveDir = dir;
     ai.toward = true;
     ai.leanDir = "forward";
-    ai.x += dir * AI_APPROACH_SPEED * (dt / 1000);
+    ai.x += dir * (FIGHTER_SPEED[script.creatorClass] ?? AI_APPROACH_SPEED) * (dt / 1000);
     ai.x = clamp(ai.x, oppTrack(playerSide));
     ai.blockHeld = false;
 
@@ -1016,8 +1045,8 @@ function updateAI(
       const move = m.moves.creator.criticalArt;
       ai.attack = {
         kind: "critical",
-        windup: WINDUP.critical,
-        recover: RECOVER.critical,
+        windup: WINDUP_FOR[script.creatorClass].critical,
+        recover: RECOVER_FOR[script.creatorClass].critical,
         move,
       };
       ai.activeMoveName = move.name;
@@ -1031,8 +1060,8 @@ function updateAI(
       const move = m.moves.creator.signatureMove;
       ai.attack = {
         kind: "special",
-        windup: WINDUP.special,
-        recover: RECOVER.special,
+        windup: WINDUP_FOR[script.creatorClass].special,
+        recover: RECOVER_FOR[script.creatorClass].special,
         move,
       };
       ai.activeMoveName = move.name;
@@ -1046,8 +1075,8 @@ function updateAI(
       if (actRoll < 0.45) {
         ai.attack = {
           kind: "light",
-          windup: WINDUP.light,
-          recover: RECOVER.light,
+          windup: WINDUP_FOR[script.creatorClass].light,
+          recover: RECOVER_FOR[script.creatorClass].light,
           move: null,
         };
         ai.activeMoveName = null;
@@ -1058,8 +1087,8 @@ function updateAI(
       } else if (actRoll < 0.75) {
         ai.attack = {
           kind: "heavy",
-          windup: WINDUP.heavy,
-          recover: RECOVER.heavy,
+          windup: WINDUP_FOR[script.creatorClass].heavy,
+          recover: RECOVER_FOR[script.creatorClass].heavy,
           move: null,
         };
         ai.activeMoveName = null;
@@ -1076,7 +1105,7 @@ function updateAI(
       } else {
         // Micro backstep to bait whiff
         const retreatDir = Math.sign(ai.x - p.x) || (playerSide === "left" ? 1 : -1);
-        ai.x += retreatDir * AI_BACKSTEP_SPEED * (dt / 1000);
+        ai.x += retreatDir * ((FIGHTER_SPEED[script.creatorClass] ?? AI_APPROACH_SPEED) * 0.75) * (dt / 1000);
         ai.x = clamp(ai.x, oppTrack(playerSide));
         ai.moveDir = retreatDir;
         ai.leanDir = "retreat";
@@ -1135,7 +1164,7 @@ function updateFight(
 
   // Player manual movement (only while the fight stage is live).
   p.blockHeld = m.heldBlock;
-  const speed = MOVE_SPEED * (p.blockHeld ? 0.4 : 1);
+  const speed = (FIGHTER_SPEED[script.challengerClass] ?? MOVE_SPEED) * (p.blockHeld ? 0.4 : 1);
   p.moveDir = (m.heldRight ? 1 : 0) - (m.heldLeft ? 1 : 0);
   if (p.moveDir !== 0) {
     p.x += p.moveDir * speed * (dt / 1000);
@@ -1154,7 +1183,7 @@ function updateFight(
   if (m.attackQueued) {
     const kind = m.attackQueued;
     m.attackQueued = null;
-    tryStartPlayerAttack(m, kind);
+    tryStartPlayerAttack(m, kind, script);
   }
 
   updateAI(m, dt, script, playerSide);
