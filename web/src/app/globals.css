@@ -1679,4 +1679,151 @@ body {
   animation: super-ready-pulse 0.8s ease-in-out infinite;
 }
 
+/* ---------------- High-Octane 2.5D Procedural Combat Physics ---------------- */
+
+/* Idle Sinusoidal Breathing */
+@keyframes procedural-idle-breathe {
+  0%, 100% {
+    transform: scaleY(1) scaleX(1) translateY(0);
+  }
+  50% {
+    transform: scaleY(1.03) scaleX(0.985) translateY(-2px);
+  }
+}
+
+.procedural-idle-breathe {
+  animation: procedural-idle-breathe 2.2s ease-in-out infinite;
+  transform-origin: bottom center;
+}
+
+/* Velocity Leans on Dash / Walk (A/D) */
+.fighter-lean-forward {
+  transform: skewX(-8deg) scaleX(1.03);
+  transform-origin: bottom center;
+  transition: transform 100ms ease-out;
+}
+
+.fighter-lean-retreat {
+  transform: skewX(6deg) scaleX(0.97);
+  transform-origin: bottom center;
+  transition: transform 100ms ease-out;
+}
+
+/* 3-Phase Spring Attack & Strike */
+@keyframes spring-attack-strike {
+  0% {
+    transform: scale(0.94, 0.92) translateX(-4px); /* 60ms crouch/wind-up compress */
+    animation-timing-function: cubic-bezier(0.55, 0, 1, 0.45);
+  }
+  24% {
+    transform: scale(1.12, 0.93) translateX(18px); /* fast exponential lunge forward with horizontal stretch */
+    animation-timing-function: cubic-bezier(0.34, 1.56, 0.64, 1);
+  }
+  64% {
+    transform: scale(0.98, 1.02) translateX(-2px); /* elastic recoil */
+    animation-timing-function: ease-out;
+  }
+  100% {
+    transform: scale(1, 1) translateX(0); /* recoil back to stance */
+  }
+}
+
+.spring-attack-strike {
+  animation: spring-attack-strike 0.34s linear;
+  transform-origin: bottom center;
+}
+
+/* Hit Stagger — White/Red Damage Flash + Knockback Slide */
+@keyframes hit-knockback-slide {
+  0% {
+    transform: translateX(0);
+    filter: brightness(2.4) contrast(1.6);
+  }
+  16% {
+    transform: translateX(-14px) rotate(-3deg);
+    filter: brightness(1.8) drop-shadow(0 0 12px rgba(239, 68, 68, 0.95));
+  }
+  50% {
+    transform: translateX(-8px) rotate(-1.5deg);
+    filter: brightness(1.3);
+  }
+  100% {
+    transform: translateX(0);
+    filter: brightness(1);
+  }
+}
+
+.hit-knockback-slide {
+  animation: hit-knockback-slide 0.32s cubic-bezier(0.2, 0.9, 0.3, 1);
+  transform-origin: bottom center;
+}
+
+/* Floating Weapon Aura */
+@keyframes weapon-aura-float {
+  0%, 100% {
+    opacity: 0.55;
+    transform: scale(0.96) translateY(0);
+  }
+  50% {
+    opacity: 0.88;
+    transform: scale(1.06) translateY(-4px);
+  }
+}
+
+.weapon-aura-float {
+  animation: weapon-aura-float 2.2s ease-in-out infinite;
+}
+
+/* Street-Style Slash Streak for Critical Art */
+@keyframes critical-streak-slash {
+  0% {
+    transform: scaleX(0) rotate(-18deg);
+    opacity: 0;
+  }
+  20% {
+    transform: scaleX(1.4) rotate(-18deg);
+    opacity: 1;
+  }
+  65% {
+    transform: scaleX(1.15) rotate(-18deg);
+    opacity: 0.9;
+  }
+  100% {
+    transform: scaleX(0.7) rotate(-18deg);
+    opacity: 0;
+  }
+}
+
+.critical-streak-slash {
+  animation: critical-streak-slash 0.72s cubic-bezier(0.2, 0.95, 0.3, 1) forwards;
+}
+
+/* Directional Hit-Spark Slash Lines */
+@keyframes directional-spark-burst {
+  0% {
+    transform: translate(0, 0) scale(0.3);
+    opacity: 0;
+  }
+  20% {
+    opacity: 1;
+    transform: scale(1.2);
+  }
+  100% {
+    transform: translate(var(--dx), var(--dy)) scale(0.6);
+    opacity: 0;
+  }
+}
+
+.directional-spark-burst {
+  animation: directional-spark-burst 0.38s cubic-bezier(0.12, 0.88, 0.25, 1) forwards;
+}
+
+/* Motion Afterimage Trail Silhouettes */
+.afterimage-ghost {
+  pointer-events: none;
+  filter: brightness(1.7) saturate(2.8) drop-shadow(0 0 10px var(--afterimage-glow, #a855f7));
+  mix-blend-mode: screen;
+}
+
+
 

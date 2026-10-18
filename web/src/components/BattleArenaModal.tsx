@@ -63,6 +63,33 @@ const CLASS_SIZE_SCALE: Record<FighterClass, number> = {
   juggernaut: 1.1,
 };
 
+/** Class-specific neon afterimage trail colors (shadow clones). */
+const CLASS_AFTERIMAGE_CONFIG: Record<
+  FighterClass,
+  { name: string; color: string; glow: string }
+> = {
+  juggernaut: {
+    name: "Keone Mage",
+    color: "#22d3ee",
+    glow: "rgba(34, 211, 238, 0.85)",
+  },
+  berserker: {
+    name: "Warlord Chogzilla",
+    color: "#f97316",
+    glow: "rgba(249, 115, 22, 0.85)",
+  },
+  samurai: {
+    name: "Chog Samurai",
+    color: "#a855f7",
+    glow: "rgba(168, 85, 247, 0.85)",
+  },
+  mage: {
+    name: "Void Lord James",
+    color: "#c084fc",
+    glow: "rgba(192, 132, 252, 0.85)",
+  },
+};
+
 function stageSize(f: FighterDescriptor, narrow = false): number {
   /* Narrow viewports (< 640px) scale both fighters down proportionally so
    * there is room to dash and trade combos cleanly on a phone. */
@@ -73,28 +100,28 @@ function stageSize(f: FighterDescriptor, narrow = false): number {
 
 /* ------------------------------------------------------------------ tuning */
 
-const MOVE_SPEED = 22; // %/s player slide speed
-const AI_APPROACH_SPEED = 17; // %/s AI closes distance
-const AI_BACKSTEP_SPEED = 16; // %/s AI retreats
-const LUNGE_SPEED = 10; // %/s forward lunge during an attack windup
+const MOVE_SPEED = 24; // %/s player slide speed
+const AI_APPROACH_SPEED = 24; // %/s AI closes distance aggressively
+const AI_BACKSTEP_SPEED = 18; // %/s AI retreats
+const LUNGE_SPEED = 12; // %/s forward lunge during an attack windup
 const WINDUP: Record<AttackKind, number> = {
-  light: 150,
-  heavy: 260,
-  special: 340,
-  critical: 440,
+  light: 120,
+  heavy: 240,
+  special: 300,
+  critical: 380,
 };
 const RECOVER: Record<AttackKind, number> = {
-  light: 170,
-  heavy: 260,
-  special: 320,
-  critical: 360,
+  light: 150,
+  heavy: 240,
+  special: 280,
+  critical: 340,
 };
 /** Center-to-center reach (stage %) for each attack. */
 const REACH: Record<AttackKind, number> = {
-  light: 29,
-  heavy: 33,
-  special: 35,
-  critical: 37,
+  light: 28,
+  heavy: 32,
+  special: 34,
+  critical: 36,
 };
 const MOVE_FX_MS: Record<SpecialMove["vfxType"], number> = {
   void_rift: 650,
@@ -103,8 +130,8 @@ const MOVE_FX_MS: Record<SpecialMove["vfxType"], number> = {
   slash: 800,
 };
 /** Horizontal tracks each fighter is confined to (stage %). */
-const TRACK_LEFT: [number, number] = [10, 40];
-const TRACK_RIGHT: [number, number] = [60, 90];
+const TRACK_LEFT: [number, number] = [10, 42];
+const TRACK_RIGHT: [number, number] = [58, 90];
 
 function randInt(min: number, max: number): number {
   return Math.floor(min + Math.random() * (max - min + 1));
@@ -149,6 +176,8 @@ type FighterRT = {
   stunMs: number;
   moveDir: number;
   toward: boolean;
+  leanDir: "forward" | "retreat" | null;
+  activeMoveName: string | null;
 };
 
 type AiAction =
@@ -252,6 +281,8 @@ function createMatch(script: MatchScript, playerSide: PlayerSide): MatchState {
     stunMs: 0,
     moveDir: 0,
     toward: false,
+    leanDir: null,
+    activeMoveName: null,
   });
   return {
     stage: "faceoff",
@@ -272,7 +303,7 @@ function createMatch(script: MatchScript, playerSide: PlayerSide): MatchState {
     heldRight: false,
     heldBlock: false,
     attackQueued: null,
-    aiNextMs: 800,
+    aiNextMs: 400,
     aiAction: null,
     aiActionMs: 0,
     shieldUsed: false,
@@ -321,6 +352,8 @@ type FighterView = {
   shield: boolean;
   moveDir: number;
   toward: boolean;
+  leanDir: "forward" | "retreat" | null;
+  activeMoveName: string | null;
 };
 
 type View = {
@@ -365,6 +398,8 @@ function fighterView(f: FighterRT): FighterView {
     shield: f.shieldMs > 0,
     moveDir: f.moveDir,
     toward: f.toward,
+    leanDir: f.leanDir,
+    activeMoveName: f.activeMoveName,
   };
 }
 
@@ -577,12 +612,9 @@ function tryStartPlayerAttack(m: MatchState, kind: AttackKind) {
     recover: RECOVER[kind],
     move,
   };
+  p.activeMoveName = move ? move.name : null;
   p.pose = "attack";
   p.seq += 1;
-  if (m.dashSfxMs <= 0) {
-    playDashSfx();
-    m.dashSfxMs = 400;
-  }
 }
 
 function applyHit(
@@ -595,19 +627,20 @@ function applyHit(
   playerSide: PlayerSide,
 ) {
   const dist = Math.abs(attacker.x - defender.x);
-  if (dist > REACH[a.kind]) return; // whiff — out of range
+  if (dist > REACH[a.kind]) return; // whiff — out of range! No sound, no damage.
   if (defender.shieldMs > 0) return; // invulnerable
+
   const crit = a.kind === "critical" || a.kind === "special";
   let dmg: number;
   if (isPlayer) {
-    if (a.kind === "light") dmg = randInt(7, 11);
-    else if (a.kind === "heavy") dmg = randInt(12, 17);
+    if (a.kind === "light") dmg = randInt(8, 12);
+    else if (a.kind === "heavy") dmg = randInt(14, 19);
     else dmg = randInt(a.move!.damage[0], a.move!.damage[1]);
     dmg *= m.buffs.player;
   } else {
-    if (a.kind === "light") dmg = randInt(6, 10);
-    else if (a.kind === "heavy") dmg = randInt(10, 15);
-    else dmg = randInt(a.move!.damage[0], a.move!.damage[1]) * 0.85;
+    if (a.kind === "light") dmg = randInt(7, 11);
+    else if (a.kind === "heavy") dmg = randInt(12, 17);
+    else dmg = randInt(a.move!.damage[0], a.move!.damage[1]) * 0.9;
     dmg *= m.buffs.ai;
   }
   const blocked = defender.blockHeld;
@@ -615,14 +648,13 @@ function applyHit(
   dmg = Math.max(1, Math.round(dmg));
   defender.hp = Math.max(0, defender.hp - dmg);
 
-  // Super meter: attacker builds on clean hits, defender builds on taking
-  // a hit, and blocking grants the perfect-guard bonus.
-  if (a.kind === "light") attacker.meter = Math.min(100, attacker.meter + 8);
-  else if (a.kind === "heavy") attacker.meter = Math.min(100, attacker.meter + 12);
-  defender.meter = Math.min(100, defender.meter + 4);
-  if (blocked) defender.meter = Math.min(100, defender.meter + 8);
+  // Super meter: attacker builds on clean hits, defender builds on taking a hit
+  if (a.kind === "light") attacker.meter = Math.min(100, attacker.meter + 10);
+  else if (a.kind === "heavy") attacker.meter = Math.min(100, attacker.meter + 14);
+  defender.meter = Math.min(100, defender.meter + 6);
+  if (blocked) defender.meter = Math.min(100, defender.meter + 10);
 
-  // FX + audio.
+  // FX + AUDIO: ONLY play strike/impact SFX when attack actually connects
   m.impact = { id: ++m.fxId, x: defender.x };
   m.impactMs = 380;
   m.hurtFx = { id: ++m.fxId, x: defender.x, bright: true };
@@ -640,30 +672,38 @@ function applyHit(
     dmg,
     crit: crit && !blocked,
     multi,
-    name: a.move?.name,
+    name: (a.kind === "special" || a.kind === "critical") ? a.move?.name : undefined,
     ms: 950,
   });
   if (m.hits.length > 6) m.hits.shift();
+
+  // 90ms arcade hit-stop freeze on heavy hits
   m.hitStopMs = a.kind === "light" ? 60 : 90;
-  m.camShakeMs = a.kind === "light" ? 300 : 420;
+  m.camShakeMs = a.kind === "light" ? 280 : 440;
   playHitSfx();
   if (a.move) playImpactSfx(impactCueFor(a.move.soundCue));
-  else playImpactSfx(crit ? "crit" : "slash");
+  else playImpactSfx(crit ? "crit" : a.kind === "heavy" ? "slam" : "slash");
 
-  defender.hurtMs = a.kind === "light" ? 220 : 320;
+  defender.hurtMs = a.kind === "light" ? 220 : 340;
   defender.hurtHeavy = a.kind !== "light";
   defender.hurtBright = true;
   defender.pose = "hit";
   defender.seq += 1;
-  if (defender.attack) defender.attack = null;
+  if (defender.attack) {
+    defender.attack = null;
+    defender.activeMoveName = null;
+  }
 
   if (isPlayer) {
-    m.combo = { id: ++m.fxId, count: (m.combo?.count ?? 0) + 1 };
-    m.comboMs = 1400;
+    m.combo = {
+      id: ++m.fxId,
+      count: (m.combo?.count ?? 0) + (a.move?.hitCount ?? 1),
+    };
+    m.comboMs = 1500;
   }
   if (a.kind === "special" || a.kind === "critical") {
     m.cinematic = { id: ++m.fxId, kind: "critical", moveName: a.move?.name };
-    m.cinematicMs = 750;
+    m.cinematicMs = a.kind === "critical" ? 1100 : 750;
     m.moveFx = {
       id: ++m.fxId,
       x: defender.x,
@@ -715,6 +755,7 @@ function updateAttack(
     a.recover -= dt;
     if (a.recover <= 0) {
       f.attack = null;
+      f.activeMoveName = null;
       f.pose = "idle";
       f.seq += 1;
     }
@@ -731,94 +772,126 @@ function updateAI(
   const p = m.fighters.challenger;
   if (ai.down || ai.stunMs > 0) {
     ai.moveDir = 0;
+    ai.leanDir = null;
     return;
   }
-  if (m.aiAction) {
-    m.aiActionMs += dt;
-    const act = m.aiAction;
-    if (act.kind === "approach") {
-      const dir = Math.sign(p.x - ai.x) || 1;
-      ai.x += dir * AI_APPROACH_SPEED * (dt / 1000);
-      ai.x = clamp(ai.x, oppTrack(playerSide));
-      ai.moveDir = dir;
-      ai.toward = true;
-      if (m.aiActionMs >= act.dur) {
-        m.aiAction = null;
-        m.aiNextMs = m.overdrive ? randInt(550, 850) : randInt(900, 1300);
-        ai.moveDir = 0;
-      }
-    } else if (act.kind === "backstep") {
-      const dir = Math.sign(ai.x - p.x) || 1;
-      ai.x += dir * AI_BACKSTEP_SPEED * (dt / 1000);
-      ai.x = clamp(ai.x, oppTrack(playerSide));
-      ai.moveDir = dir;
-      ai.toward = false;
-      if (m.aiActionMs >= act.dur) {
-        m.aiAction = null;
-        m.aiNextMs = m.overdrive ? randInt(550, 850) : randInt(900, 1300);
-        ai.moveDir = 0;
-      }
-    } else if (act.kind === "block") {
+
+  // If AI is executing an attack, let the attack cycle complete
+  if (ai.attack) {
+    ai.moveDir = 0;
+    ai.leanDir = null;
+    return;
+  }
+
+  const dist = Math.abs(ai.x - p.x);
+  const reach = REACH.light;
+
+  // OUT OF RANGE: Aggressively walk/dash across the stage towards the player
+  if (dist > reach - 2) {
+    const dir = Math.sign(p.x - ai.x) || (playerSide === "left" ? -1 : 1);
+    ai.moveDir = dir;
+    ai.toward = true;
+    ai.leanDir = "forward";
+    ai.x += dir * AI_APPROACH_SPEED * (dt / 1000);
+    ai.x = clamp(ai.x, oppTrack(playerSide));
+    ai.blockHeld = false;
+
+    // Ground dust puffs while closing distance
+    if (Math.random() < 0.16) {
+      m.dust = { id: ++m.fxId, x: ai.x };
+      m.dustMs = 350;
+    }
+    return;
+  }
+
+  // IN RANGE: Active mix-ups and attacks (cadence: 160-280ms)
+  m.aiNextMs -= dt;
+  if (m.aiNextMs <= 0) {
+    m.aiNextMs = randInt(160, 280);
+
+    // If player is attacking in wind-up, 40% chance AI raises guard
+    if (p.attack && p.attack.windup > 0 && Math.random() < 0.42) {
       ai.blockHeld = true;
-      if (m.aiActionMs >= act.dur) {
-        ai.blockHeld = false;
-        m.aiAction = null;
-        m.aiNextMs = m.overdrive ? randInt(550, 850) : randInt(900, 1300);
-      }
-    } else if (act.kind === "telegraph") {
-      ai.pose = "idle";
+      ai.moveDir = 0;
+      ai.leanDir = null;
+      return;
+    }
+
+    ai.blockHeld = false;
+
+    // Super Meter attacks
+    const roll = Math.random();
+    if (ai.meter >= 100 && roll < 0.45) {
+      // Critical Art
+      ai.meter = 0;
+      const move = m.moves.creator.criticalArt;
+      ai.attack = {
+        kind: "critical",
+        windup: WINDUP.critical,
+        recover: RECOVER.critical,
+        move,
+      };
+      ai.activeMoveName = move.name;
+      ai.pose = "attack";
       ai.seq += 1;
-      if (m.aiActionMs >= act.dur) {
-        const moves = m.moves.creator;
-        const move =
-          act.attack === "special"
-            ? moves.signatureMove
-            : act.attack === "critical"
-              ? moves.criticalArt
-              : null;
+      ai.moveDir = 0;
+      ai.leanDir = null;
+    } else if (ai.meter >= 40 && roll < 0.40) {
+      // Signature Special
+      ai.meter -= 40;
+      const move = m.moves.creator.signatureMove;
+      ai.attack = {
+        kind: "special",
+        windup: WINDUP.special,
+        recover: RECOVER.special,
+        move,
+      };
+      ai.activeMoveName = move.name;
+      ai.pose = "attack";
+      ai.seq += 1;
+      ai.moveDir = 0;
+      ai.leanDir = null;
+    } else {
+      // Light / Heavy strikes or quick guard / micro-step
+      const actRoll = Math.random();
+      if (actRoll < 0.45) {
         ai.attack = {
-          kind: act.attack,
-          windup: 150,
-          recover: RECOVER[act.attack],
-          move,
+          kind: "light",
+          windup: WINDUP.light,
+          recover: RECOVER.light,
+          move: null,
         };
+        ai.activeMoveName = null;
         ai.pose = "attack";
         ai.seq += 1;
-        m.aiAction = null;
-        m.aiNextMs = m.overdrive ? randInt(550, 850) : randInt(900, 1300);
+        ai.moveDir = 0;
+        ai.leanDir = null;
+      } else if (actRoll < 0.75) {
+        ai.attack = {
+          kind: "heavy",
+          windup: WINDUP.heavy,
+          recover: RECOVER.heavy,
+          move: null,
+        };
+        ai.activeMoveName = null;
+        ai.pose = "attack";
+        ai.seq += 1;
+        ai.moveDir = 0;
+        ai.leanDir = null;
+      } else if (actRoll < 0.88) {
+        // Short tactical guard
+        ai.blockHeld = true;
+        m.aiNextMs = randInt(160, 240);
+        ai.moveDir = 0;
+        ai.leanDir = null;
+      } else {
+        // Micro backstep to bait whiff
+        const retreatDir = Math.sign(ai.x - p.x) || (playerSide === "left" ? 1 : -1);
+        ai.x += retreatDir * AI_BACKSTEP_SPEED * (dt / 1000);
+        ai.x = clamp(ai.x, oppTrack(playerSide));
+        ai.moveDir = retreatDir;
+        ai.leanDir = "retreat";
       }
-    }
-    return;
-  }
-  m.aiNextMs -= dt;
-  if (m.aiNextMs > 0) {
-    ai.moveDir = 0;
-    return;
-  }
-  const dist = Math.abs(ai.x - p.x);
-  if (dist > 26) {
-    m.aiAction = { kind: "approach", dur: randInt(250, 420) };
-    m.aiActionMs = 0;
-    if (m.dashSfxMs <= 0) {
-      playDashSfx();
-      m.dashSfxMs = 400;
-    }
-  } else {
-    const roll = Math.random();
-    if (roll < 0.6) {
-      let kind: AttackKind = "light";
-      const r2 = Math.random();
-      if (ai.meter >= 40 && r2 < 0.25) kind = "special";
-      else if (r2 < 0.7) kind = "light";
-      else kind = "heavy";
-      m.aiAction = { kind: "telegraph", attack: kind, dur: 300 };
-      m.aiActionMs = 0;
-    } else if (roll < 0.8) {
-      m.aiAction = { kind: "block", dur: 500 };
-      m.aiActionMs = 0;
-    } else {
-      m.aiAction = { kind: "backstep", dur: randInt(200, 350) };
-      m.aiActionMs = 0;
     }
   }
 }
@@ -879,6 +952,13 @@ function updateFight(
     p.x += p.moveDir * speed * (dt / 1000);
     p.x = clamp(p.x, playerTrack(playerSide));
     p.toward = p.moveDir > 0 === p.x < ai.x;
+    p.leanDir = p.toward ? "forward" : "retreat";
+    if (Math.random() < 0.18) {
+      m.dust = { id: ++m.fxId, x: p.x };
+      m.dustMs = 350;
+    }
+  } else {
+    p.leanDir = null;
   }
 
   // Consume a queued player attack.
@@ -928,10 +1008,11 @@ function step(
         const winner = m.roundWinner ?? script.chainWinner;
         m.orbs[winner] += 1;
         onRoundWin?.(winner);
-        if (m.orbs[winner] >= 2) {
+        // Best-of-3: first fighter to 2 round wins ends the match immediately!
+        if (m.orbs[winner] >= 2 || m.orbs.challenger >= 2 || m.orbs.creator >= 2) {
           m.stage = "verdict";
           m.stageMs = 0;
-          m.matchWinner = winner;
+          m.matchWinner = m.orbs.challenger >= 2 ? "challenger" : "creator";
         } else {
           startRound(m, (m.round + 1) as 1 | 2 | 3, script, playerSide);
         }
@@ -974,6 +1055,8 @@ const emptyFighterView: FighterView = {
   shield: false,
   moveDir: 0,
   toward: false,
+  leanDir: null,
+  activeMoveName: null,
 };
 
 const initialView: View = {
@@ -1234,6 +1317,14 @@ export function BattleArenaModal({
   const leftDesc = leftSide === "challenger" ? challengerFighter : creatorFighter;
   const rightDesc = rightSide === "challenger" ? challengerFighter : creatorFighter;
 
+  /* Dynamic Stage Camera & Zoom */
+  const dist = Math.abs(view.fighters.creator.x - view.fighters.challenger.x);
+  const closeRatio = Math.max(0, Math.min(1, (65 - dist) / 45));
+  const isCriticalArt = view.cinematic?.kind === "critical";
+  const cameraScale = isCriticalArt ? 1.22 : 1.0 + closeRatio * 0.12;
+  const midX = (view.fighters.creator.x + view.fighters.challenger.x) / 2;
+  const cameraPanX = (50 - midX) * 0.22;
+
   /* The match winner is decided STRICTLY from the manual round scoreboard —
    * never from the pre-rolled on-chain outcome. First to 2 round wins. */
   const manualPlayerWon = playerWins >= 2;
@@ -1301,193 +1392,248 @@ export function BattleArenaModal({
                 view.cinematic && "arena-cinematic-zoom",
               )}
             >
-              {/* Arena background art — heavily dimmed + softened */}
+              {/* Camera transform wrapper with dynamic zoom and pan */}
               <div
-                className="absolute inset-0 bg-cover bg-center"
+                className="relative h-full w-full will-change-transform transition-transform duration-150 ease-out"
                 style={{
-                  backgroundImage: "url(/assets/arena-background.jpg)",
-                  filter: "brightness(0.5) contrast(0.9) blur(2px)",
+                  transform: `scale(${cameraScale}) translateX(${cameraPanX}%)`,
+                  transformOrigin: "50% 75%",
                 }}
-                aria-hidden
-              />
-              {/* Heavy dark gradient overlay — keeps HUD, fighters, and
-                  floating text crisp against a quiet backdrop */}
-              <div
-                className="absolute inset-0 bg-gradient-to-t from-zinc-950 via-zinc-950/80 to-zinc-950/60"
-                aria-hidden
-              />
-              {/* Arena floor — subtle gradient, no harsh graphics */}
-              <div className="absolute inset-x-0 bottom-0 h-[38%] bg-gradient-to-b from-transparent via-[#241a3d]/40 to-[#120d22]/70">
-                <svg
-                  className="absolute inset-0 h-full w-full"
-                  viewBox="0 0 800 160"
-                  preserveAspectRatio="none"
-                  aria-hidden
-                >
-                  {Array.from({ length: 9 }).map((_, i) => (
-                    <line
-                      key={i}
-                      x1={i * 100}
-                      y1="0"
-                      x2={400 + (i * 100 - 400) * 1.6}
-                      y2="160"
-                      stroke="#7c3aed"
-                      strokeWidth="0.8"
-                      opacity="0.12"
-                    />
-                  ))}
-                  <line
-                    x1="0"
-                    y1="2"
-                    x2="800"
-                    y2="2"
-                    stroke="#a855f7"
-                    strokeWidth="2"
-                    opacity="0.25"
-                  />
-                </svg>
-                {[
-                  { left: "18%", top: "30%", glyph: "ᛝ" },
-                  { left: "48%", top: "55%", glyph: "ᛟ" },
-                  { left: "76%", top: "25%", glyph: "ᛉ" },
-                ].map((rune) => (
-                  <span
-                    key={rune.glyph}
-                    className="animate-pulse absolute select-none text-2xl text-purple-400/30 drop-shadow-[0_0_10px_rgba(168,85,247,0.4)]"
-                    style={{ left: rune.left, top: rune.top }}
-                    aria-hidden
-                  >
-                    {rune.glyph}
-                  </span>
-                ))}
-              </div>
-
-              {/* Ambient fighter lighting — soft white/purple backlight
-                  spots + floor light pools so the sprites read cleanly
-                  against the darkened arena without any filters on them. */}
-              {(["creator", "challenger"] as const).map((side) => {
-                const f = view.fighters[side];
-                const anchor = { left: `${f.x}%` };
-                return (
-                  <div key={`light-${side}`} aria-hidden>
-                    {/* Backlight spot */}
-                    <div
-                      className="pointer-events-none absolute bottom-8 h-56 w-56 -translate-x-1/2 rounded-full blur-xl"
-                      style={{
-                        ...anchor,
-                        background:
-                          "radial-gradient(circle, rgba(255,255,255,0.10), rgba(139,92,246,0.08) 50%, transparent 72%)",
-                      }}
-                    />
-                    {/* Floor light pool */}
-                    <div
-                      className="pointer-events-none absolute bottom-3 h-7 w-48 -translate-x-1/2 rounded-[50%] blur-md"
-                      style={{
-                        ...anchor,
-                        background:
-                          "radial-gradient(ellipse, rgba(196,181,253,0.22), rgba(168,85,247,0.10) 55%, transparent 75%)",
-                      }}
-                    />
-                  </div>
-                );
-              })}
-
-              {/* Fighters — face-to-face in the center foreground */}
-              {(["creator", "challenger"] as const).map((side) => {
-                const f = view.fighters[side];
-                const isPlayer = side === "challenger";
-                const desc = side === "creator" ? creatorFighter : challengerFighter;
-                const lean = isPlayer
-                  ? f.blockHeld
-                    ? "assist-block"
-                    : f.moveDir !== 0
-                      ? f.toward
-                        ? "assist-dash"
-                        : "assist-back"
-                      : ""
-                  : "";
-                return (
-                  <div
-                    key={side}
-                    className="sprite-pixelated absolute bottom-5"
-                    style={{ left: `${f.x}%`, transform: "translateX(-50%)" }}
-                  >
-                    <div className={cn("assist-stance", lean)}>
-                      <SheetFighter
-                        fighterClass={desc.fighterClass}
-                        state={f.pose}
-                        facing={f.facing}
-                        size={stageSize(desc, narrow)}
-                        animKey={`${f.pose}-${f.seq}`}
-                      />
-                    </div>
-                    {/* Guard aura — shield shimmer while blocking. */}
-                    {f.blockHeld && (
-                      <div
-                        className="pointer-events-none absolute bottom-0 left-1/2 z-[25] h-28 w-28 -translate-x-1/2 rounded-full border-2 border-cyan-300/70 bg-cyan-300/10"
-                        style={{ boxShadow: "0 0 20px rgba(34,211,238,0.5)" }}
-                        aria-hidden
-                      />
-                    )}
-                    {view.hits
-                      .filter((h) => h.side === side)
-                      .map((h) => (
-                        <DamageNumber key={h.id} hit={h} />
-                      ))}
-                  </div>
-                );
-              })}
-
-              {/* Dash-in dust/smoke behind the attacker */}
-              {view.dust && <DustFx key={`dust-${view.dust.id}`} x={view.dust.x} />}
-
-              {/* Defender stagger: red flash frame + damage sparks */}
-              {view.hurtFx && (
-                <>
-                  <StaggerFlash
-                    key={`flash-${view.hurtFx.id}`}
-                    x={view.hurtFx.x}
-                    bright={view.hurtFx.bright}
-                  />
-                  <DamageSparks
-                    key={`sparks-${view.hurtFx.id}`}
-                    x={view.hurtFx.x}
-                  />
-                </>
-              )}
-
-              {/* Signature / Critical Art move FX (positioned at the target) */}
-              {view.moveFx?.vfx === "void_rift" && (
-                <SlamFx key={`slam-${view.moveFx.id}`} x={view.moveFx.x} />
-              )}
-              {view.moveFx?.vfx === "laser" && (
-                <KeonePortalFx key={`portal-${view.moveFx.id}`} x={view.moveFx.x} />
-              )}
-              {view.moveFx?.vfx === "magma" && (
-                <ChogzillaSlamFx key={`chog-${view.moveFx.id}`} x={view.moveFx.x} />
-              )}
-              {view.moveFx?.vfx === "slash" && (
-                <SamuraiSlashFx key={`sam-${view.moveFx.id}`} x={view.moveFx.x} />
-              )}
-
-              {/* Cyberpunk hit-marker on every clean strike */}
-              {view.impact && (
-                <NeonHitMarker key={`burst-${view.impact.id}`} x={view.impact.x} />
-              )}
-
-              {/* Guard flash on a blocked hit */}
-              {view.guard && (
+              >
+                {/* Arena background art — heavily dimmed + softened */}
                 <div
-                  key={`guard-${view.guard.id}`}
-                  className="pointer-events-none absolute bottom-16 z-[28] h-24 w-24 rounded-full border-4 border-cyan-300/90"
+                  className="absolute inset-0 bg-cover bg-center"
                   style={{
-                    left: `${view.guard.x}%`,
-                    transform: "translateX(-50%)",
-                    boxShadow: "0 0 28px rgba(34,211,238,0.95)",
+                    backgroundImage: "url(/assets/arena-background.jpg)",
+                    filter: "brightness(0.5) contrast(0.9) blur(2px)",
                   }}
                   aria-hidden
                 />
-              )}
+                {/* Heavy dark gradient overlay — keeps HUD, fighters, and
+                    floating text crisp against a quiet backdrop */}
+                <div
+                  className="absolute inset-0 bg-gradient-to-t from-zinc-950 via-zinc-950/80 to-zinc-950/60"
+                  aria-hidden
+                />
+
+                {/* Critical Art Cut-In Dark Vignette */}
+                {isCriticalArt && (
+                  <div
+                    className="pointer-events-none absolute inset-0 z-[22] bg-black/85 backdrop-blur-[1px] transition-opacity duration-200"
+                    aria-hidden
+                  />
+                )}
+
+                {/* Dramatic Street-Style Streak Across Screen */}
+                {isCriticalArt && (
+                  <div
+                    className="critical-streak-slash pointer-events-none absolute inset-x-[-15%] top-1/2 z-[24] h-2.5 bg-gradient-to-r from-transparent via-amber-300 via-rose-500 to-transparent shadow-[0_0_26px_rgba(239,68,68,1)]"
+                    aria-hidden
+                  />
+                )}
+
+                {/* Arena floor — subtle gradient, no harsh graphics */}
+                <div className="absolute inset-x-0 bottom-0 h-[38%] bg-gradient-to-b from-transparent via-[#241a3d]/40 to-[#120d22]/70">
+                  <svg
+                    className="absolute inset-0 h-full w-full"
+                    viewBox="0 0 800 160"
+                    preserveAspectRatio="none"
+                    aria-hidden
+                  >
+                    {Array.from({ length: 9 }).map((_, i) => (
+                      <line
+                        key={i}
+                        x1={i * 100}
+                        y1="0"
+                        x2={400 + (i * 100 - 400) * 1.6}
+                        y2="160"
+                        stroke="#7c3aed"
+                        strokeWidth="0.8"
+                        opacity="0.12"
+                      />
+                    ))}
+                    <line
+                      x1="0"
+                      y1="2"
+                      x2="800"
+                      y2="2"
+                      stroke="#a855f7"
+                      strokeWidth="2"
+                      opacity="0.25"
+                    />
+                  </svg>
+                  {[
+                    { left: "18%", top: "30%", glyph: "ᛝ" },
+                    { left: "48%", top: "55%", glyph: "ᛟ" },
+                    { left: "76%", top: "25%", glyph: "ᛉ" },
+                  ].map((rune) => (
+                    <span
+                      key={rune.glyph}
+                      className="animate-pulse absolute select-none text-2xl text-purple-400/30 drop-shadow-[0_0_10px_rgba(168,85,247,0.4)]"
+                      style={{ left: rune.left, top: rune.top }}
+                      aria-hidden
+                    >
+                      {rune.glyph}
+                    </span>
+                  ))}
+                </div>
+
+                {/* Ambient fighter lighting — soft backlight spots */}
+                {(["creator", "challenger"] as const).map((side) => {
+                  const f = view.fighters[side];
+                  const anchor = { left: `${f.x}%` };
+                  return (
+                    <div key={`light-${side}`} aria-hidden>
+                      {/* Backlight spot */}
+                      <div
+                        className="pointer-events-none absolute bottom-8 h-56 w-56 -translate-x-1/2 rounded-full blur-xl"
+                        style={{
+                          ...anchor,
+                          background:
+                            "radial-gradient(circle, rgba(255,255,255,0.10), rgba(139,92,246,0.08) 50%, transparent 72%)",
+                        }}
+                      />
+                      {/* Floor light pool */}
+                      <div
+                        className="pointer-events-none absolute bottom-3 h-7 w-48 -translate-x-1/2 rounded-[50%] blur-md"
+                        style={{
+                          ...anchor,
+                          background:
+                            "radial-gradient(ellipse, rgba(196,181,253,0.22), rgba(168,85,247,0.10) 55%, transparent 75%)",
+                        }}
+                      />
+                    </div>
+                  );
+                })}
+
+                {/* Fighters + Motion Afterimages (Shadow Clones) */}
+                {(["creator", "challenger"] as const).map((side) => {
+                  const f = view.fighters[side];
+                  const desc = side === "creator" ? creatorFighter : challengerFighter;
+                  const classCfg = CLASS_AFTERIMAGE_CONFIG[desc.fighterClass];
+
+                  const isDashing = f.moveDir !== 0;
+                  const isSpecialOrCrit = f.pose === "attack" && Boolean(f.activeMoveName);
+                  const showAfterimages = isDashing || isSpecialOrCrit;
+
+                  const dirSign = f.moveDir !== 0 ? f.moveDir : (f.facing === "right" ? 1 : -1);
+                  const offsets = [-dirSign * 3.5, -dirSign * 7.5, -dirSign * 11.5];
+                  const opacities = [0.5, 0.25, 0.1];
+
+                  return (
+                    <div key={side}>
+                      {/* 3 fading neon silhouette afterimages */}
+                      {showAfterimages &&
+                        [0, 1, 2].map((idx) => (
+                          <div
+                            key={`afterimage-${side}-${idx}`}
+                            className="sprite-pixelated afterimage-ghost absolute bottom-5"
+                            style={{
+                              left: `${f.x + offsets[idx]}%`,
+                              transform: "translateX(-50%)",
+                              opacity: opacities[idx],
+                              ["--afterimage-glow" as string]: classCfg.color,
+                              zIndex: 10 + idx,
+                            }}
+                            aria-hidden
+                          >
+                            <SheetFighter
+                              fighterClass={desc.fighterClass}
+                              state={f.pose}
+                              facing={f.facing}
+                              size={stageSize(desc, narrow)}
+                              animKey={`after-${side}-${idx}-${f.pose}`}
+                              leanDir={f.leanDir}
+                            />
+                          </div>
+                        ))}
+
+                      {/* Main Fighter Body */}
+                      <div
+                        className="sprite-pixelated absolute bottom-5 z-20"
+                        style={{ left: `${f.x}%`, transform: "translateX(-50%)" }}
+                      >
+                        <div className="assist-stance">
+                          <SheetFighter
+                            fighterClass={desc.fighterClass}
+                            state={f.pose}
+                            facing={f.facing}
+                            size={stageSize(desc, narrow)}
+                            animKey={`${f.pose}-${f.seq}`}
+                            activeMoveName={f.activeMoveName}
+                            leanDir={f.leanDir}
+                            isBlocking={f.blockHeld}
+                          />
+                        </div>
+                        {/* Guard aura — shield shimmer while blocking */}
+                        {f.blockHeld && (
+                          <div
+                            className="pointer-events-none absolute bottom-0 left-1/2 z-[25] h-28 w-28 -translate-x-1/2 rounded-full border-2 border-cyan-300/70 bg-cyan-300/10"
+                            style={{ boxShadow: "0 0 20px rgba(34,211,238,0.5)" }}
+                            aria-hidden
+                          />
+                        )}
+                        {view.hits
+                          .filter((h) => h.side === side)
+                          .map((h) => (
+                            <DamageNumber key={h.id} hit={h} />
+                          ))}
+                      </div>
+                    </div>
+                  );
+                })}
+
+                {/* Dash-in dust/smoke behind the attacker */}
+                {view.dust && <DustFx key={`dust-${view.dust.id}`} x={view.dust.x} />}
+
+                {/* Defender stagger: red flash frame + damage sparks */}
+                {view.hurtFx && (
+                  <>
+                    <StaggerFlash
+                      key={`flash-${view.hurtFx.id}`}
+                      x={view.hurtFx.x}
+                      bright={view.hurtFx.bright}
+                    />
+                    <DamageSparks
+                      key={`sparks-${view.hurtFx.id}`}
+                      x={view.hurtFx.x}
+                    />
+                  </>
+                )}
+
+                {/* Signature / Critical Art move FX */}
+                {view.moveFx?.vfx === "void_rift" && (
+                  <SlamFx key={`slam-${view.moveFx.id}`} x={view.moveFx.x} />
+                )}
+                {view.moveFx?.vfx === "laser" && (
+                  <KeonePortalFx key={`portal-${view.moveFx.id}`} x={view.moveFx.x} />
+                )}
+                {view.moveFx?.vfx === "magma" && (
+                  <ChogzillaSlamFx key={`chog-${view.moveFx.id}`} x={view.moveFx.x} />
+                )}
+                {view.moveFx?.vfx === "slash" && (
+                  <SamuraiSlashFx key={`sam-${view.moveFx.id}`} x={view.moveFx.x} />
+                )}
+
+                {/* Cyberpunk hit-marker on every clean strike */}
+                {view.impact && (
+                  <NeonHitMarker key={`burst-${view.impact.id}`} x={view.impact.x} />
+                )}
+
+                {/* Guard flash on a blocked hit */}
+                {view.guard && (
+                  <div
+                    key={`guard-${view.guard.id}`}
+                    className="pointer-events-none absolute bottom-16 z-[28] h-24 w-24 rounded-full border-4 border-cyan-300/90"
+                    style={{
+                      left: `${view.guard.x}%`,
+                      transform: "translateX(-50%)",
+                      boxShadow: "0 0 28px rgba(34,211,238,0.95)",
+                    }}
+                    aria-hidden
+                  />
+                )}
+              </div>
 
               {/* Floating combo hit counter */}
               {view.combo && (
@@ -1646,6 +1792,7 @@ export function BattleArenaModal({
                       key={b.dir}
                       type="button"
                       aria-label={`${b.label} (${b.badge})`}
+                      style={{ touchAction: "none" }}
                       className={cn(
                         "arcade-ctl-btn flex min-w-[62px] flex-col items-center justify-center rounded-xl border px-2.5 py-3 text-[11px] font-black uppercase tracking-wider transition-all active:scale-95 sm:min-w-[78px] sm:px-4",
                         b.active
@@ -1667,6 +1814,21 @@ export function BattleArenaModal({
                         else triggerPlayerMove(b.dir, false);
                       }}
                       onPointerLeave={() => {
+                        if (b.dir === "block") triggerPlayerBlock(false);
+                        else triggerPlayerMove(b.dir, false);
+                      }}
+                      onTouchStart={(e) => {
+                        e.preventDefault();
+                        if (b.dir === "block") triggerPlayerBlock(true);
+                        else triggerPlayerMove(b.dir, true);
+                      }}
+                      onTouchEnd={(e) => {
+                        e.preventDefault();
+                        if (b.dir === "block") triggerPlayerBlock(false);
+                        else triggerPlayerMove(b.dir, false);
+                      }}
+                      onTouchCancel={(e) => {
+                        e.preventDefault();
                         if (b.dir === "block") triggerPlayerBlock(false);
                         else triggerPlayerMove(b.dir, false);
                       }}
@@ -1702,6 +1864,7 @@ export function BattleArenaModal({
                         key={b.kind}
                         type="button"
                         aria-label={`${b.label} (${b.badge})`}
+                        style={{ touchAction: "none" }}
                         className={cn(
                           "arcade-ctl-btn flex min-w-[62px] flex-col items-center justify-center rounded-xl border px-2.5 py-3 text-[11px] font-black uppercase tracking-wider transition-all active:scale-95 sm:min-w-[78px] sm:px-4",
                           b.kind === "special" &&
@@ -1718,6 +1881,10 @@ export function BattleArenaModal({
                             "border-white/10 bg-zinc-900/40 text-zinc-600",
                         )}
                         onPointerDown={(e) => {
+                          e.preventDefault();
+                          triggerPlayerAttack(b.kind);
+                        }}
+                        onTouchStart={(e) => {
                           e.preventDefault();
                           triggerPlayerAttack(b.kind);
                         }}
@@ -1971,21 +2138,32 @@ function StaggerFlash({ x, bright }: { x: number; bright: boolean }) {
   );
 }
 
-/** Damage sparks radiating off the staggered defender. */
+/** Directional hit-spark slash lines radiating off the staggered defender (no cartoon emojis). */
 function DamageSparks({ x }: { x: number }) {
   return (
     <div className="pointer-events-none absolute inset-0 z-[27]" aria-hidden>
-      {Array.from({ length: 6 }).map((_, i) => (
+      {[
+        { dx: "-44px", dy: "-26px", rot: "-28deg" },
+        { dx: "40px", dy: "-32px", rot: "32deg" },
+        { dx: "-34px", dy: "26px", rot: "-48deg" },
+        { dx: "38px", dy: "22px", rot: "18deg" },
+        { dx: "0px", dy: "-40px", rot: "90deg" },
+        { dx: "-18px", dy: "36px", rot: "-82deg" },
+      ].map((s, i) => (
         <span
           key={i}
-          className="damage-spark absolute h-1.5 w-1.5 rounded-full"
-          style={{
-            left: `calc(${x}% + ${((i % 3) - 1) * 28}px)`,
-            top: `calc(46% + ${(i % 2 ? -1 : 1) * 16}px)`,
-            background: i % 2 ? "#a78bfa" : "#fbbf24",
-            boxShadow: `0 0 8px ${i % 2 ? "rgba(167,139,250,0.95)" : "rgba(251,191,36,0.95)"}`,
-            animationDelay: `${i * 40}ms`,
-          }}
+          className="directional-spark-burst absolute h-0.5 w-7 rounded-full bg-gradient-to-r from-white via-amber-300 to-purple-400"
+          style={
+            {
+              left: `${x}%`,
+              top: "52%",
+              transform: `rotate(${s.rot})`,
+              boxShadow: "0 0 10px rgba(251,191,36,0.95)",
+              "--dx": s.dx,
+              "--dy": s.dy,
+              animationDelay: `${i * 30}ms`,
+            } as CSSProperties
+          }
         />
       ))}
     </div>
@@ -2339,6 +2517,17 @@ function VerdictScreen({
           />
         </div>
 
+        {/* Trophy / Skull Championship Emblem */}
+        {won ? (
+          <div className="mx-auto mb-2 flex h-14 w-14 items-center justify-center rounded-full border border-amber-400/40 bg-amber-500/20 text-3xl shadow-[0_0_24px_rgba(251,191,36,0.6)] animate-pop-in">
+            🏆
+          </div>
+        ) : (
+          <div className="mx-auto mb-2 flex h-14 w-14 items-center justify-center rounded-full border border-red-500/40 bg-red-500/20 text-3xl shadow-[0_0_24px_rgba(239,68,68,0.5)] animate-pop-in">
+            💀
+          </div>
+        )}
+
         <h3
           className={cn(
             "mt-2 animate-verdict-slam text-4xl font-black tracking-wide sm:text-5xl",
@@ -2354,9 +2543,9 @@ function VerdictScreen({
           <p className="mt-3 text-sm text-zinc-300">
             {challengerName} claimed{" "}
             <span className="font-bold text-emerald-300">
-              +{formatMon(outcome.payout)} MON
+              +{formatMon(outcome.payout > 0n ? outcome.payout : outcome.pot)} MON
             </span>{" "}
-            in Duel #{outcome.duelId}
+            in Duel #{outcome.duelId} (2 Rounds Won)
           </p>
         ) : (
           <p className="mt-3 text-sm text-zinc-300">

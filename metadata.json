@@ -1,0 +1,8 @@
+{
+  "name": "Chog Arena",
+  "description": "1v1 Deathmatch with Second Wind resurrection on Monad — stake MON, fight instantly.",
+  "permissions": [],
+  "capabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

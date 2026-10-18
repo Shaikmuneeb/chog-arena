@@ -13,6 +13,7 @@ import { monad, monadTestnet } from "./monadChain";
  */
 export const config = createConfig({
   chains: [monad, monadTestnet],
+  ssr: true,
   connectors: [
     injected(), // generic browser-injected fallback (window.ethereum)
     injected({ target: "metaMask" }),

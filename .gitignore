@@ -2,6 +2,14 @@
 cache/
 out/
 
+# Dependencies & Build artifacts
+node_modules/
+web/node_modules/
+.next/
+web/.next/
+dist/
+*.log
+
 # Commonly ignored directories
 .logs/
 .ignore/
@@ -18,3 +26,4 @@ docs/
 .env
 .env.*
 !.env.example
+

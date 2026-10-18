@@ -28,6 +28,12 @@ type ChogzillaSpriteProps = {
   /** Drives attack VFX particles + floating move-name tag from fighterMoves. */
   fighterClass?: FighterClass;
   className?: string;
+  /** Active move name banner — ONLY rendered when an actual special/critical is triggered */
+  activeMoveName?: string | null;
+  /** Velocity lean direction: forward when dashing toward foe, retreat when backing up */
+  leanDir?: "forward" | "retreat" | null;
+  /** Whether guarding/blocking */
+  isBlocking?: boolean;
 };
 
 /** 4-pose sprite sheet: column per state (bottom12% captions cropped out). */
@@ -79,60 +85,77 @@ function getProcessedImage(src: string): Promise<HTMLCanvasElement> {
         const px = data.data;
         const W = off.width;
         const H = off.height;
+        const frameW = Math.floor(W / FRAME_COUNT);
 
-        /* Sample the backdrop from the four corners (average). */
-        const cornerIdx = [
-          0,
-          (W - 1) * 4,
-          (H - 1) * W * 4,
-          ((H - 1) * W + (W - 1)) * 4,
-        ];
-        let br = 0;
-        let bg = 0;
-        let bb = 0;
-        for (const i of cornerIdx) {
-          br += px[i];
-          bg += px[i + 1];
-          bb += px[i + 2];
-        }
-        br = Math.round(br / 4);
-        bg = Math.round(bg / 4);
-        bb = Math.round(bb / 4);
-        const TOL_SQ = 42 * 42;
-
-        const matchesBg = (i: number) => {
-          const dr = px[i] - br;
-          const dg = px[i + 1] - bg;
-          const db = px[i + 2] - bb;
-          return dr * dr + dg * dg + db * db <= TOL_SQ;
-        };
-
-        /* BFS flood fill from every border pixel that matches the backdrop. */
         const visited = new Uint8Array(W * H);
-        const stack: number[] = [];
-        const push = (idx: number) => {
-          if (visited[idx]) return;
-          if (!matchesBg(idx * 4)) return;
-          visited[idx] = 1;
-          stack.push(idx);
-        };
-        for (let x = 0; x < W; x += 1) {
-          push(x);
-          push((H - 1) * W + x);
-        }
-        for (let y = 0; y < H; y += 1) {
-          push(y * W);
-          push(y * W + W - 1);
-        }
-        while (stack.length > 0) {
-          const idx = stack.pop()!;
-          px[idx * 4 + 3] = 0;
-          const x = idx % W;
-          const y = (idx / W) | 0;
-          if (x > 0) push(idx - 1);
-          if (x < W - 1) push(idx + 1);
-          if (y > 0) push(idx - W);
-          if (y < H - 1) push(idx + W);
+        const TOL_SQ = 45 * 45;
+
+        /* Perimeter BFS flood-fill per frame: flood only outer background from
+         * the 4 borders of each frame inward so 100% of interior armor and linework
+         * stays solid and opaque. */
+        for (let f = 0; f < FRAME_COUNT; f += 1) {
+          const startX = f * frameW;
+          const endX = f === FRAME_COUNT - 1 ? W : (f + 1) * frameW;
+
+          /* Sample backdrop color from the 4 corners of this specific frame */
+          const cTopLeft = startX;
+          const cTopRight = endX - 1;
+          const cBotLeft = (H - 1) * W + startX;
+          const cBotRight = (H - 1) * W + (endX - 1);
+          const cornerIndices = [cTopLeft, cTopRight, cBotLeft, cBotRight];
+
+          let br = 0;
+          let bg = 0;
+          let bb = 0;
+          for (const c of cornerIndices) {
+            br += px[c * 4];
+            bg += px[c * 4 + 1];
+            bb += px[c * 4 + 2];
+          }
+          br = Math.round(br / 4);
+          bg = Math.round(bg / 4);
+          bb = Math.round(bb / 4);
+
+          const matchesBg = (idx: number) => {
+            const dr = px[idx * 4] - br;
+            const dg = px[idx * 4 + 1] - bg;
+            const db = px[idx * 4 + 2] - bb;
+            return dr * dr + dg * dg + db * db <= TOL_SQ;
+          };
+
+          const queue: number[] = [];
+          const tryPush = (x: number, y: number) => {
+            if (x < startX || x >= endX || y < 0 || y >= H) return;
+            const idx = y * W + x;
+            if (visited[idx]) return;
+            if (!matchesBg(idx)) return;
+            visited[idx] = 1;
+            queue.push(idx);
+          };
+
+          /* Seed BFS from top and bottom perimeter edges */
+          for (let x = startX; x < endX; x += 1) {
+            tryPush(x, 0);
+            tryPush(x, H - 1);
+          }
+          /* Seed BFS from left and right perimeter edges */
+          for (let y = 0; y < H; y += 1) {
+            tryPush(startX, y);
+            tryPush(endX - 1, y);
+          }
+
+          let head = 0;
+          while (head < queue.length) {
+            const idx = queue[head++];
+            px[idx * 4 + 3] = 0; // Transparent
+            const x = idx % W;
+            const y = (idx / W) | 0;
+
+            if (x > startX) tryPush(x - 1, y);
+            if (x < endX - 1) tryPush(x + 1, y);
+            if (y > 0) tryPush(x, y - 1);
+            if (y < H - 1) tryPush(x, y + 1);
+          }
         }
 
         ctx.putImageData(data, 0, 0);
@@ -164,6 +187,9 @@ export function ChogzillaSprite({
   spriteSheetSrc = DEFAULT_SHEET,
   fighterClass,
   className,
+  activeMoveName,
+  leanDir,
+  isBlocking,
 }: ChogzillaSpriteProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const ghostRef = useRef<HTMLCanvasElement | null>(null);
@@ -241,26 +267,38 @@ export function ChogzillaSprite({
     };
   }, [state, spriteSheetSrc]);
 
+  /* Procedural motion classes:
+   * - idle: sinusoidal vertical breathing
+   * - attack: 3-phase spring (compress -> exponential lunge -> recoil)
+   * - hit / stagger: white/red damage flash + knockback slide
+   */
   const motionClass =
     state === "idle"
-      ? "sprite-idle"
+      ? "procedural-idle-breathe"
       : state === "dashIn"
         ? "fighter-dash-in"
         : state === "attack"
-          ? "chog-combo-attack"
-          : state === "stagger"
-            ? "fighter-stagger"
+          ? "spring-attack-strike"
+          : state === "stagger" || state === "hit"
+            ? "hit-knockback-slide"
             : state === "dashOut"
               ? "fighter-dash-out"
-              : state === "hit"
-                ? "sprite-recoil"
-                : state === "dead"
-                  ? "sprite-dead"
-                  : state === "secondWind"
-                    ? "sprite-levitate"
-                    : state === "victory"
-                      ? "sprite-victory-body"
-                      : "";
+              : state === "dead"
+                ? "sprite-dead"
+                : state === "secondWind"
+                  ? "sprite-levitate"
+                  : state === "victory"
+                    ? "sprite-victory-body"
+                    : "";
+
+  const leanClass =
+    leanDir === "forward"
+      ? "fighter-lean-forward"
+      : leanDir === "retreat"
+        ? "fighter-lean-retreat"
+        : isBlocking
+          ? "assist-block"
+          : "";
 
   const hotAura =
     state === "secondWind" ||
@@ -279,10 +317,10 @@ export function ChogzillaSprite({
       style={{ height: size, lineHeight: 0 }}
       aria-hidden
     >
-      {/* Fiery orange/purple aura glow (idle breathing) — softened */}
+      {/* Floating weapon aura with procedural breathing pulse */}
       <div
         className={cn(
-          "pointer-events-none absolute inset-x-[-18%] bottom-[4%] top-[10%] rounded-full opacity-65 blur-2xl",
+          "weapon-aura-float pointer-events-none absolute inset-x-[-18%] bottom-[4%] top-[10%] rounded-full opacity-65 blur-2xl",
           hotAura ? "sprite-aura-hot" : "sprite-aura",
         )}
         style={{
@@ -290,9 +328,7 @@ export function ChogzillaSprite({
             "radial-gradient(circle at 50% 65%, rgba(249,115,22,0.5), rgba(168,85,247,0.35) 55%, transparent 75%)",
         }}
       />
-      {/* Subtle white/purple rim backlight — a separate layer BEHIND the
-       * sprite so fighters read cleanly against the dark arena floor. It
-       * never filters or blends the sprite pixels themselves. */}
+      {/* Subtle white/purple rim backlight behind sprite */}
       <div
         className="pointer-events-none absolute inset-x-[-10%] inset-y-[8%] rounded-[45%] blur-xl"
         style={{
@@ -308,8 +344,7 @@ export function ChogzillaSprite({
           aria-hidden
         />
       )}
-      {/* Red damage flash on hit & stagger (plain opacity fade, no blend
-       * modes — keeps the sprite fully solid underneath) */}
+      {/* Red damage flash on hit & stagger */}
       {(state === "hit" || state === "stagger") && (
         <div
           className="sprite-flash pointer-events-none absolute inset-0 z-20 bg-red-500/45"
@@ -317,10 +352,8 @@ export function ChogzillaSprite({
         />
       )}
 
-      {/* Motion wrapper: carries the 3-step physics curves (wind-up →
-       * rush & strike → impact & recoil) as smooth CSS transforms +
-       * drop-shadow glow, while the canvases stay crisp pixel art. */}
-      <div className={cn("relative will-change-transform", motionClass)}>
+      {/* Motion wrapper with procedural squash, stretch, and lean transforms */}
+      <div className={cn("relative will-change-transform", motionClass, leanClass)}>
         {/* Ghost canvas: outgoing pose dissolving away on state changes */}
         <canvas
           ref={ghostRef}
@@ -339,8 +372,8 @@ export function ChogzillaSprite({
         />
       </div>
 
-      {/* Moveset-driven attack VFX: layered particles + signature-move tag */}
-      {(state === "attack" || state === "dashOut") && signatureMove && (
+      {/* Moveset-driven attack VFX & banner: ONLY when an active special or critical move is triggered */}
+      {state === "attack" && activeMoveName && signatureMove && (
         <>
           <MoveVfxParticles
             key={`vfx-${animKey ?? "static"}`}
@@ -348,16 +381,16 @@ export function ChogzillaSprite({
           />
           <span
             key={`mv-${animKey ?? "static"}`}
-            className="animate-damage-float pointer-events-none absolute -top-1 left-1/2 z-20 -translate-x-1/2 whitespace-nowrap text-[10px] font-black uppercase tracking-wider text-fuchsia-200 drop-shadow-[0_0_8px_rgba(232,121,249,0.9)]"
-            style={{ animationDuration: "0.42s" }}
+            className="animate-damage-float pointer-events-none absolute -top-2 left-1/2 z-20 -translate-x-1/2 whitespace-nowrap text-[11px] font-black uppercase tracking-wider text-fuchsia-200 drop-shadow-[0_0_10px_rgba(232,121,249,0.95)]"
+            style={{ animationDuration: "0.55s" }}
             aria-hidden
           >
-            {signatureMove.name}
+            {activeMoveName}
           </span>
         </>
       )}
 
-      {/* Impact shake while dashing */}
+      {/* Impact shake while attacking */}
       {state === "attack" && (
         <div className="pointer-events-none absolute inset-0 z-20 animate-hit-shake" />
       )}
@@ -596,6 +629,9 @@ export function SheetFighter({
   size,
   animKey,
   className,
+  activeMoveName,
+  leanDir,
+  isBlocking,
 }: {
   fighterClass: FighterClass;
   state?: SpriteState;
@@ -603,6 +639,9 @@ export function SheetFighter({
   size?: number;
   animKey?: number | string;
   className?: string;
+  activeMoveName?: string | null;
+  leanDir?: "forward" | "retreat" | null;
+  isBlocking?: boolean;
 }) {
   const spriteSheetSrc = CLASS_SPRITE_SHEETS[fighterClass];
   if (spriteSheetSrc) {
@@ -615,6 +654,9 @@ export function SheetFighter({
         animKey={animKey}
         fighterClass={fighterClass}
         className={className}
+        activeMoveName={activeMoveName}
+        leanDir={leanDir}
+        isBlocking={isBlocking}
       />
     );
   }
