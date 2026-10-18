@@ -1,48 +1,109 @@
 "use client";
 
-import { memo } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 
-export type FighterPose = "stance" | "attack" | "guard";
-
-const FRAME_INDEX: Record<FighterPose, number> = {
-  stance: 0,
-  attack: 1,
-  guard: 2,
-};
+const FRAME_CACHE = new Map<string, string>();
 
 /**
- * Lightweight static sprite renderer: shows one frame of a 4-frame sprite
- * sheet via CSS background positioning. No video/canvas decoding.
+ * Extracts a single front-facing frame from the MP4, chroma-keys the neutral
+ * gray studio background, and renders a cached static PNG <img>.
  */
 export const ChromaVideo = memo(function ChromaVideo({
   src,
-  pose = "stance",
   className,
   style,
   size,
 }: {
   src: string;
-  pose?: FighterPose;
   className?: string;
   style?: React.CSSProperties;
   size?: number;
 }) {
-  const frame = FRAME_INDEX[pose] ?? 0;
-  const pos = `${(frame / 3) * 100}% 0%`;
+  const [dataUrl, setDataUrl] = useState<string | null>(FRAME_CACHE.get(src) ?? null);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+
+  useEffect(() => {
+    if (FRAME_CACHE.has(src)) {
+      setDataUrl(FRAME_CACHE.get(src)!);
+      return;
+    }
+    const video = document.createElement("video");
+    video.src = src;
+    video.muted = true;
+    video.playsInline = true;
+    video.preload = "auto";
+    video.style.position = "fixed";
+    video.style.left = "-9999px";
+    video.style.top = "-9999px";
+    document.body.appendChild(video);
+    videoRef.current = video;
+
+    const extract = () => {
+      if (video.readyState < 2) return;
+      const w = video.videoWidth || 320;
+      const h = video.videoHeight || 320;
+      const canvas = document.createElement("canvas");
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext("2d", { willReadFrequently: true });
+      if (!ctx) return;
+      ctx.drawImage(video, 0, 0, w, h);
+      const frame = ctx.getImageData(0, 0, w, h);
+      const data = frame.data;
+      for (let i = 0; i < data.length; i += 4) {
+        const r = data[i];
+        const g = data[i + 1];
+        const b = data[i + 2];
+        const sat = Math.max(r, g, b) - Math.min(r, g, b);
+        if (sat < 15 && r < 65) {
+          data[i + 3] = 0;
+        }
+      }
+      ctx.putImageData(frame, 0, 0);
+      const url = canvas.toDataURL("image/png");
+      FRAME_CACHE.set(src, url);
+      setDataUrl(url);
+      video.pause();
+      video.removeAttribute("src");
+      try { video.load(); } catch {}
+      if (video.parentNode) video.parentNode.removeChild(video);
+    };
+
+    const onLoaded = () => {
+      try { video.currentTime = 0.1; } catch { extract(); }
+    };
+    const onSeeked = () => extract();
+
+    video.addEventListener("loadeddata", onLoaded);
+    video.addEventListener("seeked", onSeeked);
+    video.load();
+
+    return () => {
+      video.removeEventListener("loadeddata", onLoaded);
+      video.removeEventListener("seeked", onSeeked);
+      video.pause();
+      video.removeAttribute("src");
+      if (video.parentNode) video.parentNode.removeChild(video);
+    };
+  }, [src]);
+
+  if (!dataUrl) {
+    return (
+      <div
+        className={cn("inline-block bg-transparent", className)}
+        style={{ height: size, width: size ? size * 0.7 : undefined, ...style }}
+      />
+    );
+  }
+
   return (
-    <div
-      className={cn("inline-block bg-transparent", className)}
-      style={{
-        height: size,
-        width: size ? size * 0.72 : undefined,
-        backgroundImage: `url(${src})`,
-        backgroundSize: "400% 100%",
-        backgroundPosition: pos,
-        backgroundRepeat: "no-repeat",
-        imageRendering: "pixelated",
-        ...style,
-      }}
+    <img
+      src={dataUrl}
+      alt=""
+      className={cn("object-contain", className)}
+      style={{ height: size, width: "auto", ...style }}
+      draggable={false}
     />
   );
 });

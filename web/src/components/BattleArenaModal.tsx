@@ -22,7 +22,7 @@ import {
   type SpecialMove,
 } from "@/data/fighterMoves";
 import { cn, formatMon, truncateAddress } from "@/lib/utils";
-import { ChromaVideo, type FighterPose } from "./ChromaVideo";
+import { ChromaVideo } from "./ChromaVideo";
 import {
   playDashSfx,
   playHitSfx,
@@ -76,7 +76,7 @@ export function ChromaFighter({
   moveDir?: number;
 }) {
   const theme = FIGHTER_CLASS_META[fighterClass];
-  const videoSrc = theme.sprite;
+  const videoSrc = theme.video;
   const leanClass =
     leanDir === "forward"
       ? "fighter-lean-forward"
@@ -85,15 +85,6 @@ export function ChromaFighter({
         : isBlocking
           ? "assist-block"
           : "";
-
-  const fighterPose: FighterPose =
-    isBlocking || state === "hit" || state === "stagger"
-      ? "guard"
-      : moveDir < 0
-        ? "guard"
-        : moveDir > 0 || state === "attack" || state === "dashIn"
-          ? "attack"
-          : "stance";
 
   let transform = "translateY(0px) scale(1)";
   let transition = "transform 120ms ease-out";
@@ -151,7 +142,7 @@ export function ChromaFighter({
         className={cn("relative will-change-transform", leanClass, state === "idle" && "procedural-idle-breathe")}
         style={motionStyle}
       >
-        <ChromaVideo src={videoSrc} pose={fighterPose} size={size} />
+        <ChromaVideo src={videoSrc} size={size} />
         {isBlocking && (
           <div
             className="pointer-events-none absolute left-1/2 top-1/2 h-24 w-24 -translate-x-1/2 -translate-y-1/2"
@@ -2181,7 +2172,7 @@ function HudPortrait({ fighter }: { fighter: FighterDescriptor }) {
       ) : (
         /* Class sprite headshot — top crop of the idle fighter canvas */
          <span className="sprite-pixelated -mt-0.5 flex items-start justify-center">
-           <ChromaVideo src={FIGHTER_CLASS_META[fighter.fighterClass].sprite} size={42} />
+           <ChromaVideo src={FIGHTER_CLASS_META[fighter.fighterClass].video} size={42} />
          </span>
       )}
     </span>

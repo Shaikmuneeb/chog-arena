@@ -561,7 +561,7 @@ export function AcceptDuelModal({ duel, onClose, onSettled }: AcceptDuelModalPro
                 <div className="flex items-center justify-center gap-8">
                   <div className="flex flex-col items-center">
                     <ChromaVideo
-                      src={FIGHTER_CLASS_META[creatorFighter.fighterClass].sprite}
+                      src={FIGHTER_CLASS_META[creatorFighter.fighterClass].video}
                       size={180}
                     />
                     <p className="mt-2 text-lg font-black uppercase tracking-wider text-white">
@@ -574,7 +574,7 @@ export function AcceptDuelModal({ duel, onClose, onSettled }: AcceptDuelModalPro
                   <div className="flex flex-col items-center">
                     <div className="scale-x-[-1]">
                       <ChromaVideo
-                        src={FIGHTER_CLASS_META[challengerFighter.fighterClass].sprite}
+                        src={FIGHTER_CLASS_META[challengerFighter.fighterClass].video}
                         size={180}
                       />
                     </div>
@@ -779,7 +779,7 @@ function FighterCard({
         <>
            {/* Full-body fighter preview */}
            <div className="flex justify-center">
-             <ChromaVideo src={theme.sprite} size={110} />
+             <ChromaVideo src={theme.video} size={110} />
            </div>
           <div className="-mt-2 flex items-center gap-2">
             <FighterAvatarBadge address={address} size="sm" />
