@@ -36,6 +36,10 @@ export const ChromaVideo = memo(function ChromaVideo({
     video.muted = true;
     video.playsInline = true;
     video.preload = "auto";
+    video.style.position = "fixed";
+    video.style.left = "-9999px";
+    video.style.top = "-9999px";
+    document.body.appendChild(video);
     videoRef.current = video;
 
     const extract = () => {
@@ -65,7 +69,8 @@ export const ChromaVideo = memo(function ChromaVideo({
       setDataUrl(url);
       video.pause();
       video.removeAttribute("src");
-      video.load();
+      try { video.load(); } catch {}
+      if (video.parentNode) video.parentNode.removeChild(video);
     };
 
     const onLoaded = () => {
@@ -86,6 +91,7 @@ export const ChromaVideo = memo(function ChromaVideo({
       video.removeEventListener("seeked", onSeeked);
       video.pause();
       video.removeAttribute("src");
+      if (video.parentNode) video.parentNode.removeChild(video);
     };
   }, [src]);
 
