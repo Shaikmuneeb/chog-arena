@@ -67,6 +67,8 @@ export const ChromaVideo = memo(function ChromaVideo({
       const url = canvas.toDataURL("image/png");
       FRAME_CACHE.set(src, url);
       setDataUrl(url);
+      // eslint-disable-next-line no-console
+      console.log("ChromaVideo extracted sprite:", src);
       video.pause();
       video.removeAttribute("src");
       try { video.load(); } catch {}
