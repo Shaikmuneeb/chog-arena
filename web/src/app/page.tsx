@@ -83,7 +83,7 @@ export default function Home() {
           </div>
         </section>
 
-        <DuelBoard duels={duels} onDuelSettled={handleSettled} />
+        <DuelBoard duels={duels} onDuelSettled={handleSettled} onCreateDuel={() => setCreateOpen(true)} />
       </main>
 
       <CreateDuelModal

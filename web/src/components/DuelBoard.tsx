@@ -59,6 +59,7 @@ type DuelRow = readonly [
 type DuelBoardProps = {
   duels: ArenaDuel[];
   onDuelSettled: (duelId: number) => void;
+  onCreateDuel?: () => void;
 };
 
 /**
@@ -67,7 +68,7 @@ type DuelBoardProps = {
  * "Accept Challenge" opens the VS matchup modal; own duels can be cancelled
  * to reclaim the staked MON.
  */
-export function DuelBoard({ duels, onDuelSettled }: DuelBoardProps) {
+export function DuelBoard({ duels, onDuelSettled, onCreateDuel }: DuelBoardProps) {
   const config = useConfig();
   const { address, chainId: walletChainId } = useAccount();
   const appChainId = useChainId();
@@ -169,37 +170,31 @@ export function DuelBoard({ duels, onDuelSettled }: DuelBoardProps) {
   const totalChallengers = playerDuels.length + npcDuels.length;
 
   return (
-    <section>
-      <div className="mb-4 flex items-center justify-between">
-        <h2 className="flex items-center gap-2 text-lg font-bold text-zinc-100">
-          <Swords className="h-5 w-5 text-rose-400" aria-hidden />
-          Duel Lobby
-        </h2>
-        <span className="text-xs text-zinc-500">
-          {totalChallengers} challenger{totalChallengers === 1 ? "" : "s"}
-          {!liveDuels && " · arena offline"}
-        </span>
-      </div>
-
-      {/* ================= SECTION 1 — LIVE PLAYER DUELS ================= */}
-      <div className="mb-3 flex items-center gap-2">
-        <h3 className="text-xs font-bold uppercase tracking-[0.18em] text-zinc-400">
-          Live Player Duels
-        </h3>
-        <span className="rounded-full border border-cyan-400/25 bg-cyan-400/10 px-2 py-0.5 text-[10px] font-bold text-cyan-300">
-          {playerDuels.length} open
-        </span>
-        <div className="h-px flex-1 bg-gradient-to-r from-white/10 to-transparent" aria-hidden />
-      </div>
-
-      {playerDuels.length === 0 ? (
-        <div className="mb-6 rounded-2xl border border-dashed border-white/10 bg-zinc-900/40 px-6 py-10 text-center text-sm text-zinc-500">
-          No active player duels. Click{" "}
-          <span className="font-semibold text-zinc-300">&quot;Create Duel&quot;</span>{" "}
-          above to host one!
+    <section className="space-y-6">
+      {/* Compact Live PvP strip */}
+      <div className="flex items-center justify-between rounded-xl border border-white/10 bg-zinc-900/60 px-4 py-2.5">
+        <div className="flex items-center gap-3">
+          <span className="text-xs font-bold uppercase tracking-[0.18em] text-zinc-400">
+            Open PVP Challenges
+          </span>
+          <span className="rounded-full border border-cyan-400/25 bg-cyan-400/10 px-2 py-0.5 text-[10px] font-bold text-cyan-300">
+            {playerDuels.length}
+          </span>
+          {!liveDuels && (
+            <span className="text-[10px] text-zinc-500">· arena offline</span>
+          )}
         </div>
-      ) : (
-        <ul className="mb-6 space-y-3">
+        <button
+          type="button"
+          onClick={() => onCreateDuel?.()}
+          className="rounded-lg bg-rose-600 px-3 py-1.5 text-xs font-bold text-white shadow-lg shadow-rose-600/25 transition hover:bg-rose-500"
+        >
+          + Create Open Duel
+        </button>
+      </div>
+
+      {playerDuels.length > 0 && (
+        <ul className="space-y-2">
           {playerDuels.map((duel) => (
             <PlayerDuelRow
               key={duel.id}
@@ -218,18 +213,8 @@ export function DuelBoard({ duels, onDuelSettled }: DuelBoardProps) {
         </ul>
       )}
 
-      {/* ================= SECTION 2 — ARENA BOT CHALLENGERS ================= */}
-      <div className="mb-3 flex items-center gap-2">
-        <h3 className="text-xs font-bold uppercase tracking-[0.18em] text-zinc-400">
-          Arena Bot Challengers
-        </h3>
-        <span className="rounded-full border border-amber-400/25 bg-amber-400/10 px-2 py-0.5 text-[10px] font-bold text-amber-300">
-          {npcDuels.length} bots
-        </span>
-        <div className="h-px flex-1 bg-gradient-to-r from-white/10 to-transparent" aria-hidden />
-      </div>
-
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+      {/* Arcade roster grid */}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {npcDuels.map((duel) => (
           <NpcFighterCard
             key={duel.id}
@@ -287,43 +272,34 @@ function NpcFighterCard({
       />
       {/* Portrait */}
       <div
-        className="relative flex h-44 items-center justify-center overflow-hidden bg-black/60"
+        className="relative aspect-[3/4] overflow-hidden bg-black/60"
         style={{ boxShadow: `inset 0 0 40px ${classMeta.primary}33` }}
       >
         <div
-          className="absolute inset-0 opacity-40 blur-2xl"
-          style={{ background: `radial-gradient(circle, ${classMeta.primary}66, transparent 70%)` }}
+          className="absolute inset-0 opacity-50 blur-2xl"
+          style={{ background: `radial-gradient(circle, ${classMeta.primary}88, transparent 70%)` }}
           aria-hidden
         />
-        <ChromaVideo src={classMeta.video} size={120} className="relative z-10" />
+        <div className="absolute inset-0 flex items-center justify-center transition-transform duration-300 group-hover:scale-125">
+          <ChromaVideo src={classMeta.video} size={150} className="scale-110" />
+        </div>
       </div>
-      <div className="flex flex-1 flex-col gap-2 p-4">
-        <p className="truncate text-base font-extrabold text-zinc-100">{npc.name}</p>
-        <p className="text-[11px] font-semibold uppercase tracking-wider text-zinc-400">
-          {style}
+      <div className="absolute inset-x-0 bottom-0 z-20 bg-gradient-to-t from-black via-black/60 to-transparent p-4">
+        <p className="text-xl font-black uppercase tracking-wider text-white">
+          {npc.name}
         </p>
         <div className="mt-1 flex items-center justify-between">
-          <span
-            className="rounded-full border px-2 py-0.5 text-[10px] font-semibold"
-            style={{
-              borderColor: `${classMeta.secondary}55`,
-              color: classMeta.secondary,
-              backgroundColor: `${classMeta.primary}22`,
-            }}
-          >
-            {classMeta.label}
-          </span>
           <span className="font-mono text-sm font-black tabular-nums text-amber-300">
             {formatMon(duel.betAmount)} MON
           </span>
+          <button
+            type="button"
+            onClick={onFight}
+            className="rounded-lg bg-rose-600 px-3 py-1.5 text-xs font-bold text-white opacity-0 shadow-lg shadow-rose-600/30 transition-all duration-300 group-hover:opacity-100 hover:bg-rose-500"
+          >
+            CHALLENGE
+          </button>
         </div>
-        <button
-          type="button"
-          onClick={onFight}
-          className="mt-2 w-full rounded-xl bg-gradient-to-r from-rose-600 to-pink-600 px-4 py-2 text-sm font-bold text-white shadow-lg shadow-rose-600/25 transition-all duration-300 hover:scale-[1.02] hover:from-rose-500 hover:to-pink-500 active:scale-95"
-        >
-          ⚡ Fight NPC
-        </button>
       </div>
     </li>
   );

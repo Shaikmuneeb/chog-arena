@@ -556,42 +556,41 @@ export function AcceptDuelModal({ duel, onClose, onSettled }: AcceptDuelModalPro
                 </button>
               </div>
 
-              {/* VS matchup */}
-              <div className="grid grid-cols-1 items-stretch gap-4 sm:grid-cols-[1fr_auto_1fr]">
-                {/* Creator / NPC */}
-                <FighterCard
-                  role={duel.npc ? "ARENA NPC" : "CREATOR"}
-                  address={duel.creator}
-                  side="left"
-                  npc={duel.npc}
-                />
-
-                {/* Center VS + pot */}
-                <div className="flex flex-col items-center justify-center gap-2 px-2">
-                  <p className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-widest text-zinc-500">
-                    <Coins className="h-3 w-3" aria-hidden />
-                    Prize Pot
-                  </p>
-                  <p className="text-3xl font-extrabold text-transparent bg-gradient-to-r from-amber-300 to-orange-300 bg-clip-text drop-shadow-[0_0_14px_rgba(249,115,22,0.55)]">
-                    {formatMon(pot)} MON
-                  </p>
-                  <div className="my-1 flex h-16 w-16 animate-pulse items-center justify-center rounded-full border border-red-400/50 bg-gradient-to-br from-red-600 to-orange-500 text-2xl font-black text-white shadow-[0_0_34px_rgba(239,68,68,0.65)]">
+              {/* VS screen */}
+              <div className="flex flex-col items-center gap-6">
+                <div className="flex items-center justify-center gap-8">
+                  <div className="flex flex-col items-center">
+                    <ChromaVideo
+                      src={FIGHTER_CLASS_META[creatorFighter.fighterClass].video}
+                      size={180}
+                    />
+                    <p className="mt-2 text-lg font-black uppercase tracking-wider text-white">
+                      {creatorFighter.name}
+                    </p>
+                  </div>
+                  <div className="text-6xl font-black text-rose-500 drop-shadow-[0_0_20px_rgba(239,68,68,0.8)]">
                     VS
                   </div>
-                  <p className="text-center text-[10px] leading-snug text-zinc-500">
-                    Instant settlement · 2% rake
-                    <br />
-                    (0% if either fighter holds a Chog NFT)
+                  <div className="flex flex-col items-center">
+                    <div className="scale-x-[-1]">
+                      <ChromaVideo
+                        src={FIGHTER_CLASS_META[challengerFighter.fighterClass].video}
+                        size={180}
+                      />
+                    </div>
+                    <p className="mt-2 text-lg font-black uppercase tracking-wider text-white">
+                      {challengerFighter.name}
+                    </p>
+                  </div>
+                </div>
+                <div className="text-center">
+                  <p className="text-[10px] font-semibold uppercase tracking-widest text-zinc-500">
+                    Prize Pot
+                  </p>
+                  <p className="text-4xl font-black text-amber-300 drop-shadow-[0_0_14px_rgba(249,115,22,0.55)]">
+                    {formatMon(pot)} MON
                   </p>
                 </div>
-
-                {/* You */}
-                <FighterCard
-                  role="YOU / CHALLENGER"
-                  address={address ?? ZERO}
-                  side="right"
-                  placeholder={!isConnected}
-                />
               </div>
 
               {/* Action */}
