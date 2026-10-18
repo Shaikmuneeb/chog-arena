@@ -29,8 +29,8 @@ export const FIGHTER_CLASS_META: Record<
     secondary: string;
     /** Dark armor shade. */
     dark: string;
-    /** Muted autoplaying looping MP4 used for the in-arena fighter. */
-    video: string;
+    /** Static sprite sheet used for the in-arena fighter. */
+    sprite: string;
   }
 > = {
   berserker: {
@@ -40,7 +40,7 @@ export const FIGHTER_CLASS_META: Record<
     primary: "#dc2626",
     secondary: "#fbbf24",
     dark: "#7f1d1d",
-    video: "/fighters/chogzilla.mp4",
+    sprite: "/assets/chog-slash.png",
   },
   samurai: {
     label: "Chog Samurai",
@@ -49,7 +49,7 @@ export const FIGHTER_CLASS_META: Record<
     primary: "#7c3aed",
     secondary: "#c4b5fd",
     dark: "#3b0764",
-    video: "/fighters/samurai.mp4",
+    sprite: "/assets/chog-samurai.png",
   },
   mage: {
     label: "Void Lord James",
@@ -58,7 +58,7 @@ export const FIGHTER_CLASS_META: Record<
     primary: "#4c1d95",
     secondary: "#22d3ee",
     dark: "#1e1b4b",
-    video: "/fighters/james.mp4",
+    sprite: "/assets/void-james.png",
   },
   benja: {
     label: "Crimson Lord Benja",
@@ -67,7 +67,7 @@ export const FIGHTER_CLASS_META: Record<
     primary: "#991b1b",
     secondary: "#f87171",
     dark: "#450a0a",
-    video: "/fighters/benja.mp4",
+    sprite: "/assets/chog-slash.png",
   },
   ladychog: {
     label: "Lady Chog",
@@ -76,7 +76,7 @@ export const FIGHTER_CLASS_META: Record<
     primary: "#be185d",
     secondary: "#f9a8d4",
     dark: "#500724",
-    video: "/fighters/ladychog.mp4",
+    sprite: "/assets/chog-samurai.png",
   },
   princess: {
     label: "Chog Princess",
@@ -85,7 +85,7 @@ export const FIGHTER_CLASS_META: Record<
     primary: "#7c3aed",
     secondary: "#e9d5ff",
     dark: "#3b0764",
-    video: "/fighters/princess.mp4",
+    sprite: "/assets/keone-mage.png",
   },
 };
 

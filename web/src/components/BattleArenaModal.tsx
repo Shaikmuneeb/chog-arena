@@ -67,7 +67,7 @@ export function ChromaFighter({
   moveDir?: number;
 }) {
   const theme = FIGHTER_CLASS_META[fighterClass];
-  const videoSrc = theme.video;
+  const videoSrc = theme.sprite;
   const leanClass =
     leanDir === "forward"
       ? "fighter-lean-forward"
@@ -2172,7 +2172,7 @@ function HudPortrait({ fighter }: { fighter: FighterDescriptor }) {
       ) : (
         /* Class sprite headshot — top crop of the idle fighter canvas */
          <span className="sprite-pixelated -mt-0.5 flex items-start justify-center">
-           <ChromaVideo src={FIGHTER_CLASS_META[fighter.fighterClass].video} size={42} />
+           <ChromaVideo src={FIGHTER_CLASS_META[fighter.fighterClass].sprite} size={42} />
          </span>
       )}
     </span>

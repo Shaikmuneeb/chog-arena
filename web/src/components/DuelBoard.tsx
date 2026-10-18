@@ -281,7 +281,7 @@ function NpcFighterCard({
           aria-hidden
         />
         <div className="absolute inset-0 flex items-center justify-center transition-transform duration-300 group-hover:scale-125">
-          <ChromaVideo src={classMeta.video} size={150} className="scale-110" />
+          <ChromaVideo src={classMeta.sprite} size={150} className="scale-110" />
         </div>
       </div>
       <div className="absolute inset-x-0 bottom-0 z-20 bg-gradient-to-t from-black via-black/60 to-transparent p-4">

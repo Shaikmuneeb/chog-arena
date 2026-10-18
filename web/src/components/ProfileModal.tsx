@@ -304,7 +304,7 @@ export function ProfileModal({ open, onClose }: ProfileModalProps) {
                         : "border-white/10 bg-black/40 hover:border-white/25",
                     )}
                   >
-                     <ChromaVideo src={meta.video} size={88} />
+                     <ChromaVideo src={meta.sprite} size={88} />
                     <span
                       className="text-[10px] font-extrabold uppercase tracking-wider"
                       style={{ color: selected ? meta.secondary : "#a1a1aa" }}
