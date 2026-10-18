@@ -229,7 +229,7 @@ export function DuelBoard({ duels, onDuelSettled }: DuelBoardProps) {
         <div className="h-px flex-1 bg-gradient-to-r from-white/10 to-transparent" aria-hidden />
       </div>
 
-      <ul className="space-y-3">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
         {npcDuels.map((duel) => (
           <NpcFighterCard
             key={duel.id}
@@ -237,7 +237,7 @@ export function DuelBoard({ duels, onDuelSettled }: DuelBoardProps) {
             onFight={() => setActiveDuel(duel)}
           />
         ))}
-      </ul>
+      </div>
 
       <AcceptDuelModal
         duel={activeDuel}
@@ -255,6 +255,15 @@ export function DuelBoard({ duels, onDuelSettled }: DuelBoardProps) {
  * avatar + class tag + title (left), glowing stake badge (center),
  * high-impact Fight NPC button (right). Name shown exactly once.
  */
+const FIGHTER_STYLE: Record<string, string> = {
+  benja: "Bloodline Overlord • Aggressive",
+  ladychog: "Royal Duelist • Technical",
+  princess: "Astral Sovereign • Magic",
+  samurai: "Blade Saint • Fast",
+  mage: "Void Sovereign • Heavy",
+  berserker: "Apex Predator • Power",
+};
+
 function NpcFighterCard({
   duel,
   onFight,
@@ -265,8 +274,9 @@ function NpcFighterCard({
   const npc = duel.npc;
   if (!npc) return null;
   const classMeta = FIGHTER_CLASS_META[npc.fighterClass];
+  const style = FIGHTER_STYLE[npc.fighterClass] ?? npc.title;
   return (
-    <li className="group relative overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-900/80 px-4 py-3 transition-all duration-300 hover:border-purple-500/50 hover:bg-zinc-900/95 hover:shadow-[0_0_28px_-8px_rgba(168,85,247,0.45)]">
+    <li className="group relative flex flex-col overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-900/80 transition-all duration-300 hover:border-purple-500/50 hover:bg-zinc-900/95 hover:shadow-[0_0_28px_-8px_rgba(168,85,247,0.45)]">
       {/* Class-tinted top edge */}
       <div
         className="absolute inset-x-0 top-0 h-px opacity-70"
@@ -275,48 +285,42 @@ function NpcFighterCard({
         }}
         aria-hidden
       />
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        {/* LEFT — animated avatar, class tag, fighter title */}
-        <div className="flex min-w-0 items-center gap-3">
-          <div
-            className="sprite-pixelated shrink-0 rounded-xl border border-white/10 bg-black/60 px-1 pt-1 transition-transform duration-300 group-hover:scale-105"
-            style={{ boxShadow: `0 0 16px ${classMeta.primary}44` }}
+      {/* Portrait */}
+      <div
+        className="relative flex h-44 items-center justify-center overflow-hidden bg-black/60"
+        style={{ boxShadow: `inset 0 0 40px ${classMeta.primary}33` }}
+      >
+        <div
+          className="absolute inset-0 opacity-40 blur-2xl"
+          style={{ background: `radial-gradient(circle, ${classMeta.primary}66, transparent 70%)` }}
+          aria-hidden
+        />
+        <ChromaVideo src={classMeta.video} size={120} className="relative z-10" />
+      </div>
+      <div className="flex flex-1 flex-col gap-2 p-4">
+        <p className="truncate text-base font-extrabold text-zinc-100">{npc.name}</p>
+        <p className="text-[11px] font-semibold uppercase tracking-wider text-zinc-400">
+          {style}
+        </p>
+        <div className="mt-1 flex items-center justify-between">
+          <span
+            className="rounded-full border px-2 py-0.5 text-[10px] font-semibold"
+            style={{
+              borderColor: `${classMeta.secondary}55`,
+              color: classMeta.secondary,
+              backgroundColor: `${classMeta.primary}22`,
+            }}
           >
-             <ChromaVideo src={FIGHTER_CLASS_META[npc.fighterClass].video} size={56} />
-          </div>
-          <div className="min-w-0">
-            <p className="truncate text-sm font-bold text-zinc-100">{npc.name}</p>
-            <div className="mt-1 flex flex-wrap items-center gap-1.5">
-              <span
-                className="rounded-full border px-2 py-0.5 text-[10px] font-semibold"
-                style={{
-                  borderColor: `${classMeta.secondary}55`,
-                  color: classMeta.secondary,
-                  backgroundColor: `${classMeta.primary}22`,
-                }}
-              >
-                {classMeta.label}
-              </span>
-            </div>
-          </div>
-        </div>
-
-        {/* CENTER — glowing gold/violet stake badge */}
-        <div className="flex shrink-0 flex-col items-center rounded-xl border border-amber-400/30 bg-gradient-to-b from-amber-500/15 to-violet-600/10 px-4 py-1.5 shadow-[0_0_18px_-4px_rgba(251,191,36,0.45)] transition-shadow duration-300 group-hover:shadow-[0_0_24px_-2px_rgba(251,191,36,0.65)]">
-          <span className="text-[9px] font-bold uppercase tracking-[0.25em] text-amber-200/70">
-            Stake
+            {classMeta.label}
           </span>
-          <span className="font-mono text-base font-black tabular-nums text-amber-300 drop-shadow-[0_0_8px_rgba(251,191,36,0.5)]">
-            {formatMon(duel.betAmount)}
-            <span className="ml-1 text-xs font-bold text-amber-200/80">MON</span>
+          <span className="font-mono text-sm font-black tabular-nums text-amber-300">
+            {formatMon(duel.betAmount)} MON
           </span>
         </div>
-
-        {/* RIGHT — high-impact action button */}
         <button
           type="button"
           onClick={onFight}
-          className="shrink-0 rounded-xl bg-gradient-to-r from-rose-600 to-pink-600 px-4 py-2 text-sm font-bold text-white shadow-lg shadow-rose-600/25 transition-all duration-300 hover:scale-105 hover:from-rose-500 hover:to-pink-500 active:scale-95"
+          className="mt-2 w-full rounded-xl bg-gradient-to-r from-rose-600 to-pink-600 px-4 py-2 text-sm font-bold text-white shadow-lg shadow-rose-600/25 transition-all duration-300 hover:scale-[1.02] hover:from-rose-500 hover:to-pink-500 active:scale-95"
         >
           ⚡ Fight NPC
         </button>

@@ -141,6 +141,19 @@ export function ArenaHeader() {
           </div>
 
           <div className="flex items-center gap-3">
+            {/* Compact fighter status badge */}
+            {mounted && (
+              <span
+                className={cn(
+                  "hidden items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold sm:inline-flex",
+                  secondWind
+                    ? "border-rose-400/40 bg-rose-500/10 text-rose-200"
+                    : "border-white/10 bg-white/5 text-zinc-300",
+                )}
+              >
+                {secondWind ? "🔥 SECOND WIND" : "⚡ 2% ARENA FEE"}
+              </span>
+            )}
             {/* Network indicator — gated on mount to stay hydration-safe */}
             {mounted && (
               <span className="hidden items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-medium text-zinc-300 sm:inline-flex">
@@ -272,43 +285,6 @@ export function ArenaHeader() {
           </div>
         </div>
       </header>
-
-      {/* Fighter status card */}
-      <div className="mx-auto max-w-6xl px-4 pt-6">
-        <div
-          className={cn(
-            "flex items-center gap-3 rounded-2xl border px-5 py-3.5 transition",
-            secondWind
-              ? "animate-second-wind border-rose-400/40 bg-gradient-to-r from-rose-950/70 via-zinc-900 to-orange-950/50"
-              : "border-white/10 bg-zinc-900/60",
-          )}
-        >
-          {secondWind ? (
-            <>
-              <Swords className="h-5 w-5 shrink-0 text-rose-300" aria-hidden />
-              <p className="text-sm font-bold text-rose-100">
-                🔥 SECOND WIND ACTIVE{" "}
-                <span className="font-medium text-rose-200/80">
-                  (20% Resurrect Chance &amp; 0% Fees)
-                </span>
-              </p>
-            </>
-          ) : (
-            <>
-              <Swords className="h-5 w-5 shrink-0 text-zinc-500" aria-hidden />
-              <p className="text-sm font-semibold text-zinc-300">
-                {!mounted
-                  ? "Syncing fighter status…"
-                  : !isConnected
-                    ? "Connect your wallet to sync fighter status."
-                    : nftLoading
-                      ? "Checking Chog NFT balance…"
-                      : "⚡ Standard Fighter (2% Arena Fee)"}
-              </p>
-            </>
-          )}
-        </div>
-      </div>
 
       <ProfileModal
         open={profileOpen}
