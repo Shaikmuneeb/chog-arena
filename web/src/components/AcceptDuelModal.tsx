@@ -35,6 +35,7 @@ import {
   type DuelOutcome,
   type FighterDescriptor,
 } from "./BattleArenaModal";
+import { ChromaVideo } from "./ChromaVideo";
 
 import type { ArenaDuel } from "./DuelBoard";
 
@@ -779,15 +780,7 @@ function FighterCard({
         <>
            {/* Full-body fighter preview */}
            <div className="flex justify-center">
-             <video
-               src={theme.video}
-               muted
-               autoPlay
-               loop
-               playsInline
-               style={{ height: 110 }}
-               className="h-[110px] w-auto object-contain"
-             />
+             <ChromaVideo src={theme.video} size={110} />
            </div>
           <div className="-mt-2 flex items-center gap-2">
             <FighterAvatarBadge address={address} size="sm" />

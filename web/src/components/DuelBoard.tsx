@@ -29,7 +29,7 @@ import {
   type ArenaNpc,
 } from "@/config/arenaNpcs";
 import { FIGHTER_CLASS_META, type FighterClass } from "@/config/fighterClasses";
-import { SheetFighter } from "./ChogzillaSprite";
+import { ChromaVideo } from "./ChromaVideo";
 import { cn, formatMon, truncateAddress } from "@/lib/utils";
 import { pushToast } from "./Toast";
 import { AcceptDuelModal } from "./AcceptDuelModal";
@@ -282,7 +282,7 @@ function NpcFighterCard({
             className="sprite-pixelated shrink-0 rounded-xl border border-white/10 bg-black/60 px-1 pt-1 transition-transform duration-300 group-hover:scale-105"
             style={{ boxShadow: `0 0 16px ${classMeta.primary}44` }}
           >
-            <SheetFighter fighterClass={npc.fighterClass} state="idle" size={56} />
+             <ChromaVideo src={FIGHTER_CLASS_META[npc.fighterClass].video} size={56} />
           </div>
           <div className="min-w-0">
             <p className="truncate text-sm font-bold text-zinc-100">{npc.name}</p>

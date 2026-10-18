@@ -13,6 +13,7 @@ import {
   type SpecialMove,
 } from "@/data/fighterMoves";
 import { cn, formatMon, truncateAddress } from "@/lib/utils";
+import { ChromaVideo } from "./ChromaVideo";
 import {
   playDashSfx,
   playHitSfx,
@@ -42,7 +43,7 @@ export type DuelOutcome = {
 };
 
 /** One side of the battle: identity + full-body fighter class. */
-export function FighterVideo({
+export function ChromaFighter({
   fighterClass,
   state = "idle",
   facing = "right",
@@ -77,7 +78,7 @@ export function FighterVideo({
             : state === "dashOut"
               ? "fighter-dash-out"
               : state === "dead"
-                ? "sprite-dead"
+                ? "ko-drop"
                 : state === "secondWind"
                   ? "sprite-levitate"
                   : state === "victory"
@@ -91,6 +92,14 @@ export function FighterVideo({
         : isBlocking
           ? "assist-block"
           : "";
+  const koStyle =
+    state === "dead"
+      ? {
+          transform: "translateY(40px) rotate(-85deg)",
+          transformOrigin: "bottom center",
+          filter: "grayscale(1) sepia(1) hue-rotate(-50deg) saturate(3) brightness(0.7)",
+        }
+      : undefined;
   return (
     <div
       key={animKey ?? "static"}
@@ -102,16 +111,11 @@ export function FighterVideo({
       style={{ height: size, lineHeight: 0 }}
       aria-hidden
     >
-      <div className={cn("relative will-change-transform", motionClass, leanClass)}>
-        <video
-          src={videoSrc}
-          muted
-          autoPlay
-          loop
-          playsInline
-          className="h-full w-auto object-contain"
-          style={{ height: size }}
-        />
+      <div
+        className={cn("relative will-change-transform", motionClass, leanClass)}
+        style={koStyle}
+      >
+        <ChromaVideo src={videoSrc} size={size} />
       </div>
     </div>
   );
@@ -1624,7 +1628,7 @@ export function BattleArenaModal({
                             }}
                             aria-hidden
                           >
-                             <FighterVideo
+                             <ChromaFighter
                                fighterClass={desc.fighterClass}
                                state={f.pose}
                                facing={f.facing}
@@ -1635,13 +1639,13 @@ export function BattleArenaModal({
                           </div>
                         ))}
 
-                      {/* Main Fighter Body */}
-                      <div
-                        className="sprite-pixelated absolute bottom-5 z-20"
-                        style={{ left: `${f.x}%`, transform: "translateX(-50%)" }}
-                      >
+                       {/* Main Fighter Body */}
+                       <div
+                         className="sprite-pixelated absolute bottom-5 z-30"
+                         style={{ left: `${f.x}%`, transform: "translateX(-50%)", opacity: 1, visibility: "visible" }}
+                       >
                         <div className="assist-stance">
-                          <FighterVideo
+                          <ChromaFighter
                             fighterClass={desc.fighterClass}
                             state={f.pose}
                             facing={f.facing}
@@ -1820,8 +1824,8 @@ export function BattleArenaModal({
                     className="animate-second-wind-flash pointer-events-none absolute inset-0 z-20 bg-gradient-to-br from-purple-600/70 via-transparent to-amber-400/60"
                     aria-hidden
                   />
-                  <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center">
-                    <div className="animate-pop-in rounded-2xl border-2 border-purple-400/60 bg-black/85 px-8 py-6 text-center shadow-[0_0_50px_rgba(168,85,247,0.6)]">
+                   <div className="pointer-events-none absolute inset-0 z-30 flex items-start justify-center pt-16">
+                     <div className="animate-pop-in rounded-2xl border-2 border-purple-400/60 bg-black/85 px-8 py-6 text-center shadow-[0_0_50px_rgba(168,85,247,0.6)]">
                       <p className="text-5xl">
                         {view.shieldFx.kind === "secondwind" ? "🛡️" : "⚡"}
                       </p>
@@ -2031,7 +2035,7 @@ function HudPortrait({ fighter }: { fighter: FighterDescriptor }) {
       ) : (
         /* Class sprite headshot — top crop of the idle fighter canvas */
          <span className="sprite-pixelated -mt-0.5 flex items-start justify-center">
-           <FighterVideo fighterClass={fighter.fighterClass} state="idle" size={42} />
+           <ChromaVideo src={FIGHTER_CLASS_META[fighter.fighterClass].video} size={42} />
          </span>
       )}
     </span>
@@ -2589,13 +2593,13 @@ function VerdictScreen({
       <div className="relative z-10">
         {/* Winner / loser sprites flanking the verdict */}
         <div className="mb-2 flex items-end justify-center gap-8">
-          <FighterVideo
+          <ChromaFighter
             fighterClass={loserDescriptor.fighterClass}
             state="dead"
             facing="right"
             size={140}
           />
-          <FighterVideo
+          <ChromaFighter
             fighterClass={winnerDescriptor.fighterClass}
             state="victory"
             facing="left"

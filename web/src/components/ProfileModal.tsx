@@ -14,6 +14,7 @@ import {
 } from "@/config/fighterClasses";
 
 import { cn, truncateAddress } from "@/lib/utils";
+import { ChromaVideo } from "./ChromaVideo";
 import { pushToast } from "./Toast";
 
 type ProfileModalProps = {
@@ -303,15 +304,7 @@ export function ProfileModal({ open, onClose }: ProfileModalProps) {
                         : "border-white/10 bg-black/40 hover:border-white/25",
                     )}
                   >
-                     <video
-                       src={meta.video}
-                       muted
-                       autoPlay
-                       loop
-                       playsInline
-                       style={{ height: 88 }}
-                       className="h-[88px] w-auto object-contain"
-                     />
+                     <ChromaVideo src={meta.video} size={88} />
                     <span
                       className="text-[10px] font-extrabold uppercase tracking-wider"
                       style={{ color: selected ? meta.secondary : "#a1a1aa" }}

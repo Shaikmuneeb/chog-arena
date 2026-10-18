@@ -50,6 +50,24 @@ export const ARENA_NPCS: ArenaNpc[] = [
     fighterClass: "berserker",
     wager: parseEther("2.5"),
   },
+  {
+    key: "lady-chog",
+    npcId: 5,
+    address: "0x1111111111111111111111111111111111110005",
+    name: "Lady Chog",
+    title: "Royal Chog",
+    fighterClass: "ladychog",
+    wager: parseEther("1.5"),
+  },
+  {
+    key: "chog-princess",
+    npcId: 6,
+    address: "0x1111111111111111111111111111111111110006",
+    name: "Chog Princess",
+    title: "Chog Princess",
+    fighterClass: "princess",
+    wager: parseEther("1.2"),
+  },
 ];
 
 /** Synthetic duel ids for NPC rows (never clash with on-chain duelCounter). */
