@@ -896,7 +896,13 @@ function updateFight(
   syncMechanics(m, script);
 }
 
-function step(m: MatchState, dt: number, script: MatchScript, playerSide: PlayerSide) {
+function step(
+  m: MatchState,
+  dt: number,
+  script: MatchScript,
+  playerSide: PlayerSide,
+  onRoundWin?: (winner: FighterSide) => void,
+) {
   m.stageMs += dt;
   if (m.hitStopMs > 0) {
     m.hitStopMs -= dt;
@@ -921,6 +927,7 @@ function step(m: MatchState, dt: number, script: MatchScript, playerSide: Player
       if (m.stageMs >= m.stageDur) {
         const winner = m.roundWinner ?? script.chainWinner;
         m.orbs[winner] += 1;
+        onRoundWin?.(winner);
         if (m.orbs[winner] >= 2) {
           m.stage = "verdict";
           m.stageMs = 0;
@@ -1014,6 +1021,14 @@ export function BattleArenaModal({
   const [view, setView] = useState<View>(initialView);
   const [narrow, setNarrow] = useState(false);
 
+  /* Manual best-of-3 round scoreboard. Refs are the authoritative counters
+   * (updated synchronously inside the rAF loop); state mirrors them for
+   * rendering. The final verdict is decided ONLY from these counts. */
+  const playerWinsRef = useRef(0);
+  const opponentWinsRef = useRef(0);
+  const [playerWins, setPlayerWins] = useState(0);
+  const [opponentWins, setOpponentWins] = useState(0);
+
   const matchRef = useRef<MatchState | null>(null);
   const viewRef = useRef<View>(initialView);
 
@@ -1066,10 +1081,21 @@ export function BattleArenaModal({
 
     let raf = 0;
     let last = performance.now();
+    /* Award a round win the moment a K.O. resolves. Refs are bumped first
+     * (no stale-closure risk), then mirrored into state for the HUD. */
+    const onRoundWin = (winner: FighterSide) => {
+      if (winner === "challenger") {
+        playerWinsRef.current += 1;
+        setPlayerWins(playerWinsRef.current);
+      } else {
+        opponentWinsRef.current += 1;
+        setOpponentWins(opponentWinsRef.current);
+      }
+    };
     const loop = (now: number) => {
       const dt = Math.min(now - last, 50);
       last = now;
-      step(m, dt, script, playerSide);
+      step(m, dt, script, playerSide, onRoundWin);
       const next = snapshot(m);
       viewRef.current = next;
       setView(next);
@@ -1208,6 +1234,12 @@ export function BattleArenaModal({
   const leftDesc = leftSide === "challenger" ? challengerFighter : creatorFighter;
   const rightDesc = rightSide === "challenger" ? challengerFighter : creatorFighter;
 
+  /* The match winner is decided STRICTLY from the manual round scoreboard —
+   * never from the pre-rolled on-chain outcome. First to 2 round wins. */
+  const manualPlayerWon = playerWins >= 2;
+  const leftWins = leftSide === "challenger" ? playerWins : opponentWins;
+  const rightWins = rightSide === "challenger" ? playerWins : opponentWins;
+
   return (
     <div className="fixed inset-0 z-[95] flex h-[100dvh] items-center justify-center bg-black/90 p-2 backdrop-blur-sm sm:h-[90vh] sm:p-4">
       <div
@@ -1219,6 +1251,7 @@ export function BattleArenaModal({
         {view.stage === "verdict" ? (
           <VerdictScreen
             outcome={outcome}
+            manualWon={manualPlayerWon}
             creatorName={creatorFighter.name}
             challengerName={challengerFighter.name}
             creatorFighter={creatorFighter}
@@ -1248,7 +1281,7 @@ export function BattleArenaModal({
                 <p className="whitespace-nowrap text-[9px] font-bold uppercase tracking-widest text-red-300/90">
                   {view.round === 3 ? "FINAL ROUND" : `ROUND ${view.round}`} · Orbs{" "}
                   <span className="text-amber-300">
-                    {view.orbs[leftSide]}–{view.orbs[rightSide]}
+                    {leftWins}–{rightWins}
                   </span>
                 </p>
               </div>
@@ -2235,6 +2268,7 @@ function KeonePortalFx({ x }: { x: number }) {
 
 function VerdictScreen({
   outcome,
+  manualWon,
   creatorName,
   challengerName,
   creatorFighter,
@@ -2246,6 +2280,8 @@ function VerdictScreen({
   onClose,
 }: {
   outcome: DuelOutcome;
+  /** Winner resolved from the manual round scoreboard (first to 2). */
+  manualWon: boolean;
   creatorName: string;
   challengerName: string;
   creatorFighter: FighterDescriptor;
@@ -2256,7 +2292,7 @@ function VerdictScreen({
   onPlayAgainBusy?: boolean;
   onClose: () => void;
 }) {
-  const won = outcome.userWon;
+  const won = manualWon;
   const clutch = won && outcome.userResurrected;
   const winnerDescriptor = won ? challengerFighter : creatorFighter;
   const loserDescriptor = won ? creatorFighter : challengerFighter;
