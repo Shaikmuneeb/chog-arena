@@ -49,7 +49,10 @@ export type FighterDescriptor = {
   fighterClass: FighterClass;
 };
 
-type Side = "creator" | "challenger";
+type FighterSide = "creator" | "challenger";
+type PlayerSide = "left" | "right";
+type Stage = "faceoff" | "roundintro" | "fight" | "ko" | "verdict";
+type AttackKind = "light" | "heavy" | "special" | "critical";
 
 /** Per-class visual scale — sheet art fills its frame very differently
  * (Chogzilla art is edge-to-edge; Keone/James art sits small in-frame). */
@@ -68,29 +71,872 @@ function stageSize(f: FighterDescriptor, narrow = false): number {
   );
 }
 
-type Stage =
-  | "faceoff"
-  | "roundintro"
-  | "combat"
-  | "ko"
-  | "down"
-  | "secondwind"
-  | "suddendeath"
-  | "verdict";
+/* ------------------------------------------------------------------ tuning */
 
-type Fx = {
+const MOVE_SPEED = 22; // %/s player slide speed
+const AI_APPROACH_SPEED = 17; // %/s AI closes distance
+const AI_BACKSTEP_SPEED = 16; // %/s AI retreats
+const LUNGE_SPEED = 10; // %/s forward lunge during an attack windup
+const WINDUP: Record<AttackKind, number> = {
+  light: 150,
+  heavy: 260,
+  special: 340,
+  critical: 440,
+};
+const RECOVER: Record<AttackKind, number> = {
+  light: 170,
+  heavy: 260,
+  special: 320,
+  critical: 360,
+};
+/** Center-to-center reach (stage %) for each attack. */
+const REACH: Record<AttackKind, number> = {
+  light: 29,
+  heavy: 33,
+  special: 35,
+  critical: 37,
+};
+const MOVE_FX_MS: Record<SpecialMove["vfxType"], number> = {
+  void_rift: 650,
+  laser: 750,
+  magma: 750,
+  slash: 800,
+};
+/** Horizontal tracks each fighter is confined to (stage %). */
+const TRACK_LEFT: [number, number] = [10, 40];
+const TRACK_RIGHT: [number, number] = [60, 90];
+
+function randInt(min: number, max: number): number {
+  return Math.floor(min + Math.random() * (max - min + 1));
+}
+function clamp(v: number, [lo, hi]: [number, number]): number {
+  return Math.min(hi, Math.max(lo, v));
+}
+function playerTrack(playerSide: PlayerSide): [number, number] {
+  return playerSide === "left" ? TRACK_LEFT : TRACK_RIGHT;
+}
+function oppTrack(playerSide: PlayerSide): [number, number] {
+  return playerSide === "left" ? TRACK_RIGHT : TRACK_LEFT;
+}
+function trackFor(side: FighterSide, playerSide: PlayerSide): [number, number] {
+  return side === "challenger" ? playerTrack(playerSide) : oppTrack(playerSide);
+}
+
+/* ------------------------------------------------------------- match model */
+
+type ActiveAttack = {
+  kind: AttackKind;
+  windup: number;
+  recover: number;
+  move: SpecialMove | null;
+};
+
+type FighterRT = {
+  side: FighterSide;
+  x: number;
+  hp: number;
+  meter: number;
+  pose: SpriteState;
+  seq: number;
+  facing: "left" | "right";
+  attack: ActiveAttack | null;
+  blockHeld: boolean;
+  hurtMs: number;
+  hurtHeavy: boolean;
+  hurtBright: boolean;
+  shieldMs: number;
+  down: boolean;
+  stunMs: number;
+  moveDir: number;
+  toward: boolean;
+};
+
+type AiAction =
+  | { kind: "approach"; dur: number }
+  | { kind: "block"; dur: number }
+  | { kind: "backstep"; dur: number }
+  | { kind: "telegraph"; attack: AttackKind; dur: number };
+
+type HitRT = {
   id: number;
-  attacker: Side;
-  target: Side;
+  side: FighterSide;
   dmg: number;
   crit: boolean;
-  /** Combo choreography phase — dashIn → strike → stagger → dashOut. */
-  phase: "dashIn" | "strike" | "stagger" | "dashOut";
-  /** Multi-hit count for signature/critical moves (displays as ×N). */
-  hits?: number;
-  /** Active character's exact move name from fighterMoves config. */
-  moveName?: string;
+  multi?: number;
+  name?: string;
+  ms: number;
 };
+
+type MatchState = {
+  stage: Stage;
+  stageMs: number;
+  stageDur: number;
+  round: 1 | 2 | 3;
+  timer: number;
+  orbs: Record<FighterSide, number>;
+  fighters: Record<FighterSide, FighterRT>;
+  moves: Record<FighterSide, ReturnType<typeof getFighterMoveSet>>;
+  heldLeft: boolean;
+  heldRight: boolean;
+  heldBlock: boolean;
+  attackQueued: AttackKind | null;
+  aiNextMs: number;
+  aiAction: AiAction | null;
+  aiActionMs: number;
+  shieldUsed: boolean;
+  overdrive: boolean;
+  buffs: { player: number; ai: number };
+  fxId: number;
+  impact: { id: number; x: number } | null;
+  impactMs: number;
+  dust: { id: number; x: number } | null;
+  dustMs: number;
+  hurtFx: { id: number; x: number; bright: boolean } | null;
+  hurtFxMs: number;
+  moveFx: {
+    id: number;
+    x: number;
+    vfx: SpecialMove["vfxType"];
+    kind: "special" | "critical";
+  } | null;
+  moveFxMs: number;
+  cinematic: { id: number; kind: "critical" | "ko"; moveName?: string } | null;
+  cinematicMs: number;
+  combo: { id: number; count: number } | null;
+  comboMs: number;
+  camShakeMs: number;
+  hitStopMs: number;
+  guard: { id: number; x: number } | null;
+  guardMs: number;
+  shieldFx: { id: number; kind: "secondwind" | "overdrive" } | null;
+  shieldFxMs: number;
+  hits: HitRT[];
+  dashSfxMs: number;
+  banner: string | null;
+  bannerMs: number;
+  roundWinner: FighterSide | null;
+  matchWinner: FighterSide | null;
+};
+
+type MatchScript = {
+  playerWon: boolean;
+  chainWinner: FighterSide;
+  finalWinnerSide: FighterSide;
+  loserSide: FighterSide;
+  revivedSide: FighterSide | null;
+  revivedWins: boolean;
+  creatorClass: FighterClass;
+  challengerClass: FighterClass;
+};
+
+function createMatch(script: MatchScript, playerSide: PlayerSide): MatchState {
+  const playerX = playerSide === "left" ? 32 : 68;
+  const oppX = playerSide === "left" ? 68 : 32;
+  const playerFacing: "left" | "right" = playerSide === "left" ? "right" : "left";
+  const oppFacing: "left" | "right" = playerSide === "left" ? "left" : "right";
+  const blank = (side: FighterSide, x: number, facing: "left" | "right"): FighterRT => ({
+    side,
+    x,
+    hp: 100,
+    meter: 0,
+    pose: "idle",
+    seq: 0,
+    facing,
+    attack: null,
+    blockHeld: false,
+    hurtMs: 0,
+    hurtHeavy: false,
+    hurtBright: false,
+    shieldMs: 0,
+    down: false,
+    stunMs: 0,
+    moveDir: 0,
+    toward: false,
+  });
+  return {
+    stage: "faceoff",
+    stageMs: 0,
+    stageDur: 1000,
+    round: 1,
+    timer: 99,
+    orbs: { creator: 0, challenger: 0 },
+    fighters: {
+      creator: blank("creator", oppX, oppFacing),
+      challenger: blank("challenger", playerX, playerFacing),
+    },
+    moves: {
+      creator: getFighterMoveSet(script.creatorClass),
+      challenger: getFighterMoveSet(script.challengerClass),
+    },
+    heldLeft: false,
+    heldRight: false,
+    heldBlock: false,
+    attackQueued: null,
+    aiNextMs: 800,
+    aiAction: null,
+    aiActionMs: 0,
+    shieldUsed: false,
+    overdrive: false,
+    buffs: { player: script.playerWon ? 1.5 : 0.9, ai: script.playerWon ? 0.75 : 1.35 },
+    fxId: 0,
+    impact: null,
+    impactMs: 0,
+    dust: null,
+    dustMs: 0,
+    hurtFx: null,
+    hurtFxMs: 0,
+    moveFx: null,
+    moveFxMs: 0,
+    cinematic: null,
+    cinematicMs: 0,
+    combo: null,
+    comboMs: 0,
+    camShakeMs: 0,
+    hitStopMs: 0,
+    guard: null,
+    guardMs: 0,
+    shieldFx: null,
+    shieldFxMs: 0,
+    hits: [],
+    dashSfxMs: 0,
+    banner: null,
+    bannerMs: 0,
+    roundWinner: null,
+    matchWinner: null,
+  };
+}
+
+/* ------------------------------------------------------------ view snapshot */
+
+type FighterView = {
+  x: number;
+  hp: number;
+  meter: number;
+  pose: SpriteState;
+  seq: number;
+  facing: "left" | "right";
+  blockHeld: boolean;
+  hurtBright: boolean;
+  down: boolean;
+  shield: boolean;
+  moveDir: number;
+  toward: boolean;
+};
+
+type View = {
+  stage: Stage;
+  round: 1 | 2 | 3;
+  timer: number;
+  banner: string | null;
+  orbs: Record<FighterSide, number>;
+  fighters: Record<FighterSide, FighterView>;
+  impact: { id: number; x: number } | null;
+  dust: { id: number; x: number } | null;
+  hurtFx: { id: number; x: number; bright: boolean } | null;
+  moveFx: {
+    id: number;
+    x: number;
+    vfx: SpecialMove["vfxType"];
+    kind: "special" | "critical";
+  } | null;
+  cinematic: { id: number; kind: "critical" | "ko"; moveName?: string } | null;
+  combo: { id: number; count: number } | null;
+  camShake: boolean;
+  hitStop: boolean;
+  guard: { id: number; x: number } | null;
+  shieldFx: { id: number; kind: "secondwind" | "overdrive" } | null;
+  hits: HitRT[];
+  heldLeft: boolean;
+  heldRight: boolean;
+  heldBlock: boolean;
+};
+
+function fighterView(f: FighterRT): FighterView {
+  return {
+    x: Math.round(f.x * 10) / 10,
+    hp: Math.round(f.hp),
+    meter: Math.round(f.meter),
+    pose: f.pose,
+    seq: f.seq,
+    facing: f.facing,
+    blockHeld: f.blockHeld,
+    hurtBright: f.hurtBright,
+    down: f.down,
+    shield: f.shieldMs > 0,
+    moveDir: f.moveDir,
+    toward: f.toward,
+  };
+}
+
+function snapshot(m: MatchState): View {
+  return {
+    stage: m.stage,
+    round: m.round,
+    timer: Math.max(0, Math.ceil(m.timer)),
+    banner: m.bannerMs > 0 ? m.banner : null,
+    orbs: { ...m.orbs },
+    fighters: {
+      creator: fighterView(m.fighters.creator),
+      challenger: fighterView(m.fighters.challenger),
+    },
+    impact: m.impactMs > 0 ? m.impact : null,
+    dust: m.dustMs > 0 ? m.dust : null,
+    hurtFx:
+      m.hurtFxMs > 0
+        ? { ...m.hurtFx!, bright: m.hurtFxMs > 290 }
+        : null,
+    moveFx: m.moveFxMs > 0 ? m.moveFx : null,
+    cinematic: m.cinematicMs > 0 ? m.cinematic : null,
+    combo: m.comboMs > 0 ? m.combo : null,
+    camShake: m.camShakeMs > 0,
+    hitStop: m.hitStopMs > 0,
+    guard: m.guardMs > 0 ? m.guard : null,
+    shieldFx: m.shieldFxMs > 0 ? m.shieldFx : null,
+    hits: m.hits.filter((h) => h.ms > 0),
+    heldLeft: m.heldLeft,
+    heldRight: m.heldRight,
+    heldBlock: m.heldBlock,
+  };
+}
+
+/* ---------------------------------------------------------------- game loop */
+
+function decayFx(m: MatchState, dt: number) {
+  m.impactMs -= dt;
+  if (m.impactMs <= 0) m.impact = null;
+  m.dustMs -= dt;
+  if (m.dustMs <= 0) m.dust = null;
+  m.hurtFxMs -= dt;
+  if (m.hurtFxMs <= 0) m.hurtFx = null;
+  m.moveFxMs -= dt;
+  if (m.moveFxMs <= 0) m.moveFx = null;
+  m.cinematicMs -= dt;
+  if (m.cinematicMs <= 0) m.cinematic = null;
+  m.comboMs -= dt;
+  if (m.comboMs <= 0) m.combo = null;
+  m.camShakeMs -= dt;
+  m.guardMs -= dt;
+  if (m.guardMs <= 0) m.guard = null;
+  m.shieldFxMs -= dt;
+  if (m.shieldFxMs <= 0) m.shieldFx = null;
+  m.bannerMs -= dt;
+  if (m.bannerMs <= 0) m.banner = null;
+  m.dashSfxMs -= dt;
+  for (const h of m.hits) h.ms -= dt;
+}
+
+function refreshFighterPose(f: FighterRT) {
+  let pose: SpriteState;
+  if (f.down) pose = "dead";
+  else if (f.shieldMs > 0) pose = "secondWind";
+  else if (f.attack) pose = "attack";
+  else if (f.hurtMs > 0) pose = f.hurtHeavy ? "stagger" : "hit";
+  else if (f.stunMs > 0) pose = "idle";
+  else if (f.moveDir !== 0) pose = f.toward ? "dashIn" : "dashOut";
+  else pose = "idle";
+  if (f.pose !== pose) {
+    f.pose = pose;
+    f.seq += 1;
+  }
+}
+
+function tickFighter(f: FighterRT, dt: number) {
+  if (f.hurtMs > 0) f.hurtMs -= dt;
+  if (f.shieldMs > 0) f.shieldMs -= dt;
+  if (f.stunMs > 0) f.stunMs -= dt;
+  refreshFighterPose(f);
+}
+
+function startRound(
+  m: MatchState,
+  round: 1 | 2 | 3,
+  script: MatchScript,
+  playerSide: PlayerSide,
+) {
+  m.round = round;
+  m.stage = "roundintro";
+  m.stageMs = 0;
+  m.stageDur = round === 1 ? 1300 : 1400;
+  m.banner =
+    round === 3 ? "ROUND 3 // FINAL ROUND!" : `ROUND ${round} // FIGHT!`;
+  m.bannerMs = m.stageDur;
+  playRoundAnnouncement(round);
+  const p = m.fighters.challenger;
+  const ai = m.fighters.creator;
+  p.hp = 100;
+  ai.hp = 100;
+  p.down = false;
+  ai.down = false;
+  p.attack = null;
+  ai.attack = null;
+  p.hurtMs = 0;
+  ai.hurtMs = 0;
+  p.shieldMs = 0;
+  ai.shieldMs = 0;
+  p.stunMs = 0;
+  ai.stunMs = 0;
+  p.blockHeld = false;
+  ai.blockHeld = false;
+  p.x = playerSide === "left" ? 32 : 68;
+  ai.x = playerSide === "left" ? 68 : 32;
+  p.pose = "idle";
+  ai.pose = "idle";
+  p.seq += 1;
+  ai.seq += 1;
+  m.attackQueued = null;
+  m.aiAction = null;
+  m.aiActionMs = 0;
+  m.aiNextMs = 800;
+  m.impact = null;
+  m.dust = null;
+  m.hurtFx = null;
+  m.moveFx = null;
+  m.cinematic = null;
+  m.combo = null;
+  m.guard = null;
+  m.shieldFx = null;
+  m.hits = [];
+  m.timer = 99;
+}
+
+function startKO(
+  m: MatchState,
+  winner: FighterSide,
+  script: MatchScript,
+  playerSide: PlayerSide,
+) {
+  m.roundWinner = winner;
+  m.stage = "ko";
+  m.stageMs = 0;
+  m.stageDur = 1750;
+  m.banner = `ROUND ${m.round} K.O.!`;
+  m.bannerMs = 1750;
+  const loser = winner === "challenger" ? m.fighters.creator : m.fighters.challenger;
+  const win = winner === "challenger" ? m.fighters.challenger : m.fighters.creator;
+  loser.down = true;
+  loser.pose = "dead";
+  loser.seq += 1;
+  win.pose = "victory";
+  win.seq += 1;
+  m.cinematic = { id: ++m.fxId, kind: "ko" };
+  m.cinematicMs = 750;
+  playHitSfx();
+}
+
+function triggerSecondWind(m: MatchState, p: FighterRT) {
+  m.shieldUsed = true;
+  p.hp = 55;
+  p.shieldMs = 2600;
+  p.pose = "secondWind";
+  p.seq += 1;
+  m.shieldFx = { id: ++m.fxId, kind: "secondwind" };
+  m.shieldFxMs = 1600;
+  m.banner = "MONAD SECOND WIND // ADRENALINE SHIELD";
+  m.bannerMs = 1600;
+  playSecondWindSfx();
+  const ai = m.fighters.creator;
+  ai.stunMs = 3000;
+  ai.attack = null;
+  ai.blockHeld = false;
+  m.buffs.player *= 1.4;
+}
+
+function triggerOverdrive(m: MatchState, ai: FighterRT) {
+  m.overdrive = true;
+  ai.hp = Math.max(ai.hp, 50);
+  ai.shieldMs = 2600;
+  ai.pose = "secondWind";
+  ai.seq += 1;
+  m.shieldFx = { id: ++m.fxId, kind: "overdrive" };
+  m.shieldFxMs = 1600;
+  m.banner = "AI BOSS OVERDRIVE!";
+  m.bannerMs = 1600;
+  playSecondWindSfx();
+  m.buffs.ai = 2.0;
+  m.aiAction = { kind: "telegraph", attack: "critical", dur: 300 };
+  m.aiActionMs = 0;
+  m.aiNextMs = 400;
+}
+
+function tryStartPlayerAttack(m: MatchState, kind: AttackKind) {
+  const p = m.fighters.challenger;
+  if (m.stage !== "fight" || p.down || p.stunMs > 0 || p.attack) return;
+  const cost = kind === "special" ? 40 : kind === "critical" ? 100 : 0;
+  if (p.meter < cost) return;
+  p.meter = Math.max(0, p.meter - cost);
+  const moves = m.moves.challenger;
+  const move =
+    kind === "special"
+      ? moves.signatureMove
+      : kind === "critical"
+        ? moves.criticalArt
+        : null;
+  p.attack = {
+    kind,
+    windup: WINDUP[kind],
+    recover: RECOVER[kind],
+    move,
+  };
+  p.pose = "attack";
+  p.seq += 1;
+  if (m.dashSfxMs <= 0) {
+    playDashSfx();
+    m.dashSfxMs = 400;
+  }
+}
+
+function applyHit(
+  m: MatchState,
+  attacker: FighterRT,
+  defender: FighterRT,
+  a: ActiveAttack,
+  isPlayer: boolean,
+  script: MatchScript,
+  playerSide: PlayerSide,
+) {
+  const dist = Math.abs(attacker.x - defender.x);
+  if (dist > REACH[a.kind]) return; // whiff — out of range
+  if (defender.shieldMs > 0) return; // invulnerable
+  const crit = a.kind === "critical" || a.kind === "special";
+  let dmg: number;
+  if (isPlayer) {
+    if (a.kind === "light") dmg = randInt(7, 11);
+    else if (a.kind === "heavy") dmg = randInt(12, 17);
+    else dmg = randInt(a.move!.damage[0], a.move!.damage[1]);
+    dmg *= m.buffs.player;
+  } else {
+    if (a.kind === "light") dmg = randInt(6, 10);
+    else if (a.kind === "heavy") dmg = randInt(10, 15);
+    else dmg = randInt(a.move!.damage[0], a.move!.damage[1]) * 0.85;
+    dmg *= m.buffs.ai;
+  }
+  const blocked = defender.blockHeld;
+  if (blocked) dmg *= 0.2; // 80% damage reduction while blocking
+  dmg = Math.max(1, Math.round(dmg));
+  defender.hp = Math.max(0, defender.hp - dmg);
+
+  // Super meter: attacker builds on clean hits, defender builds on taking
+  // a hit, and blocking grants the perfect-guard bonus.
+  if (a.kind === "light") attacker.meter = Math.min(100, attacker.meter + 8);
+  else if (a.kind === "heavy") attacker.meter = Math.min(100, attacker.meter + 12);
+  defender.meter = Math.min(100, defender.meter + 4);
+  if (blocked) defender.meter = Math.min(100, defender.meter + 8);
+
+  // FX + audio.
+  m.impact = { id: ++m.fxId, x: defender.x };
+  m.impactMs = 380;
+  m.hurtFx = { id: ++m.fxId, x: defender.x, bright: true };
+  m.hurtFxMs = 430;
+  m.dust = { id: ++m.fxId, x: attacker.x };
+  m.dustMs = 500;
+  if (blocked) {
+    m.guard = { id: ++m.fxId, x: defender.x };
+    m.guardMs = 300;
+  }
+  const multi = a.move && a.move.hitCount > 1 ? a.move.hitCount : undefined;
+  m.hits.push({
+    id: ++m.fxId,
+    side: defender.side,
+    dmg,
+    crit: crit && !blocked,
+    multi,
+    name: a.move?.name,
+    ms: 950,
+  });
+  if (m.hits.length > 6) m.hits.shift();
+  m.hitStopMs = a.kind === "light" ? 60 : 90;
+  m.camShakeMs = a.kind === "light" ? 300 : 420;
+  playHitSfx();
+  if (a.move) playImpactSfx(impactCueFor(a.move.soundCue));
+  else playImpactSfx(crit ? "crit" : "slash");
+
+  defender.hurtMs = a.kind === "light" ? 220 : 320;
+  defender.hurtHeavy = a.kind !== "light";
+  defender.hurtBright = true;
+  defender.pose = "hit";
+  defender.seq += 1;
+  if (defender.attack) defender.attack = null;
+
+  if (isPlayer) {
+    m.combo = { id: ++m.fxId, count: (m.combo?.count ?? 0) + 1 };
+    m.comboMs = 1400;
+  }
+  if (a.kind === "special" || a.kind === "critical") {
+    m.cinematic = { id: ++m.fxId, kind: "critical", moveName: a.move?.name };
+    m.cinematicMs = 750;
+    m.moveFx = {
+      id: ++m.fxId,
+      x: defender.x,
+      vfx: a.move!.vfxType,
+      kind: a.kind === "critical" ? "critical" : "special",
+    };
+    m.moveFxMs = MOVE_FX_MS[a.move!.vfxType];
+  }
+
+  if (defender.hp <= 0) {
+    if (
+      defender.side === "challenger" &&
+      script.playerWon &&
+      !m.shieldUsed &&
+      m.orbs.challenger >= 1
+    ) {
+      triggerSecondWind(m, defender);
+    } else if (
+      defender.side === "creator" &&
+      !script.playerWon &&
+      !m.overdrive &&
+      m.orbs.creator >= 1
+    ) {
+      triggerOverdrive(m, defender);
+    } else {
+      startKO(m, attacker.side, script, playerSide);
+    }
+  }
+}
+
+function updateAttack(
+  m: MatchState,
+  f: FighterRT,
+  dt: number,
+  isPlayer: boolean,
+  script: MatchScript,
+  playerSide: PlayerSide,
+) {
+  const a = f.attack;
+  if (!a) return;
+  const foe = isPlayer ? m.fighters.creator : m.fighters.challenger;
+  if (a.windup > 0) {
+    a.windup -= dt;
+    const dir = Math.sign(foe.x - f.x) || (isPlayer ? 1 : -1);
+    f.x += dir * LUNGE_SPEED * (dt / 1000);
+    f.x = clamp(f.x, trackFor(f.side, playerSide));
+    if (a.windup <= 0) applyHit(m, f, foe, a, isPlayer, script, playerSide);
+  } else {
+    a.recover -= dt;
+    if (a.recover <= 0) {
+      f.attack = null;
+      f.pose = "idle";
+      f.seq += 1;
+    }
+  }
+}
+
+function updateAI(
+  m: MatchState,
+  dt: number,
+  script: MatchScript,
+  playerSide: PlayerSide,
+) {
+  const ai = m.fighters.creator;
+  const p = m.fighters.challenger;
+  if (ai.down || ai.stunMs > 0) {
+    ai.moveDir = 0;
+    return;
+  }
+  if (m.aiAction) {
+    m.aiActionMs += dt;
+    const act = m.aiAction;
+    if (act.kind === "approach") {
+      const dir = Math.sign(p.x - ai.x) || 1;
+      ai.x += dir * AI_APPROACH_SPEED * (dt / 1000);
+      ai.x = clamp(ai.x, oppTrack(playerSide));
+      ai.moveDir = dir;
+      ai.toward = true;
+      if (m.aiActionMs >= act.dur) {
+        m.aiAction = null;
+        m.aiNextMs = m.overdrive ? randInt(550, 850) : randInt(900, 1300);
+        ai.moveDir = 0;
+      }
+    } else if (act.kind === "backstep") {
+      const dir = Math.sign(ai.x - p.x) || 1;
+      ai.x += dir * AI_BACKSTEP_SPEED * (dt / 1000);
+      ai.x = clamp(ai.x, oppTrack(playerSide));
+      ai.moveDir = dir;
+      ai.toward = false;
+      if (m.aiActionMs >= act.dur) {
+        m.aiAction = null;
+        m.aiNextMs = m.overdrive ? randInt(550, 850) : randInt(900, 1300);
+        ai.moveDir = 0;
+      }
+    } else if (act.kind === "block") {
+      ai.blockHeld = true;
+      if (m.aiActionMs >= act.dur) {
+        ai.blockHeld = false;
+        m.aiAction = null;
+        m.aiNextMs = m.overdrive ? randInt(550, 850) : randInt(900, 1300);
+      }
+    } else if (act.kind === "telegraph") {
+      ai.pose = "idle";
+      ai.seq += 1;
+      if (m.aiActionMs >= act.dur) {
+        const moves = m.moves.creator;
+        const move =
+          act.attack === "special"
+            ? moves.signatureMove
+            : act.attack === "critical"
+              ? moves.criticalArt
+              : null;
+        ai.attack = {
+          kind: act.attack,
+          windup: 150,
+          recover: RECOVER[act.attack],
+          move,
+        };
+        ai.pose = "attack";
+        ai.seq += 1;
+        m.aiAction = null;
+        m.aiNextMs = m.overdrive ? randInt(550, 850) : randInt(900, 1300);
+      }
+    }
+    return;
+  }
+  m.aiNextMs -= dt;
+  if (m.aiNextMs > 0) {
+    ai.moveDir = 0;
+    return;
+  }
+  const dist = Math.abs(ai.x - p.x);
+  if (dist > 26) {
+    m.aiAction = { kind: "approach", dur: randInt(250, 420) };
+    m.aiActionMs = 0;
+    if (m.dashSfxMs <= 0) {
+      playDashSfx();
+      m.dashSfxMs = 400;
+    }
+  } else {
+    const roll = Math.random();
+    if (roll < 0.6) {
+      let kind: AttackKind = "light";
+      const r2 = Math.random();
+      if (ai.meter >= 40 && r2 < 0.25) kind = "special";
+      else if (r2 < 0.7) kind = "light";
+      else kind = "heavy";
+      m.aiAction = { kind: "telegraph", attack: kind, dur: 300 };
+      m.aiActionMs = 0;
+    } else if (roll < 0.8) {
+      m.aiAction = { kind: "block", dur: 500 };
+      m.aiActionMs = 0;
+    } else {
+      m.aiAction = { kind: "backstep", dur: randInt(200, 350) };
+      m.aiActionMs = 0;
+    }
+  }
+}
+
+function syncMechanics(m: MatchState, script: MatchScript) {
+  const p = m.fighters.challenger;
+  const ai = m.fighters.creator;
+  if (
+    script.playerWon &&
+    !m.shieldUsed &&
+    m.orbs.challenger >= 1 &&
+    p.hp <= 30
+  ) {
+    triggerSecondWind(m, p);
+  }
+  if (
+    !script.playerWon &&
+    !m.overdrive &&
+    m.orbs.creator >= 1 &&
+    ai.hp <= 45
+  ) {
+    triggerOverdrive(m, ai);
+  }
+}
+
+function resolveTimer(m: MatchState, script: MatchScript, playerSide: PlayerSide) {
+  const p = m.fighters.challenger;
+  const ai = m.fighters.creator;
+  let winner: FighterSide;
+  if (p.hp === ai.hp) winner = script.chainWinner;
+  else if (m.orbs.challenger >= 1 && script.chainWinner === "challenger")
+    winner = "challenger";
+  else if (m.orbs.creator >= 1 && script.chainWinner === "creator")
+    winner = "creator";
+  else winner = p.hp > ai.hp ? "challenger" : "creator";
+  startKO(m, winner, script, playerSide);
+}
+
+function updateFight(
+  m: MatchState,
+  dt: number,
+  script: MatchScript,
+  playerSide: PlayerSide,
+) {
+  m.timer -= dt / 1000;
+  if (m.timer <= 0) {
+    resolveTimer(m, script, playerSide);
+    return;
+  }
+  const p = m.fighters.challenger;
+  const ai = m.fighters.creator;
+
+  // Player manual movement (only while the fight stage is live).
+  p.blockHeld = m.heldBlock;
+  const speed = MOVE_SPEED * (p.blockHeld ? 0.4 : 1);
+  p.moveDir = (m.heldRight ? 1 : 0) - (m.heldLeft ? 1 : 0);
+  if (p.moveDir !== 0) {
+    p.x += p.moveDir * speed * (dt / 1000);
+    p.x = clamp(p.x, playerTrack(playerSide));
+    p.toward = p.moveDir > 0 === p.x < ai.x;
+  }
+
+  // Consume a queued player attack.
+  if (m.attackQueued) {
+    const kind = m.attackQueued;
+    m.attackQueued = null;
+    tryStartPlayerAttack(m, kind);
+  }
+
+  updateAI(m, dt, script, playerSide);
+  updateAttack(m, p, dt, true, script, playerSide);
+  updateAttack(m, ai, dt, false, script, playerSide);
+  tickFighter(p, dt);
+  tickFighter(ai, dt);
+  syncMechanics(m, script);
+}
+
+function step(m: MatchState, dt: number, script: MatchScript, playerSide: PlayerSide) {
+  m.stageMs += dt;
+  if (m.hitStopMs > 0) {
+    m.hitStopMs -= dt;
+    decayFx(m, dt);
+    return;
+  }
+  switch (m.stage) {
+    case "faceoff":
+      if (m.stageMs >= m.stageDur) startRound(m, 1, script, playerSide);
+      break;
+    case "roundintro":
+      if (m.stageMs >= m.stageDur) {
+        m.stage = "fight";
+        m.stageMs = 0;
+        m.timer = 99;
+      }
+      break;
+    case "fight":
+      updateFight(m, dt, script, playerSide);
+      break;
+    case "ko":
+      if (m.stageMs >= m.stageDur) {
+        const winner = m.roundWinner ?? script.chainWinner;
+        m.orbs[winner] += 1;
+        if (m.orbs[winner] >= 2) {
+          m.stage = "verdict";
+          m.stageMs = 0;
+          m.matchWinner = winner;
+        } else {
+          startRound(m, (m.round + 1) as 1 | 2 | 3, script, playerSide);
+        }
+      }
+      break;
+    case "verdict":
+      break;
+  }
+  decayFx(m, dt);
+}
+
+/* ------------------------------------------------------------------- props */
 
 type BattleArenaModalProps = {
   outcome: DuelOutcome | null;
@@ -99,6 +945,8 @@ type BattleArenaModalProps = {
   explorerTxUrl?: string;
   /** Timeline only starts when this is true AND outcome is confirmed. */
   isOpen?: boolean;
+  /** Which side of the stage the local player occupies. */
+  playerSide?: PlayerSide;
   /** Verdict "Play Again" — re-runs the on-chain stake flow for a rematch. */
   onPlayAgain?: () => void;
   /** While the rematch stake is awaiting wallet/chain confirmation. */
@@ -106,11 +954,51 @@ type BattleArenaModalProps = {
   onClose: () => void;
 };
 
+const emptyFighterView: FighterView = {
+  x: 32,
+  hp: 100,
+  meter: 0,
+  pose: "idle",
+  seq: 0,
+  facing: "right",
+  blockHeld: false,
+  hurtBright: false,
+  down: false,
+  shield: false,
+  moveDir: 0,
+  toward: false,
+};
+
+const initialView: View = {
+  stage: "faceoff",
+  round: 1,
+  timer: 99,
+  banner: null,
+  orbs: { creator: 0, challenger: 0 },
+  fighters: { creator: emptyFighterView, challenger: emptyFighterView },
+  impact: null,
+  dust: null,
+  hurtFx: null,
+  moveFx: null,
+  cinematic: null,
+  combo: null,
+  camShake: false,
+  hitStop: false,
+  guard: null,
+  shieldFx: null,
+  hits: [],
+  heldLeft: false,
+  heldRight: false,
+  heldBlock: false,
+};
+
 /**
- * Street-Fighter-style 3-round battle stage driven by a SINGLE async match
- * sequencer (no reactive per-round useEffect chains). The timeline starts
- * only when `isOpen` && a confirmed `outcome` exist, runs rounds 1→2→3 with
- * close-range melee exchanges, and always ends on the real on-chain winner.
+ * Street-Fighter-style 3-round battle stage driven by a REAL-TIME manual
+ * game loop. The player's fighter only moves / blocks / attacks when the
+ * user presses keys or the arcade buttons; the opponent runs an independent
+ * AI behaviour loop. Combat physics live in a ref (never in React state),
+ * stepped by a single requestAnimationFrame loop and mirrored into a view
+ * object for rendering.
  */
 export function BattleArenaModal({
   outcome,
@@ -118,108 +1006,43 @@ export function BattleArenaModal({
   challengerFighter,
   explorerTxUrl,
   isOpen = true,
+  playerSide = "left",
   onPlayAgain,
   onPlayAgainBusy = false,
   onClose,
 }: BattleArenaModalProps) {
-  const [stage, setStage] = useState<Stage>("faceoff");
-  const [round, setRound] = useState<1 | 2 | 3>(1);
-  const [hp, setHp] = useState<{ creator: number; challenger: number }>({
-    creator: 100,
-    challenger: 100,
-  });
-  const [fx, setFx] = useState<Fx | null>(null);
-  const [banner, setBanner] = useState<string | null>(null);
-  const [orbScore, setOrbScore] = useState<{ creator: number; challenger: number }>(
-    { creator: 0, challenger: 0 },
-  );
-  const [slamFx, setSlamFx] = useState<{ id: number; target: Side } | null>(
-    null,
-  );
-  const [portalFx, setPortalFx] = useState<{ id: number; target: Side } | null>(
-    null,
-  );
-  const [chogFx, setChogFx] = useState<{ id: number; target: Side } | null>(
-    null,
-  );
-  const [samuraiFx, setSamuraiFx] = useState<{ id: number; target: Side } | null>(
-    null,
-  );
-  const [impactFx, setImpactFx] = useState<{ id: number } | null>(null);
-  const [dustFx, setDustFx] = useState<{ id: number; side: Side } | null>(null);
-  const [combo, setCombo] = useState<{
-    id: number;
-    count: number;
-    side: Side;
-  } | null>(null);
-  const [cinematic, setCinematic] = useState<{
-    id: number;
-    kind: "critical" | "counter" | "ko";
-    moveName?: string;
-  } | null>(null);
-  const [hitStop, setHitStop] = useState(false);
-  const [camShake, setCamShake] = useState(false);
-  const [timer, setTimer] = useState(99);
-
-  /* ---- Manual arcade controls (cosmetic assist over the scripted match) ----
-   * The on-chain duel is already settled; these bindings give the player a
-   * real PC (keyboard/mouse) + mobile (touch gamepad) feel — stance leans,
-   * guard blocks, strike flourishes, and a super meter gating Special /
-   * Critical Art flair — WITHOUT altering the scripted winner or pacing. */
-  const [playerStance, setPlayerStance] = useState<
-    "neutral" | "back" | "block" | "dash"
-  >("neutral");
-  const [superMeter, setSuperMeter] = useState(0);
-  const [assistFlourish, setAssistFlourish] = useState<{
-    id: number;
-    kind: "light" | "heavy" | "special" | "critical";
-  } | null>(null);
+  const [view, setView] = useState<View>(initialView);
   const [narrow, setNarrow] = useState(false);
 
-  const matchRunningRef = useRef(false);
-  const comboRef = useRef(0);
-  const playerStanceRef = useRef(playerStance);
-  playerStanceRef.current = playerStance;
-  const assistTimersRef = useRef<number[]>([]);
+  const matchRef = useRef<MatchState | null>(null);
+  const viewRef = useRef<View>(initialView);
 
-  const nameOf = (side: Side): string =>
+  const nameOf = (side: FighterSide): string =>
     side === "creator" ? creatorFighter.name : challengerFighter.name;
 
   /* Winner/loser sides + Second Wind resolution — computed once. */
-  const script = useMemo(() => {
+  const script = useMemo<MatchScript | null>(() => {
     if (!outcome) return null;
     const creatorWon =
       outcome.winnerAddress.toLowerCase() ===
       creatorFighter.address.toLowerCase();
-    const finalWinnerSide: Side = creatorWon ? "creator" : "challenger";
-    const loserSide: Side = creatorWon ? "challenger" : "creator";
-    const revivedSide: Side | null = outcome.secondWind ? loserSide : null;
+    const finalWinnerSide: FighterSide = creatorWon ? "creator" : "challenger";
+    const loserSide: FighterSide = creatorWon ? "challenger" : "creator";
+    const revivedSide: FighterSide | null = outcome.secondWind ? loserSide : null;
     const revivedWins =
       revivedSide != null &&
       outcome.resurrectedAddress != null &&
       outcome.winnerAddress.toLowerCase() ===
         outcome.resurrectedAddress.toLowerCase();
-    const isJames = (side: Side): boolean =>
-      (side === "creator" ? creatorFighter : challengerFighter)
-        .fighterClass === "mage";
-    const isKeone = (side: Side): boolean =>
-      (side === "creator" ? creatorFighter : challengerFighter)
-        .fighterClass === "juggernaut";
-    const isChogzilla = (side: Side): boolean =>
-      (side === "creator" ? creatorFighter : challengerFighter)
-        .fighterClass === "berserker";
-    const isSamurai = (side: Side): boolean =>
-      (side === "creator" ? creatorFighter : challengerFighter)
-        .fighterClass === "samurai";
     return {
+      playerWon: outcome.userWon,
+      chainWinner: outcome.userWon ? "challenger" : "creator",
       finalWinnerSide,
       loserSide,
       revivedSide,
       revivedWins,
-      isJames,
-      isKeone,
-      isChogzilla,
-      isSamurai,
+      creatorClass: creatorFighter.fighterClass,
+      challengerClass: challengerFighter.fighterClass,
     };
   }, [
     outcome,
@@ -228,455 +1051,145 @@ export function BattleArenaModal({
     challengerFighter.fighterClass,
   ]);
 
-  /* Arcade timer ticks while the stage is live. */
-  useEffect(() => {
-    if (stage === "faceoff" || stage === "verdict") return;
-    const interval = setInterval(() => {
-      setTimer((t) => Math.max(0, t - 1));
-    }, 1000);
-    return () => clearInterval(interval);
-  }, [stage]);
-
-  /* Clear the Void Claw slam shockwave after its ring plays out. */
-  useEffect(() => {
-    if (!slamFx) return;
-    const timeout = setTimeout(() => setSlamFx(null), 650);
-    return () => clearTimeout(timeout);
-  }, [slamFx]);
-
-  /* Clear the Keone portal burst after its bloom plays out. */
-  useEffect(() => {
-    if (!portalFx) return;
-    const timeout = setTimeout(() => setPortalFx(null), 750);
-    return () => clearTimeout(timeout);
-  }, [portalFx]);
-
-  /* Clear the Chogzilla ground-pound + Samurai slash bursts. */
-  useEffect(() => {
-    if (!chogFx) return;
-    const timeout = setTimeout(() => setChogFx(null), 750);
-    return () => clearTimeout(timeout);
-  }, [chogFx]);
-  useEffect(() => {
-    if (!samuraiFx) return;
-    const timeout = setTimeout(() => setSamuraiFx(null), 800);
-    return () => clearTimeout(timeout);
-  }, [samuraiFx]);
-  /* Clear the impact starburst. */
-  useEffect(() => {
-    if (!impactFx) return;
-    const timeout = setTimeout(() => setImpactFx(null), 380);
-    return () => clearTimeout(timeout);
-  }, [impactFx]);
-
-  /* Clear the dash-in dust puffs. */
-  useEffect(() => {
-    if (!dustFx) return;
-    const timeout = setTimeout(() => setDustFx(null), 500);
-    return () => clearTimeout(timeout);
-  }, [dustFx]);
-
-  /* Clear the cinematic camera zoom + big text. */
-  useEffect(() => {
-    if (!cinematic) return;
-    const timeout = setTimeout(() => setCinematic(null), 750);
-    return () => clearTimeout(timeout);
-  }, [cinematic]);
-
-  /* ================= SINGLE ASYNC MATCH SEQUENCER =================
-   * Runs the full 3-round fight sequentially. Never re-triggered by
-   * round/HP state updates — only by isOpen + a fresh confirmed outcome. */
+  /* ================= REAL-TIME GAME LOOP =================
+   * Single rAF loop: step the ref-based match state, then mirror a plain
+   * view object into React state for rendering. Never re-triggered by view
+   * updates — only by isOpen + a fresh confirmed outcome. */
   useEffect(() => {
     if (!isOpen || !outcome || !script) return;
-    if (matchRunningRef.current) return;
-    matchRunningRef.current = true;
+    resetArenaAudio();
+    const m = createMatch(script, playerSide);
+    matchRef.current = m;
+    const snap = snapshot(m);
+    viewRef.current = snap;
+    setView(snap);
 
-    let cancelled = false;
-    const aborted = () => cancelled;
-    const wait = (ms: number) =>
-      new Promise<void>((resolve) => setTimeout(resolve, ms));
-
-    /* Local HP model — deterministic, synced to state for rendering. */
-    let hpState = { creator: 100, challenger: 100 };
-    const setHpBoth = (next: { creator: number; challenger: number }) => {
-      hpState = next;
-      setHp(next);
+    let raf = 0;
+    let last = performance.now();
+    const loop = (now: number) => {
+      const dt = Math.min(now - last, 50);
+      last = now;
+      step(m, dt, script, playerSide);
+      const next = snapshot(m);
+      viewRef.current = next;
+      setView(next);
+      if (m.stage !== "verdict") raf = requestAnimationFrame(loop);
     };
-    const drain = (side: Side) => {
-      const next = { ...hpState, [side]: 0 };
-      setHpBoth(next);
-    };
-    const refill = () => setHpBoth({ creator: 100, challenger: 100 });
-
-    async function runExchange(
-      attacker: Side,
-      dmg: number,
-      opts: { lethal?: boolean; suddenDeath?: boolean } = {},
-    ) {
-      const target: Side = attacker === "creator" ? "challenger" : "creator";
-      const crit = Boolean(opts.lethal) || Math.random() < 0.25;
-      const heavy = crit; // lethal always sets crit
-      /* Data-driven moveset: signature on heavy, critical art on finishers. */
-      const moveSet = getFighterMoveSet(
-        (attacker === "creator" ? creatorFighter : challengerFighter)
-          .fighterClass,
-      );
-      const move: SpecialMove | null = heavy
-        ? opts.lethal || opts.suddenDeath
-          ? moveSet.criticalArt
-          : moveSet.signatureMove
-        : null;
-
-      /* ---- PHASE 1 — DASH IN (attacker slides across the floor, dust) ---- */
-      setFx({
-        id: Date.now(),
-        attacker,
-        target,
-        dmg,
-        crit,
-        phase: "dashIn",
-        hits: move?.hitCount,
-        moveName: move?.name,
-      });
-      setDustFx({ id: Date.now(), side: attacker });
-      playDashSfx();
-      await wait(220);
-      if (aborted()) return;
-
-      /* ---- PHASE 2 — STRIKE (80ms hit-stop, shake, splash, combo++) ---- */
-      playHitSfx();
-      setFx((prev) => (prev ? { ...prev, phase: "strike" } : prev));
-      /* Multi-hit supers add their full hitCount to the combo counter. */
-      comboRef.current += move ? move.hitCount : 1;
-      setCombo({ id: Date.now(), count: comboRef.current, side: attacker });
-      setImpactFx({ id: Date.now() });
-      setHitStop(true);
-      setTimeout(() => setHitStop(false), 80);
-      if (!move || move.screenShake) {
-        setCamShake(true);
-        setTimeout(() => setCamShake(false), heavy ? 420 : 300);
-      }
-
-      /* Cinematic camera: K.O. > COUNTER HIT (3+ combo) > CRITICAL ART. */
-      if (heavy) {
-        setCinematic({
-          id: Date.now(),
-          kind:
-            opts.lethal || opts.suddenDeath
-              ? "ko"
-              : comboRef.current >= 3
-                ? "counter"
-                : "critical",
-          moveName: move?.name,
-        });
-      }
-
-      if (move) {
-        playImpactSfx(impactCueFor(move.soundCue));
-        switch (move.vfxType) {
-          case "void_rift":
-            setSlamFx({ id: Date.now(), target });
-            break;
-          case "laser":
-            setPortalFx({ id: Date.now(), target });
-            break;
-          case "magma":
-            setChogFx({ id: Date.now(), target });
-            break;
-          case "slash":
-            setSamuraiFx({ id: Date.now(), target });
-            break;
-        }
-      } else {
-        playImpactSfx(crit ? "crit" : "slash");
-      }
-
-      if (opts.lethal || opts.suddenDeath) {
-        drain(target);
-      } else {
-        const next = {
-          ...hpState,
-          [target]: Math.max(0, hpState[target] - dmg),
-        };
-        setHpBoth(next);
-      }
-
-      /* ---- PHASE 3 — STAGGER (defender reels back, sparks + red flash) ---- */
-      await wait(160);
-      if (aborted()) return;
-      setFx((prev) => (prev ? { ...prev, phase: "stagger" } : prev));
-      await wait(180);
-      if (aborted()) return;
-
-      /* ---- PHASE 4 — DASH OUT (attacker recovers to spacing) ---- */
-      setFx((prev) => (prev ? { ...prev, phase: "dashOut" } : prev));
-      await wait(100);
-      if (aborted()) return;
-      setFx(null);
-      await wait(80);
-    }
-
-    async function runRound(
-      roundNo: 1 | 2 | 3,
-      roundWinnerSide: Side,
-    ) {
-      if (aborted()) return;
-      refill();
-      comboRef.current = 0;
-      setCombo(null);
-      setRound(roundNo);
-      setStage("roundintro");
-      setBanner(roundNo === 3 ? "ROUND 3 // FINAL ROUND!" : `ROUND ${roundNo} // FIGHT!`);
-      playRoundAnnouncement(roundNo); // exactly once per round per match
-      await wait(1200);
-      if (aborted()) return;
-
-      setBanner(null);
-      setStage("combat");
-
-      const roundLoser: Side =
-        roundWinnerSide === "creator" ? "challenger" : "creator";
-      const exchanges =
-        roundNo === 3
-          ? 10 + Math.floor(Math.random() * 3) // 10–12 intense
-          : 8 + Math.floor(Math.random() * 3); // 8–10
-
-      for (let i = 0; i < exchanges; i += 1) {
-        if (aborted()) return;
-        const isFinal = i === exchanges - 1;
-        /* Round loser pressures first; the round winner lands the K.O. */
-        let attacker: Side =
-          i % 2 === 0 ? roundLoser : roundWinnerSide;
-        if (isFinal) attacker = roundWinnerSide;
-        const dmg = 10 + Math.floor(Math.random() * 9); // 10–18
-        await runExchange(attacker, dmg, { lethal: isFinal });
-        if (aborted()) return;
-      }
-
-      /* K.O. — award the round orb. */
-      setStage("ko");
-      setBanner(`ROUND ${roundNo} K.O.!`);
-      setOrbScore((prev) => ({ ...prev, [roundWinnerSide]: prev[roundWinnerSide] + 1 }));
-      await wait(1600);
-      if (aborted()) return;
-      setBanner(null);
-    }
-
-    async function runFullMatch() {
-      resetArenaAudio();
-      setStage("faceoff");
-      setRound(1);
-      setHpBoth({ creator: 100, challenger: 100 });
-      setOrbScore({ creator: 0, challenger: 0 });
-      setFx(null);
-      setBanner(null);
-      setSlamFx(null);
-      setPortalFx(null);
-      setChogFx(null);
-      setSamuraiFx(null);
-      setImpactFx(null);
-      setDustFx(null);
-      setCombo(null);
-      setCinematic(null);
-      comboRef.current = 0;
-      setTimer(99);
-      /* Fresh manual-control state for every match. */
-      setPlayerStance("neutral");
-      setAssistFlourish(null);
-      setSuperMeter(0);
-      await wait(1000);
-      if (aborted()) return;
-
-      /* ROUND 1 — the final loser takes it (1–0). */
-      await runRound(1, script!.loserSide);
-      if (aborted()) return;
-
-      /* ROUND 2 — the winner mounts the comeback (1–1). */
-      await runRound(2, script!.finalWinnerSide);
-      if (aborted()) return;
-
-      /* ROUND 3 — FINAL ROUND decides the real on-chain winner. */
-      await runRound(3, script!.finalWinnerSide);
-      if (aborted()) return;
-
-      /* Second Wind fires inside Round 3 when the roll hit. */
-      if (script!.revivedSide) {
-        const revived = script!.revivedSide;
-        setStage("down");
-        await wait(800);
-        if (aborted()) return;
-
-        setStage("secondwind");
-        playSecondWindSfx();
-        setHpBoth({
-          creator: revived === "creator" ? 50 : hpState.creator,
-          challenger: revived === "challenger" ? 50 : hpState.challenger,
-        });
-        await wait(2200);
-        if (aborted()) return;
-
-        /* Sudden-death clash — finisher honors revivedWins. */
-        setStage("suddendeath");
-        setBanner("☠️ SUDDEN DEATH!");
-        await wait(900);
-        if (aborted()) return;
-        setBanner(null);
-
-        const finisher: Side = script!.revivedWins ? revived : script!.finalWinnerSide;
-        const opener: Side = finisher === "creator" ? "challenger" : "creator";
-        await runExchange(opener, 10 + Math.floor(Math.random() * 9));
-        if (aborted()) return;
-        await runExchange(finisher, 0, { lethal: true, suddenDeath: true });
-        if (aborted()) return;
-      }
-
-      setStage("verdict");
-    }
-
-    /* Note: only the cleanup resets matchRunningRef — a finally-block reset
-     * could clobber a StrictMode remount's in-flight second run. */
-    void runFullMatch();
+    raf = requestAnimationFrame(loop);
 
     return () => {
-      cancelled = true;
+      cancelAnimationFrame(raf);
+      matchRef.current = null;
       stopArenaAudio();
-      matchRunningRef.current = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOpen, outcome]);
+  }, [isOpen, outcome, script, playerSide]);
 
-  /* Sprite state machine per side — tracks the combo choreography phases. */
-  function sideState(side: Side): SpriteState {
-    if (!script) return "idle";
-    if (stage === "verdict")
-      return side === script.finalWinnerSide ? "victory" : "dead";
-    if (stage === "down")
-      return side === script.loserSide ? "dead" : "idle";
-    if (stage === "secondwind")
-      return side === script.revivedSide ? "secondWind" : "idle";
-    if (!fx) return "idle";
-    if (fx.attacker === side) {
-      if (fx.phase === "dashIn") return "dashIn";
-      if (fx.phase === "dashOut") return "dashOut";
-      return "attack"; // strike + stagger-hold
-    }
-    if (fx.target === side) {
-      if (fx.phase === "dashIn") return "idle";
-      if (fx.phase === "strike") return "hit";
-      return "stagger"; // stagger + dashOut
-    }
-    return "idle";
-  }
-
-  /* Wrapper-level positional choreography for one exchange (single
-   * 640ms keyframe per side: dash-in → impact lunge → knockback → recovery). */
-  const inCombat = stage === "combat" || stage === "suddendeath";
-  function attackerMotion(side: Side): string {
-    if (!fx || !inCombat) return "";
-    return side === "creator" ? "combo-advance-right" : "combo-advance-left";
-  }
-  function targetMotion(side: Side): string {
-    if (!fx || !inCombat) return "";
-    return side === "creator" ? "combo-recoil-left" : "combo-recoil-right";
-  }
-  function motionFor(side: Side): string {
-    if (fx?.attacker === side) return attackerMotion(side);
-    if (fx?.target === side) return targetMotion(side);
-    return "";
-  }
-
-  /* ================= MANUAL ARCADE CONTROLS ================= */
-
-  const strike = (
-    kind: "light" | "heavy" | "special" | "critical",
-  ): void => {
-    if (!isOpen || stage === "verdict") return;
-    if (kind === "special" && superMeter < 40) return;
-    if (kind === "critical" && superMeter < 100) return;
-    if (kind === "special") setSuperMeter((m) => Math.max(0, m - 40));
-    if (kind === "critical") setSuperMeter(0);
-    if (kind === "light") setSuperMeter((m) => Math.min(100, m + 8));
-    if (kind === "heavy") setSuperMeter((m) => Math.min(100, m + 14));
-    const id = Date.now() + Math.random();
-    setAssistFlourish({ id, kind });
-    const t = window.setTimeout(
-      () => {
-        setAssistFlourish((f) => (f?.id === id ? null : f));
-        assistTimersRef.current = assistTimersRef.current.filter(
-          (x) => x !== t,
-        );
-      },
-      kind === "critical" ? 950 : 480,
-    );
-    assistTimersRef.current.push(t);
+  /* ================= MANUAL CONTROL TRIGGERS =================
+   * Shared by the keyboard handlers and the on-screen arcade buttons.
+   * These mutate the ref-based match state directly (no stale closures). */
+  const triggerPlayerMove = (dir: "left" | "right", pressed: boolean) => {
+    const m = matchRef.current;
+    if (!m) return;
+    if (dir === "left") m.heldLeft = pressed;
+    else m.heldRight = pressed;
   };
-  const strikeRef = useRef(strike);
-  strikeRef.current = strike;
+  const triggerPlayerBlock = (pressed: boolean) => {
+    const m = matchRef.current;
+    if (!m) return;
+    m.heldBlock = pressed;
+  };
+  const triggerPlayerAttack = (kind: AttackKind) => {
+    const m = matchRef.current;
+    if (!m || m.stage !== "fight") return;
+    m.attackQueued = kind;
+  };
 
-  /* PC keyboard: hold-to-stance on keydown/keyup, strikes fire on keydown. */
+  const moveRef = useRef(triggerPlayerMove);
+  moveRef.current = triggerPlayerMove;
+  const blockRef = useRef(triggerPlayerBlock);
+  blockRef.current = triggerPlayerBlock;
+  const attackRef = useRef(triggerPlayerAttack);
+  attackRef.current = triggerPlayerAttack;
+
+  /* PC keyboard: hold-to-move/block on keydown/keyup, strikes on keydown. */
   useEffect(() => {
     if (!isOpen) return;
-    const movement = new Map<string, "back" | "dash" | "block">([
-      ["a", "back"],
-      ["arrowleft", "back"],
-      ["d", "dash"],
-      ["arrowright", "dash"],
-      ["s", "block"],
-      ["arrowdown", "block"],
-      ["shift", "block"],
+    const GAME_KEYS = new Set([
+      "KeyA",
+      "KeyD",
+      "KeyS",
+      "KeyJ",
+      "KeyK",
+      "KeyL",
+      "KeyU",
+      "ArrowLeft",
+      "ArrowRight",
+      "ArrowDown",
+      "Space",
+      "Enter",
     ]);
-    const strikes = new Map<string, "light" | "heavy" | "special" | "critical">(
-      [
-        ["j", "light"],
-        ["k", "heavy"],
-        ["l", "special"],
-        ["u", "critical"],
-      ],
-    );
     const onDown = (e: KeyboardEvent) => {
-      const k = e.key.toLowerCase();
-      const stance = movement.get(k);
-      if (stance) {
-        e.preventDefault();
-        setPlayerStance(stance);
-      }
-      const kind = strikes.get(k);
-      if (kind) {
-        e.preventDefault();
-        if (!e.repeat) strikeRef.current(kind);
+      if (GAME_KEYS.has(e.code)) e.preventDefault();
+      switch (e.code) {
+        case "KeyA":
+        case "ArrowLeft":
+          moveRef.current("left", true);
+          break;
+        case "KeyD":
+        case "ArrowRight":
+          moveRef.current("right", true);
+          break;
+        case "KeyS":
+        case "ArrowDown":
+          blockRef.current(true);
+          break;
+        case "KeyJ":
+        case "Space":
+        case "Enter":
+          if (!e.repeat) attackRef.current("light");
+          break;
+        case "KeyK":
+          if (!e.repeat) attackRef.current("heavy");
+          break;
+        case "KeyL":
+          if (!e.repeat) attackRef.current("special");
+          break;
+        case "KeyU":
+          if (!e.repeat) attackRef.current("critical");
+          break;
       }
     };
     const onUp = (e: KeyboardEvent) => {
-      const stance = movement.get(e.key.toLowerCase());
-      if (stance) {
-        setPlayerStance((cur) => (cur === stance ? "neutral" : cur));
+      switch (e.code) {
+        case "KeyA":
+        case "ArrowLeft":
+          moveRef.current("left", false);
+          break;
+        case "KeyD":
+        case "ArrowRight":
+          moveRef.current("right", false);
+          break;
+        case "KeyS":
+        case "ArrowDown":
+          blockRef.current(false);
+          break;
       }
+    };
+    const onBlur = () => {
+      moveRef.current("left", false);
+      moveRef.current("right", false);
+      blockRef.current(false);
     };
     window.addEventListener("keydown", onDown);
     window.addEventListener("keyup", onUp);
+    window.addEventListener("blur", onBlur);
     return () => {
       window.removeEventListener("keydown", onDown);
       window.removeEventListener("keyup", onUp);
+      window.removeEventListener("blur", onBlur);
     };
   }, [isOpen]);
-
-  /* Super meter fills with every exchange; blocking through an incoming
-   * strike grants a perfect-guard bonus. */
-  useEffect(() => {
-    if (!fx) return;
-    setSuperMeter((m) => Math.min(100, m + 6));
-    if (playerStanceRef.current === "block" && fx.target === "creator") {
-      setSuperMeter((m) => Math.min(100, m + 10));
-    }
-  }, [fx]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  /* Clear pending flourish timers on unmount. */
-  useEffect(
-    () => () => {
-      assistTimersRef.current.forEach((t) => window.clearTimeout(t));
-    },
-    [],
-  );
 
   /* Narrow-viewport tracking for proportional sprite scaling. */
   useEffect(() => {
@@ -690,7 +1203,10 @@ export function BattleArenaModal({
   if (!outcome || !script) return null;
 
   const revivedName = script.revivedSide ? nameOf(script.revivedSide) : null;
-  const spriteAnimKey = `${stage}-${fx?.id ?? 0}`;
+  const leftSide: FighterSide = playerSide === "left" ? "challenger" : "creator";
+  const rightSide: FighterSide = leftSide === "challenger" ? "creator" : "challenger";
+  const leftDesc = leftSide === "challenger" ? challengerFighter : creatorFighter;
+  const rightDesc = rightSide === "challenger" ? challengerFighter : creatorFighter;
 
   return (
     <div className="fixed inset-0 z-[95] flex h-[100dvh] items-center justify-center bg-black/90 p-2 backdrop-blur-sm sm:h-[90vh] sm:p-4">
@@ -700,7 +1216,7 @@ export function BattleArenaModal({
         aria-modal="true"
       >
         {/* ================= FINAL VERDICT ================= */}
-        {stage === "verdict" ? (
+        {view.stage === "verdict" ? (
           <VerdictScreen
             outcome={outcome}
             creatorName={creatorFighter.name}
@@ -717,24 +1233,28 @@ export function BattleArenaModal({
           <>
             {/* ============ ARCADE HUD ============ */}
             <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2 border-b border-white/10 bg-black/70 px-3 pb-3 pt-4 sm:gap-4 sm:px-6">
-              <HudSide fighter={creatorFighter} hp={hp.creator} align="left" />
+              <HudSide
+                fighter={leftDesc}
+                hp={view.fighters[leftSide].hp}
+                align="left"
+              />
               <div className="flex flex-col items-center gap-0.5 px-1">
                 <p className="font-mono text-2xl font-black tabular-nums text-amber-300 drop-shadow-[0_0_10px_rgba(251,191,36,0.6)]">
-                  {String(timer).padStart(2, "0")}
+                  {String(view.timer).padStart(2, "0")}
                 </p>
                 <p className="whitespace-nowrap bg-gradient-to-r from-amber-300 to-orange-300 bg-clip-text text-xs font-extrabold text-transparent">
                   {formatMon(outcome.pot)} MON
                 </p>
                 <p className="whitespace-nowrap text-[9px] font-bold uppercase tracking-widest text-red-300/90">
-                  {round === 3 ? "FINAL ROUND" : `ROUND ${round}`} · Orbs{" "}
+                  {view.round === 3 ? "FINAL ROUND" : `ROUND ${view.round}`} · Orbs{" "}
                   <span className="text-amber-300">
-                    {orbScore.creator}–{orbScore.challenger}
+                    {view.orbs[leftSide]}–{view.orbs[rightSide]}
                   </span>
                 </p>
               </div>
               <HudSide
-                fighter={challengerFighter}
-                hp={hp.challenger}
+                fighter={rightDesc}
+                hp={view.fighters[rightSide].hp}
                 align="right"
               />
             </div>
@@ -743,9 +1263,9 @@ export function BattleArenaModal({
             <div
               className={cn(
                 "relative h-[38dvh] min-h-[260px] overflow-hidden sm:h-[470px]",
-                camShake && "arena-cam-shake",
-                hitStop && "arena-hit-stop",
-                cinematic && "arena-cinematic-zoom",
+                view.camShake && "arena-cam-shake",
+                view.hitStop && "arena-hit-stop",
+                view.cinematic && "arena-cinematic-zoom",
               )}
             >
               {/* Arena background art — heavily dimmed + softened */}
@@ -813,36 +1333,24 @@ export function BattleArenaModal({
                   spots + floor light pools so the sprites read cleanly
                   against the darkened arena without any filters on them. */}
               {(["creator", "challenger"] as const).map((side) => {
-                const anchor =
-                  side === "creator"
-                    ? { left: "32%", transform: "-translate-x-1/2" }
-                    : { right: "32%", transform: "translate-x-1/2" };
+                const f = view.fighters[side];
+                const anchor = { left: `${f.x}%` };
                 return (
                   <div key={`light-${side}`} aria-hidden>
                     {/* Backlight spot */}
                     <div
-                      className={cn(
-                        "pointer-events-none absolute bottom-8 h-56 w-56 rounded-full blur-xl",
-                        anchor.transform,
-                      )}
+                      className="pointer-events-none absolute bottom-8 h-56 w-56 -translate-x-1/2 rounded-full blur-xl"
                       style={{
-                        ...(side === "creator"
-                          ? { left: anchor.left }
-                          : { right: anchor.right }),
+                        ...anchor,
                         background:
                           "radial-gradient(circle, rgba(255,255,255,0.10), rgba(139,92,246,0.08) 50%, transparent 72%)",
                       }}
                     />
                     {/* Floor light pool */}
                     <div
-                      className={cn(
-                        "pointer-events-none absolute bottom-3 h-7 w-48 rounded-[50%] blur-md",
-                        anchor.transform,
-                      )}
+                      className="pointer-events-none absolute bottom-3 h-7 w-48 -translate-x-1/2 rounded-[50%] blur-md"
                       style={{
-                        ...(side === "creator"
-                          ? { left: anchor.left }
-                          : { right: anchor.right }),
+                        ...anchor,
                         background:
                           "radial-gradient(ellipse, rgba(196,181,253,0.22), rgba(168,85,247,0.10) 55%, transparent 75%)",
                       }}
@@ -852,231 +1360,128 @@ export function BattleArenaModal({
               })}
 
               {/* Fighters — face-to-face in the center foreground */}
-              <div
-                key={`creator-${fx?.id ?? "idle"}`}
-                className={cn(
-                  "sprite-pixelated absolute bottom-5 left-[32%]",
-                  motionFor("creator"),
-                )}
-              >
-                {/* Manual-control stance lean (back / dash / block) — a
-                    nested transform so it composes with the exchange
-                    choreography on the wrapper above. */}
-                <div
-                  className={cn(
-                    "assist-stance",
-                    playerStance === "back" && "assist-back",
-                    playerStance === "dash" && "assist-dash",
-                    playerStance === "block" && "assist-block",
-                  )}
-                >
-                  <SheetFighter
-                    fighterClass={creatorFighter.fighterClass}
-                    state={sideState("creator")}
-                    facing="right"
-                    size={stageSize(creatorFighter, narrow)}
-                    animKey={spriteAnimKey}
-                  />
-                </div>
-                {fx && fx.target === "creator" && (
-                  <DamageNumber key={fx.id} fx={fx} />
-                )}
-              </div>
-              {/* Guard shimmer — only while the player is holding Block
-                  through an incoming strike. */}
-              {playerStance === "block" &&
-                fx &&
-                fx.target === "creator" &&
-                (fx.phase === "strike" || fx.phase === "stagger") && (
+              {(["creator", "challenger"] as const).map((side) => {
+                const f = view.fighters[side];
+                const isPlayer = side === "challenger";
+                const desc = side === "creator" ? creatorFighter : challengerFighter;
+                const lean = isPlayer
+                  ? f.blockHeld
+                    ? "assist-block"
+                    : f.moveDir !== 0
+                      ? f.toward
+                        ? "assist-dash"
+                        : "assist-back"
+                      : ""
+                  : "";
+                return (
                   <div
-                    className="pointer-events-none absolute bottom-5 left-[32%] z-[25] h-28 w-28 -translate-x-1/2 rounded-full border-2 border-cyan-300/70 bg-cyan-300/10"
-                    style={{ boxShadow: "0 0 20px rgba(34,211,238,0.5)" }}
-                    aria-hidden
-                  />
-                )}
-              <div
-                key={`challenger-${fx?.id ?? "idle"}`}
-                className={cn(
-                  "sprite-pixelated absolute bottom-5 right-[32%]",
-                  motionFor("challenger"),
-                )}
-              >
-                <SheetFighter
-                  fighterClass={challengerFighter.fighterClass}
-                  state={sideState("challenger")}
-                  facing="left"
-                  size={stageSize(challengerFighter, narrow)}
-                  animKey={spriteAnimKey}
-                />
-                {fx && fx.target === "challenger" && (
-                  <DamageNumber key={fx.id} fx={fx} />
-                )}
-              </div>
+                    key={side}
+                    className="sprite-pixelated absolute bottom-5"
+                    style={{ left: `${f.x}%`, transform: "translateX(-50%)" }}
+                  >
+                    <div className={cn("assist-stance", lean)}>
+                      <SheetFighter
+                        fighterClass={desc.fighterClass}
+                        state={f.pose}
+                        facing={f.facing}
+                        size={stageSize(desc, narrow)}
+                        animKey={`${f.pose}-${f.seq}`}
+                      />
+                    </div>
+                    {/* Guard aura — shield shimmer while blocking. */}
+                    {f.blockHeld && (
+                      <div
+                        className="pointer-events-none absolute bottom-0 left-1/2 z-[25] h-28 w-28 -translate-x-1/2 rounded-full border-2 border-cyan-300/70 bg-cyan-300/10"
+                        style={{ boxShadow: "0 0 20px rgba(34,211,238,0.5)" }}
+                        aria-hidden
+                      />
+                    )}
+                    {view.hits
+                      .filter((h) => h.side === side)
+                      .map((h) => (
+                        <DamageNumber key={h.id} hit={h} />
+                      ))}
+                  </div>
+                );
+              })}
 
               {/* Dash-in dust/smoke behind the attacker */}
-              {dustFx && <DustFx key={`dust-${dustFx.id}`} side={dustFx.side} />}
+              {view.dust && <DustFx key={`dust-${view.dust.id}`} x={view.dust.x} />}
 
               {/* Defender stagger: red flash frame + damage sparks */}
-              {fx &&
-                (fx.phase === "strike" || fx.phase === "stagger") && (
-                  <>
-                    <StaggerFlash
-                      key={`flash-${fx.id}`}
-                      side={fx.target}
-                      bright={fx.phase === "strike"}
-                    />
-                    <DamageSparks key={`sparks-${fx.id}`} side={fx.target} />
-                  </>
-                )}
-
-              {/* VOID CLAW SLAM — shockwave ring + jagged lightning + void runes */}
-              {slamFx && (
+              {view.hurtFx && (
                 <>
-                  <div
-                    key={`ring-${slamFx.id}`}
-                    className="void-slam-ring pointer-events-none absolute z-20 h-44 w-44"
-                    style={{
-                      left: slamFx.target === "creator" ? "32%" : "68%",
-                      top: "58%",
-                    }}
-                    aria-hidden
+                  <StaggerFlash
+                    key={`flash-${view.hurtFx.id}`}
+                    x={view.hurtFx.x}
+                    bright={view.hurtFx.bright}
                   />
-                  <VoidLightning key={`bolt-${slamFx.id}`} side={slamFx.target} />
-                  {/* Floating void runes */}
-                  {["ᚠ", "ᚢ", "ᚦ", "ᚨ"].map((glyph, i) => (
-                    <span
-                      key={`${slamFx.id}-${glyph}`}
-                      className="rune-float pointer-events-none absolute z-[26] text-xl font-bold text-purple-300"
-                      style={{
-                        left: `calc(${slamFx.target === "creator" ? "32%" : "68%"} + ${(i - 1.5) * 30}px)`,
-                        top: "62%",
-                        animationDelay: `${i * 120}ms`,
-                        textShadow: "0 0 10px rgba(168,85,247,0.9)",
-                      }}
-                      aria-hidden
-                    >
-                      {glyph}
-                    </span>
-                  ))}
+                  <DamageSparks
+                    key={`sparks-${view.hurtFx.id}`}
+                    x={view.hurtFx.x}
+                  />
                 </>
               )}
 
-              {/* Keone Mage — holographic portal + magenta lightning burst */}
-              {portalFx && (
-                <KeonePortalFx key={`portal-${portalFx.id}`} side={portalFx.target} />
+              {/* Signature / Critical Art move FX (positioned at the target) */}
+              {view.moveFx?.vfx === "void_rift" && (
+                <SlamFx key={`slam-${view.moveFx.id}`} x={view.moveFx.x} />
               )}
-
-              {/* Warlord Chogzilla — ground-pound + magma eruption */}
-              {chogFx && (
-                <ChogzillaSlamFx key={`chog-${chogFx.id}`} side={chogFx.target} />
+              {view.moveFx?.vfx === "laser" && (
+                <KeonePortalFx key={`portal-${view.moveFx.id}`} x={view.moveFx.x} />
               )}
-
-              {/* Chog Samurai — multi-slash afterimages + crescent plasma beam */}
-              {samuraiFx && (
-                <SamuraiSlashFx key={`sam-${samuraiFx.id}`} side={samuraiFx.target} />
+              {view.moveFx?.vfx === "magma" && (
+                <ChogzillaSlamFx key={`chog-${view.moveFx.id}`} x={view.moveFx.x} />
+              )}
+              {view.moveFx?.vfx === "slash" && (
+                <SamuraiSlashFx key={`sam-${view.moveFx.id}`} x={view.moveFx.x} />
               )}
 
               {/* Cyberpunk hit-marker on every clean strike */}
-              {impactFx && <NeonHitMarker key={`burst-${impactFx.id}`} />}
+              {view.impact && (
+                <NeonHitMarker key={`burst-${view.impact.id}`} x={view.impact.x} />
+              )}
+
+              {/* Guard flash on a blocked hit */}
+              {view.guard && (
+                <div
+                  key={`guard-${view.guard.id}`}
+                  className="pointer-events-none absolute bottom-16 z-[28] h-24 w-24 rounded-full border-4 border-cyan-300/90"
+                  style={{
+                    left: `${view.guard.x}%`,
+                    transform: "translateX(-50%)",
+                    boxShadow: "0 0 28px rgba(34,211,238,0.95)",
+                  }}
+                  aria-hidden
+                />
+              )}
 
               {/* Floating combo hit counter */}
-              {combo && (
+              {view.combo && (
                 <div
-                  key={`combo-${combo.id}`}
+                  key={`combo-${view.combo.id}`}
                   className="combo-pop pointer-events-none absolute left-1/2 top-2 z-[31] -translate-x-1/2 text-center"
                   aria-live="polite"
                 >
                   <p
                     className={cn(
                       "combo-count-text whitespace-nowrap font-mono font-black italic tracking-[0.25em]",
-                      combo.count >= 10
+                      view.combo.count >= 10
                         ? "text-4xl text-amber-300"
                         : "text-2xl text-orange-300",
                     )}
                   >
-                    {combo.count >= 10
-                      ? `${combo.count} HITS!`
-                      : `${combo.count} Hit${combo.count > 1 ? "s" : ""}...`}
+                    {view.combo.count >= 10
+                      ? `${view.combo.count} HITS!`
+                      : `${view.combo.count} Hit${view.combo.count > 1 ? "s" : ""}...`}
                   </p>
                 </div>
               )}
 
-              {/* Player strike flourishes — instant visual feedback for the
-                  manual Light/Heavy/Special/Critical Art buttons. */}
-              {assistFlourish && (
-                <div
-                  key={`assist-${assistFlourish.id}`}
-                  className="pointer-events-none absolute inset-0 z-[31]"
-                  aria-hidden
-                >
-                  {(assistFlourish.kind === "light" ||
-                    assistFlourish.kind === "heavy") && (
-                    <div className="absolute bottom-24 right-[30%]">
-                      <span
-                        className={cn(
-                          "hit-marker-slash-a absolute h-1 w-16 rounded-full",
-                          assistFlourish.kind === "heavy" && "scale-125",
-                        )}
-                        style={{
-                          background:
-                            "linear-gradient(90deg, transparent, #fff 50%, transparent)",
-                          boxShadow: "0 0 12px rgba(251,191,36,0.9)",
-                        }}
-                      />
-                      <span
-                        className={cn(
-                          "hit-marker-slash-b absolute h-1 w-16 rounded-full",
-                          assistFlourish.kind === "heavy" && "scale-125",
-                        )}
-                        style={{
-                          background:
-                            "linear-gradient(90deg, transparent, #fde68a 50%, transparent)",
-                          boxShadow: "0 0 12px rgba(251,191,36,0.9)",
-                        }}
-                      />
-                      <span
-                        className="hit-marker-core absolute h-6 w-6 rounded-full bg-amber-200"
-                        style={{
-                          boxShadow: "0 0 24px rgba(251,191,36,0.95)",
-                        }}
-                      />
-                      <span className="absolute -top-7 left-1/2 -translate-x-1/2 whitespace-nowrap text-[10px] font-black uppercase tracking-widest text-amber-200 drop-shadow-[0_0_8px_rgba(251,191,36,0.9)]">
-                        {assistFlourish.kind === "heavy" ? "HEAVY!" : "STRIKE!"}
-                      </span>
-                    </div>
-                  )}
-                  {assistFlourish.kind === "special" && (
-                    <>
-                      <div className="absolute inset-0 bg-fuchsia-500/10" />
-                      <div className="absolute inset-0 flex items-center justify-center">
-                        <p className="animate-round-banner whitespace-nowrap bg-gradient-to-r from-purple-300 via-white to-fuchsia-300 bg-clip-text text-3xl font-black italic tracking-[0.18em] text-transparent drop-shadow-[0_0_24px_rgba(168,85,247,0.9)] sm:text-4xl">
-                          {getFighterMoveSet(creatorFighter.fighterClass)
-                            .signatureMove.name
-                            .toUpperCase()}
-                          !
-                        </p>
-                      </div>
-                    </>
-                  )}
-                  {assistFlourish.kind === "critical" && (
-                    <div className="absolute inset-0 flex flex-col items-center justify-center gap-1">
-                      <div className="cinematic-flash absolute inset-0" />
-                      <p className="cinematic-text whitespace-nowrap text-5xl bg-gradient-to-r from-red-400 via-amber-300 to-red-500 bg-clip-text font-black italic tracking-[0.12em] text-transparent drop-shadow-[0_0_24px_rgba(239,68,68,0.9)] sm:text-6xl">
-                        CRITICAL ART
-                      </p>
-                      <p className="cinematic-move-name whitespace-nowrap text-xs font-black uppercase tracking-[0.35em] text-white/90 drop-shadow-[0_0_12px_rgba(255,255,255,0.6)] sm:text-sm">
-                        {getFighterMoveSet(creatorFighter.fighterClass)
-                          .criticalArt.name}
-                      </p>
-                    </div>
-                  )}
-                </div>
-              )}
-
               {/* Cinematic camera: vignette + color flash + big arcade text */}
-              {cinematic && (
+              {view.cinematic && (
                 <div
-                  key={`cine-${cinematic.id}`}
+                  key={`cine-${view.cinematic.id}`}
                   className="pointer-events-none absolute inset-0 z-[32]"
                   aria-live="assertive"
                 >
@@ -1095,37 +1500,31 @@ export function BattleArenaModal({
                     <p
                       className={cn(
                         "cinematic-text whitespace-nowrap font-black italic tracking-[0.12em]",
-                        cinematic.kind === "ko" &&
+                        view.cinematic.kind === "ko" &&
                           "text-6xl text-amber-300 drop-shadow-[0_0_30px_rgba(251,191,36,0.95)] sm:text-7xl",
-                        cinematic.kind === "critical" &&
+                        view.cinematic.kind === "critical" &&
                           "text-5xl bg-gradient-to-r from-red-400 via-amber-300 to-red-500 bg-clip-text text-transparent drop-shadow-[0_0_24px_rgba(239,68,68,0.9)] sm:text-6xl",
-                        cinematic.kind === "counter" &&
-                          "text-5xl bg-gradient-to-r from-cyan-300 via-white to-fuchsia-400 bg-clip-text text-transparent drop-shadow-[0_0_24px_rgba(34,211,238,0.9)] sm:text-6xl",
                       )}
                     >
-                      {cinematic.kind === "ko"
-                        ? "K.O."
-                        : cinematic.kind === "critical"
-                          ? "CRITICAL ART"
-                          : "COUNTER HIT"}
+                      {view.cinematic.kind === "ko" ? "K.O." : "CRITICAL ART"}
                     </p>
-                    {cinematic.moveName && (
+                    {view.cinematic.moveName && (
                       <p className="cinematic-move-name whitespace-nowrap text-xs font-black uppercase tracking-[0.35em] text-white/90 drop-shadow-[0_0_12px_rgba(255,255,255,0.6)] sm:text-sm">
-                        {cinematic.moveName}
+                        {view.cinematic.moveName}
                       </p>
                     )}
                   </div>
                 </div>
               )}
 
-              {/* Banner overlays: ROUND N // FIGHT!, K.O., SUDDEN DEATH */}
-              {banner && (
+              {/* Banner overlays: ROUND N // FIGHT!, K.O., sync events */}
+              {view.banner && (
                 <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center">
                   <div className="animate-round-banner text-center">
                     <p className="whitespace-nowrap bg-gradient-to-r from-amber-200 via-yellow-100 to-amber-200 bg-clip-text text-4xl font-black tracking-[0.15em] text-transparent drop-shadow-[0_0_26px_rgba(251,191,36,0.85)] sm:text-5xl">
-                      {banner}
+                      {view.banner}
                     </p>
-                    {stage === "roundintro" && (
+                    {view.stage === "roundintro" && (
                       <p className="mt-1 text-lg font-black uppercase tracking-[0.5em] text-red-400 drop-shadow-[0_0_14px_rgba(239,68,68,0.8)]">
                         FIGHT!
                       </p>
@@ -1135,22 +1534,21 @@ export function BattleArenaModal({
               )}
 
               {/* Face-off intro */}
-              {stage === "faceoff" && (
+              {view.stage === "faceoff" && (
                 <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
                   <div className="flex flex-col items-center gap-1">
                     <p className="animate-pop-in whitespace-nowrap bg-gradient-to-r from-red-300 via-amber-200 to-orange-300 bg-clip-text text-4xl font-black tracking-widest text-transparent drop-shadow-[0_0_22px_rgba(239,68,68,0.9)] sm:text-5xl">
                       ⚔️ READY?
                     </p>
                     <p className="text-[10px] font-bold uppercase tracking-[0.35em] text-zinc-400">
-                      {creatorFighter.name} vs {challengerFighter.name} · Best
-                      of 3
+                      {nameOf(leftSide)} vs {nameOf(rightSide)} · Best of 3
                     </p>
                   </div>
                 </div>
               )}
 
-              {/* Second Wind flash */}
-              {stage === "secondwind" && (
+              {/* Second Wind / AI Overdrive flash */}
+              {view.shieldFx && (
                 <>
                   <div
                     className="animate-second-wind-flash pointer-events-none absolute inset-0 z-20 bg-gradient-to-br from-purple-600/70 via-transparent to-amber-400/60"
@@ -1158,12 +1556,18 @@ export function BattleArenaModal({
                   />
                   <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center">
                     <div className="animate-pop-in rounded-2xl border-2 border-purple-400/60 bg-black/85 px-8 py-6 text-center shadow-[0_0_50px_rgba(168,85,247,0.6)]">
-                      <p className="text-5xl">🛡️</p>
+                      <p className="text-5xl">
+                        {view.shieldFx.kind === "secondwind" ? "🛡️" : "⚡"}
+                      </p>
                       <h3 className="mt-3 bg-gradient-to-r from-purple-200 via-amber-200 to-purple-200 bg-clip-text text-xl font-extrabold tracking-wide text-transparent sm:text-2xl">
-                        SECOND WIND TRIGGERED!
+                        {view.shieldFx.kind === "secondwind"
+                          ? "MONAD SECOND WIND"
+                          : "AI BOSS OVERDRIVE"}
                       </h3>
                       <p className="mt-1.5 text-xs font-bold uppercase tracking-widest text-purple-300">
-                        20% CHOG NFT PERK
+                        {view.shieldFx.kind === "secondwind"
+                          ? "ADRENALINE SHIELD · 20% CHOG NFT PERK"
+                          : "CRITICAL ART ENGAGED"}
                       </p>
                     </div>
                   </div>
@@ -1175,127 +1579,126 @@ export function BattleArenaModal({
                 PC: A/S/D + J/K/L/U keys (badges shown on sm+).
                 Mobile: touch-action:none buttons, zero tap delay via
                 pointerdown — holds for movement/guard, instant for strikes. */}
-              <div
-                className="arcade-ctl border-t border-white/10 bg-zinc-950/95"
-                style={{ WebkitUserSelect: "none", userSelect: "none" }}
-              >
-                {/* Super meter */}
-                <div className="flex items-center gap-2 px-3 pt-2 sm:px-6">
-                  <span className="text-[9px] font-black uppercase tracking-widest text-zinc-500">
-                    Super
-                  </span>
-                  <div className="h-2 flex-1 overflow-hidden rounded-full bg-white/10">
-                    <div
-                      className="h-full rounded-full bg-gradient-to-r from-purple-500 via-fuchsia-400 to-amber-300 transition-[width] duration-200"
-                      style={{ width: `${superMeter}%` }}
-                    />
-                  </div>
-                  <span className="w-10 text-right font-mono text-[10px] text-zinc-400">
-                    {Math.round(superMeter)}%
-                  </span>
+            <div
+              className="arcade-ctl border-t border-white/10 bg-zinc-950/95"
+              style={{ WebkitUserSelect: "none", userSelect: "none" }}
+            >
+              {/* Super meter */}
+              <div className="flex items-center gap-2 px-3 pt-2 sm:px-6">
+                <span className="text-[9px] font-black uppercase tracking-widest text-zinc-500">
+                  Super
+                </span>
+                <div className="h-2 flex-1 overflow-hidden rounded-full bg-white/10">
+                  <div
+                    className="h-full rounded-full bg-gradient-to-r from-purple-500 via-fuchsia-400 to-amber-300 transition-[width] duration-200"
+                    style={{ width: `${view.fighters.challenger.meter}%` }}
+                  />
+                </div>
+                <span className="w-10 text-right font-mono text-[10px] text-zinc-400">
+                  {view.fighters.challenger.meter}%
+                </span>
+              </div>
+
+              <div className="flex flex-row items-center justify-between gap-2 px-3 py-2 sm:px-6 sm:py-4">
+                {/* LEFT THUMB — movement & guard */}
+                <div className="flex items-center gap-1.5 sm:gap-2">
+                  {(
+                    [
+                      { dir: "left" as const, label: "Left", badge: "A", active: view.heldLeft },
+                      { dir: "block" as const, label: "Block", badge: "S", active: view.heldBlock },
+                      { dir: "right" as const, label: "Right", badge: "D", active: view.heldRight },
+                    ]
+                  ).map((b) => (
+                    <button
+                      key={b.dir}
+                      type="button"
+                      aria-label={`${b.label} (${b.badge})`}
+                      className={cn(
+                        "arcade-ctl-btn flex min-w-[62px] flex-col items-center justify-center rounded-xl border px-2.5 py-3 text-[11px] font-black uppercase tracking-wider transition-all active:scale-95 sm:min-w-[78px] sm:px-4",
+                        b.active
+                          ? "border-amber-400/80 bg-amber-500/25 text-amber-100 shadow-[0_0_16px_rgba(251,191,36,0.35)]"
+                          : "border-white/15 bg-zinc-900/80 text-zinc-300",
+                      )}
+                      onPointerDown={(e) => {
+                        e.preventDefault();
+                        e.currentTarget.setPointerCapture(e.pointerId);
+                        if (b.dir === "block") triggerPlayerBlock(true);
+                        else triggerPlayerMove(b.dir, true);
+                      }}
+                      onPointerUp={() => {
+                        if (b.dir === "block") triggerPlayerBlock(false);
+                        else triggerPlayerMove(b.dir, false);
+                      }}
+                      onPointerCancel={() => {
+                        if (b.dir === "block") triggerPlayerBlock(false);
+                        else triggerPlayerMove(b.dir, false);
+                      }}
+                      onPointerLeave={() => {
+                        if (b.dir === "block") triggerPlayerBlock(false);
+                        else triggerPlayerMove(b.dir, false);
+                      }}
+                    >
+                      <span>{b.label}</span>
+                      <span className="mt-0.5 hidden rounded bg-white/10 px-1.5 py-0.5 text-[9px] font-bold tracking-normal text-zinc-400 sm:inline">
+                        {b.badge}
+                      </span>
+                    </button>
+                  ))}
                 </div>
 
-                <div className="flex flex-row items-center justify-between gap-2 px-3 py-2 sm:px-6 sm:py-4">
-                  {/* LEFT THUMB — movement & guard */}
-                  <div className="flex items-center gap-1.5 sm:gap-2">
-                    {(
-                      [
-                        { stance: "back", label: "Back", badge: "A" },
-                        { stance: "block", label: "Block", badge: "S" },
-                        { stance: "dash", label: "Dash", badge: "D" },
-                      ] as const
-                    ).map((b) => (
+                {/* RIGHT THUMB — attacks & specials
+                    2×2 grid on mobile, horizontal row on desktop */}
+                <div className="grid grid-cols-2 gap-1.5 sm:flex sm:gap-2">
+                  {(
+                    [
+                      { kind: "light" as const, label: "Light", badge: "J" },
+                      { kind: "heavy" as const, label: "Heavy", badge: "K" },
+                      { kind: "special" as const, label: "Special", badge: "L" },
+                      { kind: "critical" as const, label: "Crit Art", badge: "U" },
+                    ]
+                  ).map((b) => {
+                    const meter = view.fighters.challenger.meter;
+                    const ready =
+                      b.kind === "special"
+                        ? meter >= 40
+                        : b.kind === "critical"
+                          ? meter >= 100
+                          : true;
+                    return (
                       <button
-                        key={b.stance}
+                        key={b.kind}
                         type="button"
                         aria-label={`${b.label} (${b.badge})`}
                         className={cn(
                           "arcade-ctl-btn flex min-w-[62px] flex-col items-center justify-center rounded-xl border px-2.5 py-3 text-[11px] font-black uppercase tracking-wider transition-all active:scale-95 sm:min-w-[78px] sm:px-4",
-                          playerStance === b.stance
-                            ? "border-amber-400/80 bg-amber-500/25 text-amber-100 shadow-[0_0_16px_rgba(251,191,36,0.35)]"
-                            : "border-white/15 bg-zinc-900/80 text-zinc-300",
+                          b.kind === "special" &&
+                            ready &&
+                            "special-ready text-fuchsia-100",
+                          b.kind === "critical" &&
+                            ready &&
+                            "super-ready text-amber-100",
+                          b.kind === "light" &&
+                            "border-white/15 bg-zinc-900/80 text-zinc-200",
+                          b.kind === "heavy" &&
+                            "border-white/15 bg-zinc-900/80 text-zinc-200",
+                          !ready &&
+                            "border-white/10 bg-zinc-900/40 text-zinc-600",
                         )}
                         onPointerDown={(e) => {
                           e.preventDefault();
-                          e.currentTarget.setPointerCapture(e.pointerId);
-                          setPlayerStance(b.stance);
+                          triggerPlayerAttack(b.kind);
                         }}
-                        onPointerUp={() =>
-                          setPlayerStance((cur) =>
-                            cur === b.stance ? "neutral" : cur,
-                          )
-                        }
-                        onPointerCancel={() =>
-                          setPlayerStance((cur) =>
-                            cur === b.stance ? "neutral" : cur,
-                          )
-                        }
-                        onPointerLeave={() =>
-                          setPlayerStance((cur) =>
-                            cur === b.stance ? "neutral" : cur,
-                          )
-                        }
                       >
                         <span>{b.label}</span>
                         <span className="mt-0.5 hidden rounded bg-white/10 px-1.5 py-0.5 text-[9px] font-bold tracking-normal text-zinc-400 sm:inline">
                           {b.badge}
                         </span>
                       </button>
-                    ))}
-                  </div>
-
-                  {/* RIGHT THUMB — attacks & specials
-                      2×2 grid on mobile, horizontal row on desktop */}
-                  <div className="grid grid-cols-2 gap-1.5 sm:flex sm:gap-2">
-                    {(
-                      [
-                        { kind: "light", label: "Light", badge: "J" },
-                        { kind: "heavy", label: "Heavy", badge: "K" },
-                        { kind: "special", label: "Special", badge: "L" },
-                        { kind: "critical", label: "Crit Art", badge: "U" },
-                      ] as const
-                    ).map((b) => {
-                      const ready =
-                        b.kind === "special"
-                          ? superMeter >= 40
-                          : b.kind === "critical"
-                            ? superMeter >= 100
-                            : true;
-                      return (
-                        <button
-                          key={b.kind}
-                          type="button"
-                          aria-label={`${b.label} (${b.badge})`}
-                          className={cn(
-                            "arcade-ctl-btn flex min-w-[62px] flex-col items-center justify-center rounded-xl border px-2.5 py-3 text-[11px] font-black uppercase tracking-wider transition-all active:scale-95 sm:min-w-[78px] sm:px-4",
-                            b.kind === "special" &&
-                              ready &&
-                              "special-ready text-fuchsia-100",
-                            b.kind === "critical" &&
-                              ready &&
-                              "super-ready text-amber-100",
-                            b.kind === "light" &&
-                              "border-white/15 bg-zinc-900/80 text-zinc-200",
-                            b.kind === "heavy" &&
-                              "border-white/15 bg-zinc-900/80 text-zinc-200",
-                            !ready &&
-                              "border-white/10 bg-zinc-900/40 text-zinc-600",
-                          )}
-                          onPointerDown={(e) => {
-                            e.preventDefault();
-                            strikeRef.current(b.kind);
-                          }}
-                        >
-                          <span>{b.label}</span>
-                          <span className="mt-0.5 hidden rounded bg-white/10 px-1.5 py-0.5 text-[9px] font-bold tracking-normal text-zinc-400 sm:inline">
-                            {b.badge}
-                          </span>
-                        </button>
-                      );
-                    })}
-                  </div>
+                    );
+                  })}
                 </div>
               </div>
+            </div>
           </>
         )}
       </div>
@@ -1422,26 +1825,28 @@ function HudSide({
   );
 }
 
-function DamageNumber({ fx }: { fx: Fx }) {
+function DamageNumber({ hit }: { hit: HitRT }) {
   return (
     <p
       className={cn(
         "animate-damage-arc pointer-events-none absolute -top-3 left-1/2 z-10 whitespace-nowrap font-mono text-base font-black italic tracking-wider",
-        fx.crit
+        hit.crit
           ? "text-amber-300 drop-shadow-[0_0_10px_rgba(251,191,36,0.9)]"
           : "text-red-300 drop-shadow-[0_0_8px_rgba(239,68,68,0.9)]",
       )}
     >
-      -{fx.dmg} HP
-      {fx.hits && fx.hits > 1 ? ` ×${fx.hits}` : ""}
-      {fx.crit ? (
+      -{hit.dmg} HP
+      {hit.multi && hit.multi > 1 ? ` ×${hit.multi}` : ""}
+      {hit.crit ? (
         <span className="ml-1 text-[11px] font-bold tracking-[0.2em] text-amber-200">
           //CRIT
         </span>
-      ) : ""}
-      {fx.moveName && (
+      ) : (
+        ""
+      )}
+      {hit.name && (
         <span className="mt-0.5 block text-center text-[10px] font-bold uppercase tracking-[0.25em] text-fuchsia-200 drop-shadow-[0_0_8px_rgba(232,121,249,0.85)]">
-          {fx.moveName}
+          {hit.name}
         </span>
       )}
     </p>
@@ -1451,11 +1856,13 @@ function DamageNumber({ fx }: { fx: Fx }) {
 /**
  * Cyberpunk hit-marker: neon slash cross (cyan/fuchsia), violet/gold
  * spark flyout, and a sleek white core flash — no cartoon explosions.
+ * `x` is the stage-% position of the impact.
  */
-function NeonHitMarker() {
+function NeonHitMarker({ x }: { x: number }) {
   return (
     <div
-      className="pointer-events-none absolute left-1/2 top-[52%] z-[27]"
+      className="pointer-events-none absolute top-[52%] z-[27]"
+      style={{ left: `${x}%` }}
       aria-hidden
     >
       {/* Sharp neon slash lines */}
@@ -1494,14 +1901,11 @@ function NeonHitMarker() {
 }
 
 /** Dash-in dust/smoke puffs kicked up behind the attacker. */
-function DustFx({ side }: { side: Side }) {
+function DustFx({ x }: { x: number }) {
   return (
     <div
       className="pointer-events-none absolute bottom-4 z-[18]"
-      style={{
-        left: side === "creator" ? "26%" : "auto",
-        right: side === "creator" ? "auto" : "26%",
-      }}
+      style={{ left: `${x}%` }}
       aria-hidden
     >
       {[0, 1, 2, 3].map((i) => (
@@ -1519,19 +1923,12 @@ function DustFx({ side }: { side: Side }) {
 }
 
 /** Soft radial red/white flash over the staggered defender (blurred — no hard box). */
-function StaggerFlash({
-  side,
-  bright,
-}: {
-  side: Side;
-  /** true = strike phase (white-hot flash); false = stagger phase (red). */
-  bright: boolean;
-}) {
+function StaggerFlash({ x, bright }: { x: number; bright: boolean }) {
   return (
     <div
       className="stagger-flash pointer-events-none absolute bottom-12 z-[26] h-40 w-40 rounded-full blur-xl"
       style={{
-        left: side === "creator" ? "24%" : "60%",
+        left: `${x}%`,
         background: bright
           ? "radial-gradient(circle, rgba(255,255,255,0.55) 0%, rgba(255,255,255,0.2) 45%, transparent 70%)"
           : "radial-gradient(circle, rgba(239,68,68,0.55) 0%, rgba(239,68,68,0.22) 45%, transparent 70%)",
@@ -1542,8 +1939,7 @@ function StaggerFlash({
 }
 
 /** Damage sparks radiating off the staggered defender. */
-function DamageSparks({ side }: { side: Side }) {
-  const center = side === "creator" ? "32%" : "68%";
+function DamageSparks({ x }: { x: number }) {
   return (
     <div className="pointer-events-none absolute inset-0 z-[27]" aria-hidden>
       {Array.from({ length: 6 }).map((_, i) => (
@@ -1551,7 +1947,7 @@ function DamageSparks({ side }: { side: Side }) {
           key={i}
           className="damage-spark absolute h-1.5 w-1.5 rounded-full"
           style={{
-            left: `calc(${center} + ${((i % 3) - 1) * 28}px)`,
+            left: `calc(${x}% + ${((i % 3) - 1) * 28}px)`,
             top: `calc(46% + ${(i % 2 ? -1 : 1) * 16}px)`,
             background: i % 2 ? "#a78bfa" : "#fbbf24",
             boxShadow: `0 0 8px ${i % 2 ? "rgba(167,139,250,0.95)" : "rgba(251,191,36,0.95)"}`,
@@ -1564,15 +1960,14 @@ function DamageSparks({ side }: { side: Side }) {
 }
 
 /** Warlord Chogzilla — ground-pound shockwave, blade trail, magma particles. */
-function ChogzillaSlamFx({ side }: { side: Side }) {
-  const center = side === "creator" ? "32%" : "68%";
+function ChogzillaSlamFx({ x }: { x: number }) {
   return (
     <div className="pointer-events-none absolute inset-0 z-[25]" aria-hidden>
       {/* Ground-pound shockwave ring */}
       <div
         className="ground-pound-ring absolute h-44 w-44 rounded-full"
         style={{
-          left: center,
+          left: `${x}%`,
           top: "58%",
           background:
             "radial-gradient(circle, transparent 42%, rgba(251,146,60,0.95) 50%, rgba(239,68,68,0.75) 58%, transparent 70%)",
@@ -1583,7 +1978,7 @@ function ChogzillaSlamFx({ side }: { side: Side }) {
       <div
         className="blade-trail absolute h-14 w-56"
         style={{
-          left: center,
+          left: `calc(${x}% - 112px)`,
           top: "40%",
           background:
             "linear-gradient(105deg, transparent 18%, rgba(251,146,60,0.9) 45%, rgba(239,68,68,0.95) 55%, transparent 82%)",
@@ -1597,7 +1992,7 @@ function ChogzillaSlamFx({ side }: { side: Side }) {
           key={i}
           className="magma-particle absolute h-2 w-2 rounded-full"
           style={{
-            left: `calc(${center} + ${((i % 4) - 1.5) * 26}px)`,
+            left: `calc(${x}% + ${((i % 4) - 1.5) * 26}px)`,
             bottom: "20%",
             background: i % 2 ? "#f97316" : "#ef4444",
             boxShadow: "0 0 8px rgba(249,115,22,0.95)",
@@ -1610,8 +2005,7 @@ function ChogzillaSlamFx({ side }: { side: Side }) {
 }
 
 /** Chog Samurai — multi-slash streaks, crescent plasma beam, sparks. */
-function SamuraiSlashFx({ side }: { side: Side }) {
-  const center = side === "creator" ? "32%" : "68%";
+function SamuraiSlashFx({ x }: { x: number }) {
   return (
     <div className="pointer-events-none absolute inset-0 z-[25]" aria-hidden>
       {/* High-speed multi-slash afterimage streaks */}
@@ -1620,7 +2014,7 @@ function SamuraiSlashFx({ side }: { side: Side }) {
           key={i}
           className="slash-streak absolute h-1.5 w-44"
           style={{
-            left: center,
+            left: `calc(${x}% - 88px)`,
             top: `calc(46% + ${i * 14}px)`,
             background:
               "linear-gradient(90deg, transparent, #e9d5ff 40%, #a855f7 62%, transparent)",
@@ -1633,7 +2027,7 @@ function SamuraiSlashFx({ side }: { side: Side }) {
       {/* Crescent purple plasma beam */}
       <svg
         className="crescent-beam absolute h-40 w-64"
-        style={{ left: center, top: "36%", transform: "translateX(-50%)" }}
+        style={{ left: `${x}%`, top: "36%" }}
         viewBox="0 0 200 120"
         aria-hidden
       >
@@ -1656,7 +2050,7 @@ function SamuraiSlashFx({ side }: { side: Side }) {
           key={i}
           className="spark-particle absolute h-1.5 w-1.5 rounded-full bg-yellow-200"
           style={{
-            left: `calc(${center} + ${((i % 3) - 1) * 34}px)`,
+            left: `calc(${x}% + ${((i % 3) - 1) * 34}px)`,
             top: `calc(50% + ${(i % 2 ? -1 : 1) * 18}px)`,
             boxShadow: "0 0 8px #fde047",
             animationDelay: `${i * 50}ms`,
@@ -1668,13 +2062,11 @@ function SamuraiSlashFx({ side }: { side: Side }) {
 }
 
 /** Jagged violet + gold lightning bolts cracking across the slam target. */
-function VoidLightning({ side }: { side: Side }) {
+function VoidLightning({ x }: { x: number }) {
   return (
     <div
-      className={cn(
-        "void-lightning pointer-events-none absolute bottom-4 z-30 h-48 w-40",
-        side === "creator" ? "left-[12%]" : "right-[12%]",
-      )}
+      className="void-lightning pointer-events-none absolute bottom-4 z-30 h-48 w-40"
+      style={{ left: `calc(${x}% - 80px)` }}
       aria-hidden
     >
       <svg
@@ -1711,16 +2103,45 @@ function VoidLightning({ side }: { side: Side }) {
   );
 }
 
+/** VOID CLAW SLAM — shockwave ring + jagged lightning + void runes. */
+function SlamFx({ x }: { x: number }) {
+  return (
+    <>
+      <div
+        className="void-slam-ring pointer-events-none absolute z-20 h-44 w-44"
+        style={{ left: `${x}%`, top: "58%" }}
+        aria-hidden
+      />
+      <VoidLightning x={x} />
+      {/* Floating void runes */}
+      {["ᚠ", "ᚢ", "ᚦ", "ᚨ"].map((glyph, i) => (
+        <span
+          key={glyph}
+          className="rune-float pointer-events-none absolute z-[26] text-xl font-bold text-purple-300"
+          style={{
+            left: `calc(${x}% + ${(i - 1.5) * 30}px)`,
+            top: "62%",
+            animationDelay: `${i * 120}ms`,
+            textShadow: "0 0 10px rgba(168,85,247,0.9)",
+          }}
+          aria-hidden
+        >
+          {glyph}
+        </span>
+      ))}
+    </>
+  );
+}
+
 /** Keone Mage signature — holographic purple/magenta portal + lightning burst. */
-function KeonePortalFx({ side }: { side: Side }) {
-  const center = side === "creator" ? "32%" : "68%";
+function KeonePortalFx({ x }: { x: number }) {
   return (
     <div className="pointer-events-none absolute inset-0 z-[25]" aria-hidden>
       {/* Holographic portal ring */}
       <div
         className="keone-portal-bloom absolute h-40 w-40 rounded-full"
         style={{
-          left: center,
+          left: `${x}%`,
           top: "56%",
           background:
             "radial-gradient(circle, rgba(232,121,249,0.95) 0%, rgba(168,85,247,0.6) 42%, rgba(34,211,238,0.35) 62%, transparent 78%)",
@@ -1733,7 +2154,7 @@ function KeonePortalFx({ side }: { side: Side }) {
       <div
         className="keone-burst absolute h-56 w-56 rounded-full"
         style={{
-          left: center,
+          left: `${x}%`,
           top: "56%",
           background:
             "radial-gradient(circle, rgba(255,255,255,0.9) 0%, rgba(232,121,249,0.55) 40%, transparent 72%)",
@@ -1742,7 +2163,7 @@ function KeonePortalFx({ side }: { side: Side }) {
       {/* Magenta/cyan lightning bolts across the target */}
       <svg
         className="void-lightning absolute bottom-4 h-48 w-40"
-        style={{ left: side === "creator" ? "24%" : "auto", right: side === "creator" ? "auto" : "24%" }}
+        style={{ left: `calc(${x}% - 80px)` }}
         viewBox="0 0 100 160"
         preserveAspectRatio="none"
       >
@@ -1777,7 +2198,7 @@ function KeonePortalFx({ side }: { side: Side }) {
           key={i}
           className="data-pane absolute h-8 w-11 rounded border border-cyan-400/60 bg-cyan-400/10"
           style={{
-            left: `calc(${center} + ${(i - 1) * 48}px)`,
+            left: `calc(${x}% + ${(i - 1) * 48}px)`,
             top: `${26 + i * 11}%`,
             animationDelay: `${i * 80}ms`,
           }}
@@ -1787,7 +2208,7 @@ function KeonePortalFx({ side }: { side: Side }) {
       <div
         className="laser-beam absolute h-2.5 w-72"
         style={{
-          left: center,
+          left: `${x}%`,
           top: "52%",
           background:
             "linear-gradient(90deg, transparent, #d946ef 28%, #f0abfc 50%, #a855f7 72%, transparent)",
@@ -1800,7 +2221,7 @@ function KeonePortalFx({ side }: { side: Side }) {
           key={`glitch-${i}`}
           className="glitch-strip absolute h-3 w-40 bg-gradient-to-r from-transparent via-fuchsia-400/55 to-transparent"
           style={{
-            left: center,
+            left: `${x}%`,
             top: `${42 + i * 13}%`,
             animationDelay: `${i * 70}ms`,
           }}

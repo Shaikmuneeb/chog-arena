@@ -699,6 +699,7 @@ export function AcceptDuelModal({ duel, onClose, onSettled }: AcceptDuelModalPro
           isOpen
           creatorFighter={creatorFighter}
           challengerFighter={challengerFighter}
+          playerSide={duel.npc ? "left" : "right"}
           onPlayAgain={playAgain}
           onPlayAgainBusy={playAgainBusy || busy}
           explorerTxUrl={
