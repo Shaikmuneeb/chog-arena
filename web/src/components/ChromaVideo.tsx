@@ -1,14 +1,17 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { memo, useEffect, useRef } from "react";
 import { cn } from "@/lib/utils";
 
+const PROCESS_W = 240;
+const PROCESS_H = 240;
+const FRAME_INTERVAL = 33;
+
 /**
- * Chroma-keyed video: draws a muted looping <video> onto a <canvas> every
- * frame and zeroes the alpha of pixels matching the dark-gray studio
- * background, with smooth edge feathering. Only the character body renders.
+ * Chroma-keyed video: draws a muted looping <video> onto a small canvas and
+ * zeroes the alpha of pixels matching the dark-gray studio background.
  */
-export function ChromaVideo({
+export const ChromaVideo = memo(function ChromaVideo({
   src,
   className,
   style,
@@ -26,63 +29,48 @@ export function ChromaVideo({
     const video = videoRef.current;
     const canvas = canvasRef.current;
     if (!video || !canvas) return;
-    const ctx = canvas.getContext("2d");
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
     if (!ctx) return;
 
+    canvas.width = PROCESS_W;
+    canvas.height = PROCESS_H;
+
     let raf = 0;
-    const draw = () => {
-      if (video.readyState >= 2 && video.videoWidth > 0) {
-        if (
-          canvas.width !== video.videoWidth ||
-          canvas.height !== video.videoHeight
-        ) {
-          canvas.width = video.videoWidth;
-          canvas.height = video.videoHeight;
-        }
-        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-        const frame = ctx.getImageData(0, 0, canvas.width, canvas.height);
-        const data = frame.data;
+    let lastFrameTime = 0;
 
-        // Sample the studio background color from the four corners.
-        const idx = (x: number, y: number) => (y * canvas.width + x) * 4;
-        const corners = [
-          idx(0, 0),
-          idx(canvas.width - 1, 0),
-          idx(0, canvas.height - 1),
-          idx(canvas.width - 1, canvas.height - 1),
-        ];
-        let r0 = 0;
-        let g0 = 0;
-        let b0 = 0;
-        for (const c of corners) {
-          r0 += data[c];
-          g0 += data[c + 1];
-          b0 += data[c + 2];
-        }
-        r0 = Math.round(r0 / corners.length);
-        g0 = Math.round(g0 / corners.length);
-        b0 = Math.round(b0 / corners.length);
+    const draw = (timestamp: number) => {
+      if (timestamp - lastFrameTime >= FRAME_INTERVAL) {
+        lastFrameTime = timestamp;
+        if (video.readyState >= 2 && video.videoWidth > 0) {
+          ctx.drawImage(video, 0, 0, PROCESS_W, PROCESS_H);
+          const frame = ctx.getImageData(0, 0, PROCESS_W, PROCESS_H);
+          const data = frame.data;
 
-        for (let i = 0; i < data.length; i += 4) {
-          const r = data[i];
-          const g = data[i + 1];
-          const b = data[i + 2];
-          const max = Math.max(r, g, b);
-          const min = Math.min(r, g, b);
-          const sat = max - min;
-          const dr = r - r0;
-          const dg = g - g0;
-          const db = b - b0;
-          const colorDist = Math.sqrt(dr * dr + dg * dg + db * db);
+          // Sample the studio background color from the top-left corner.
+          const bgR = data[0];
+          const bgG = data[1];
+          const bgB = data[2];
 
-          // Low saturation (gray) and close to the sampled background color.
-          if (sat < 45 && colorDist < 90) {
-            const t = Math.min(1, colorDist / 90);
-            const smooth = t * t * (3 - 2 * t);
-            data[i + 3] = Math.round(255 * smooth);
+          for (let i = 0; i < data.length; i += 4) {
+            const r = data[i];
+            const g = data[i + 1];
+            const b = data[i + 2];
+
+            const dr = r - bgR;
+            const dg = g - bgG;
+            const db = b - bgB;
+            const dist = Math.sqrt(dr * dr + dg * dg + db * db);
+            const sat = Math.max(r, g, b) - Math.min(r, g, b);
+
+            if (dist < 26 && sat < 14) {
+              data[i + 3] = 0;
+            } else if (b - g > 12 || r - g > 12) {
+              data[i + 3] = 255;
+            }
           }
+          ctx.putImageData(frame, 0, 0);
         }
-        ctx.putImageData(frame, 0, 0);
+        // If readyState < 2, keep the previous frame (do not clear).
       }
       raf = requestAnimationFrame(draw);
     };
@@ -108,9 +96,9 @@ export function ChromaVideo({
       />
       <canvas
         ref={canvasRef}
-        className="h-full w-full object-contain"
+        className="w-full h-full object-contain"
         style={size ? { height: size, width: "auto" } : undefined}
       />
     </div>
   );
-}
+});

@@ -1788,7 +1788,7 @@ export function BattleArenaModal({
               )}
 
               {/* Banner overlays: ROUND N // FIGHT!, K.O., sync events */}
-              {view.banner && (
+              {view.banner && !view.cinematic && !view.shieldFx && (
                 <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center">
                   <div className="animate-round-banner text-center">
                     <p className="whitespace-nowrap bg-gradient-to-r from-amber-200 via-yellow-100 to-amber-200 bg-clip-text text-4xl font-black tracking-[0.15em] text-transparent drop-shadow-[0_0_26px_rgba(251,191,36,0.85)] sm:text-5xl">
