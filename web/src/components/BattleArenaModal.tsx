@@ -13,7 +13,7 @@ import {
   type SpecialMove,
 } from "@/data/fighterMoves";
 import { cn, formatMon, truncateAddress } from "@/lib/utils";
-import { ChromaVideo } from "./ChromaVideo";
+import { ChromaVideo, type FighterPose } from "./ChromaVideo";
 import {
   playDashSfx,
   playHitSfx,
@@ -53,6 +53,7 @@ export function ChromaFighter({
   isBlocking = false,
   activeMoveName = null,
   className,
+  moveDir = 0,
 }: {
   fighterClass: FighterClass;
   state?: SpriteState;
@@ -63,6 +64,7 @@ export function ChromaFighter({
   isBlocking?: boolean;
   activeMoveName?: string | null;
   className?: string;
+  moveDir?: number;
 }) {
   const theme = FIGHTER_CLASS_META[fighterClass];
   const videoSrc = theme.video;
@@ -74,19 +76,23 @@ export function ChromaFighter({
         : isBlocking
           ? "assist-block"
           : "";
+
+  const fighterPose: FighterPose =
+    isBlocking || state === "hit" || state === "stagger"
+      ? "guard"
+      : moveDir < 0
+        ? "guard"
+        : moveDir > 0 || state === "attack" || state === "dashIn"
+          ? "attack"
+          : "stance";
+
   let transform = "translateY(0px) scale(1)";
   let transition = "transform 120ms ease-out";
   let filter = "none";
-  if (state === "idle") {
-    transform = "translateY(0px) scale(1)";
-    transition = "none";
-  } else if (state === "dashIn" || state === "attack") {
-    transform = "translateX(45px) scale(1.08)";
+  if (isBlocking) {
+    transform = "scaleY(0.92) translateY(8px)";
     transition = "transform 120ms ease-out";
-  } else if (state === "dashOut") {
-    transform = "translateX(-12px) scale(1)";
-    transition = "transform 120ms ease-out";
-  } else if (state === "stagger" || state === "hit") {
+  } else if (state === "hit" || state === "stagger") {
     transform = "translateX(-18px) scale(1)";
     transition = "transform 150ms ease-out";
     filter = "brightness(1.5) drop-shadow(0 0 12px red)";
@@ -94,6 +100,22 @@ export function ChromaFighter({
     transform = "translateY(30px) rotate(-75deg)";
     transition = "transform 400ms ease-out";
     filter = "grayscale(1) brightness(0.7)";
+  } else if (state === "attack" || state === "dashIn") {
+    if (activeMoveName) {
+      transform = "translateX(85px) translateY(-25px) rotate(18deg) scale(1.15)";
+    } else {
+      transform = "translateX(55px) rotate(10deg)";
+    }
+    transition = "transform 90ms ease-out";
+  } else if (state === "dashOut") {
+    transform = "translateX(-12px) scale(1)";
+    transition = "transform 120ms ease-out";
+  } else if (moveDir < 0) {
+    transform = "rotate(-6deg) translateY(-6px)";
+    transition = "transform 120ms ease-out";
+  } else if (moveDir > 0) {
+    transform = "rotate(8deg) scaleX(1.04) translateY(-4px)";
+    transition = "transform 120ms ease-out";
   } else if (state === "victory") {
     transform = "translateY(-8px) scale(1.05)";
     transition = "transform 200ms ease-out";
@@ -120,8 +142,76 @@ export function ChromaFighter({
         className={cn("relative will-change-transform", leanClass, state === "idle" && "procedural-idle-breathe")}
         style={motionStyle}
       >
-        <ChromaVideo src={videoSrc} size={size} />
+        <ChromaVideo src={videoSrc} pose={fighterPose} size={size} />
+        {isBlocking && (
+          <div
+            className="pointer-events-none absolute left-1/2 top-1/2 h-24 w-24 -translate-x-1/2 -translate-y-1/2"
+            style={{
+              clipPath:
+                "polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%)",
+              background: "rgba(34,211,238,0.25)",
+              border: "2px solid rgba(34,211,238,0.8)",
+              boxShadow: "0 0 20px rgba(34,211,238,0.6)",
+            }}
+          />
+        )}
       </div>
+    </div>
+  );
+}
+
+function FistFx({ x }: { x: number }) {
+  return (
+    <div className="pointer-events-none absolute inset-0 z-[25]" aria-hidden>
+      {[0, 1, 2].map((i) => (
+        <span
+          key={i}
+          className="absolute h-12 w-12 rounded-full border-2 border-rose-400/80"
+          style={{
+            left: `${x}%`,
+            top: "52%",
+            transform: `translate(-50%, -50%) scale(${1 + i * 0.3})`,
+            opacity: 0.8 - i * 0.25,
+            boxShadow: "0 0 18px rgba(244,63,94,0.8)",
+          }}
+        />
+      ))}
+    </div>
+  );
+}
+
+function OrbFx({ x }: { x: number }) {
+  return (
+    <div className="pointer-events-none absolute inset-0 z-[25]" aria-hidden>
+      <div
+        className="absolute h-16 w-16 rounded-full"
+        style={{
+          left: `${x}%`,
+          top: "52%",
+          transform: "translate(-50%, -50%)",
+          background:
+            "radial-gradient(circle, rgba(255,255,255,0.95), rgba(232,121,249,0.8) 40%, rgba(168,85,247,0.4) 70%, transparent 80%)",
+          boxShadow: "0 0 30px rgba(232,121,249,0.9)",
+        }}
+      />
+    </div>
+  );
+}
+
+function BreathFx({ x }: { x: number }) {
+  return (
+    <div className="pointer-events-none absolute inset-0 z-[25]" aria-hidden>
+      <div
+        className="absolute h-10 w-72"
+        style={{
+          left: `${x - 36}%`,
+          top: "52%",
+          background:
+            "linear-gradient(90deg, rgba(249,115,22,0.9), rgba(239,68,68,0.7) 50%, transparent)",
+          boxShadow: "0 0 24px rgba(249,115,22,0.8)",
+          borderRadius: "9999px",
+        }}
+      />
     </div>
   );
 }
@@ -224,6 +314,9 @@ const MOVE_FX_MS: Record<SpecialMove["vfxType"], number> = {
   laser: 750,
   magma: 750,
   slash: 800,
+  fist: 600,
+  orb: 700,
+  breath: 900,
 };
 /** Horizontal tracks each fighter is confined to (stage %). */
 const TRACK_LEFT: [number, number] = [10, 42];
@@ -1659,6 +1752,7 @@ export function BattleArenaModal({
                             activeMoveName={f.activeMoveName}
                             leanDir={f.leanDir}
                             isBlocking={f.blockHeld}
+                            moveDir={f.moveDir}
                           />
                         </div>
                         {/* Guard aura — shield shimmer while blocking */}
@@ -1707,9 +1801,18 @@ export function BattleArenaModal({
                 {view.moveFx?.vfx === "magma" && (
                   <ChogzillaSlamFx key={`chog-${view.moveFx.id}`} x={view.moveFx.x} />
                 )}
-                {view.moveFx?.vfx === "slash" && (
-                  <SamuraiSlashFx key={`sam-${view.moveFx.id}`} x={view.moveFx.x} />
-                )}
+                 {view.moveFx?.vfx === "slash" && (
+                   <SamuraiSlashFx key={`sam-${view.moveFx.id}`} x={view.moveFx.x} />
+                 )}
+                 {view.moveFx?.vfx === "fist" && (
+                   <FistFx key={`fist-${view.moveFx.id}`} x={view.moveFx.x} />
+                 )}
+                 {view.moveFx?.vfx === "orb" && (
+                   <OrbFx key={`orb-${view.moveFx.id}`} x={view.moveFx.x} />
+                 )}
+                 {view.moveFx?.vfx === "breath" && (
+                   <BreathFx key={`breath-${view.moveFx.id}`} x={view.moveFx.x} />
+                 )}
 
                 {/* Cyberpunk hit-marker on every clean strike */}
                 {view.impact && (

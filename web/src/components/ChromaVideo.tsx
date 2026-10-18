@@ -3,32 +3,53 @@
 import { memo, useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 
-const FRAME_CACHE = new Map<string, string>();
+export type FighterPose = "stance" | "attack" | "guard";
+
+type PoseSet = { stance: string; attack: string; guard: string };
+
+const FRAME_CACHE = new Map<string, PoseSet>();
+
+const POSE_TIMES: Record<FighterPose, number> = {
+  stance: 0.05,
+  attack: 0.35,
+  guard: 0.85,
+};
+
+function chromaKey(data: Uint8ClampedArray) {
+  for (let i = 0; i < data.length; i += 4) {
+    const r = data[i];
+    const g = data[i + 1];
+    const b = data[i + 2];
+    const sat = Math.max(r, g, b) - Math.min(r, g, b);
+    if (sat < 15 && r < 65) {
+      data[i + 3] = 0;
+    }
+  }
+}
 
 /**
- * Extracts a single front-facing frame from the MP4, chroma-keys the neutral
- * gray studio background, and renders a cached static PNG <img>. No video
- * decoding happens during combat.
+ * Extracts 3 transparent PNG poses from the MP4 turntable and renders the
+ * selected pose. No video decoding happens during combat.
  */
 export const ChromaVideo = memo(function ChromaVideo({
   src,
+  pose = "stance",
   className,
   style,
   size,
 }: {
   src: string;
+  pose?: FighterPose;
   className?: string;
   style?: React.CSSProperties;
   size?: number;
 }) {
-  const [dataUrl, setDataUrl] = useState<string | null>(
-    FRAME_CACHE.get(src) ?? null,
-  );
+  const [poses, setPoses] = useState<PoseSet | null>(FRAME_CACHE.get(src) ?? null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
   useEffect(() => {
     if (FRAME_CACHE.has(src)) {
-      setDataUrl(FRAME_CACHE.get(src)!);
+      setPoses(FRAME_CACHE.get(src)!);
       return;
     }
     const video = document.createElement("video");
@@ -42,7 +63,11 @@ export const ChromaVideo = memo(function ChromaVideo({
     document.body.appendChild(video);
     videoRef.current = video;
 
-    const extract = () => {
+    const poseset: Partial<PoseSet> = {};
+    const order: FighterPose[] = ["stance", "attack", "guard"];
+    let idx = 0;
+
+    const extractCurrent = () => {
       if (video.readyState < 2) return;
       const w = video.videoWidth || 320;
       const h = video.videoHeight || 320;
@@ -53,34 +78,43 @@ export const ChromaVideo = memo(function ChromaVideo({
       if (!ctx) return;
       ctx.drawImage(video, 0, 0, w, h);
       const frame = ctx.getImageData(0, 0, w, h);
-      const data = frame.data;
-      for (let i = 0; i < data.length; i += 4) {
-        const r = data[i];
-        const g = data[i + 1];
-        const b = data[i + 2];
-        const sat = Math.max(r, g, b) - Math.min(r, g, b);
-        if (sat < 15 && r < 65) {
-          data[i + 3] = 0;
-        }
-      }
+      chromaKey(frame.data);
       ctx.putImageData(frame, 0, 0);
       const url = canvas.toDataURL("image/png");
-      FRAME_CACHE.set(src, url);
-      setDataUrl(url);
-      video.pause();
-      video.removeAttribute("src");
-      try { video.load(); } catch {}
-      if (video.parentNode) video.parentNode.removeChild(video);
+      const p = order[idx];
+      poseset[p] = url;
+      idx += 1;
+      if (idx < order.length) {
+        try {
+          video.currentTime = POSE_TIMES[order[idx]];
+        } catch {
+          // fallback
+        }
+      } else {
+        const full: PoseSet = {
+          stance: poseset.stance!,
+          attack: poseset.attack!,
+          guard: poseset.guard!,
+        };
+        FRAME_CACHE.set(src, full);
+        setPoses(full);
+        video.pause();
+        video.removeAttribute("src");
+        try {
+          video.load();
+        } catch {}
+        if (video.parentNode) video.parentNode.removeChild(video);
+      }
     };
 
     const onLoaded = () => {
       try {
-        video.currentTime = 0.1;
+        video.currentTime = POSE_TIMES.stance;
       } catch {
-        extract();
+        extractCurrent();
       }
     };
-    const onSeeked = () => extract();
+    const onSeeked = () => extractCurrent();
 
     video.addEventListener("loadeddata", onLoaded);
     video.addEventListener("seeked", onSeeked);
@@ -95,7 +129,9 @@ export const ChromaVideo = memo(function ChromaVideo({
     };
   }, [src]);
 
-  if (!dataUrl) {
+  const url = poses ? poses[pose] : null;
+
+  if (!url) {
     return (
       <div
         className={cn("inline-block bg-transparent", className)}
@@ -106,7 +142,7 @@ export const ChromaVideo = memo(function ChromaVideo({
 
   return (
     <img
-      src={dataUrl}
+      src={url}
       alt=""
       className={cn("object-contain", className)}
       style={{ height: size, width: "auto", ...style }}

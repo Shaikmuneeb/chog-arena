@@ -5,7 +5,14 @@ export interface SpecialMove {
   name: string;
   damage: [number, number]; // [min, max]
   hitCount: number;
-  vfxType: "slash" | "magma" | "laser" | "void_rift";
+  vfxType:
+    | "slash"
+    | "magma"
+    | "laser"
+    | "void_rift"
+    | "fist"
+    | "orb"
+    | "breath";
   screenShake: boolean;
   soundCue: string;
 }
@@ -32,16 +39,16 @@ export const FIGHTER_MOVES: Record<string, FighterMoveSet> = {
       name: "Magma Eruption Ground Pound",
       damage: [16, 25],
       hitCount: 4,
-      vfxType: "magma",
+      vfxType: "breath",
       screenShake: true,
       soundCue: "heavy_slam",
     },
     criticalArt: {
       id: "chogzilla_wrath",
-      name: "Apocalyptic Inferno Smash",
+      name: "Atomic Plasma Breath",
       damage: [38, 48],
       hitCount: 6,
-      vfxType: "magma",
+      vfxType: "breath",
       screenShake: true,
       soundCue: "volcano_boom",
     },
@@ -103,20 +110,20 @@ export const FIGHTER_MOVES: Record<string, FighterMoveSet> = {
     idleFrames: 4,
     attackFrames: 6,
     signatureMove: {
-      id: "crimson_slash",
-      name: "Crimson Blade Cleave",
+      id: "crimson_fist",
+      name: "Crimson Fist Flurry",
       damage: [17, 25],
       hitCount: 3,
-      vfxType: "slash",
+      vfxType: "fist",
       screenShake: true,
-      soundCue: "katana_slash",
+      soundCue: "heavy_slam",
     },
     criticalArt: {
       id: "crimson_overdrive",
-      name: "Crimson Apocalypse",
+      name: "Crimson Aura Blast",
       damage: [39, 49],
       hitCount: 8,
-      vfxType: "magma",
+      vfxType: "fist",
       screenShake: true,
       soundCue: "volcano_boom",
     },
@@ -132,7 +139,7 @@ export const FIGHTER_MOVES: Record<string, FighterMoveSet> = {
       name: "Royal Grace Strike",
       damage: [15, 23],
       hitCount: 3,
-      vfxType: "slash",
+      vfxType: "fist",
       screenShake: true,
       soundCue: "katana_slash",
     },
@@ -141,7 +148,7 @@ export const FIGHTER_MOVES: Record<string, FighterMoveSet> = {
       name: "Royal Bloom Barrage",
       damage: [37, 47],
       hitCount: 7,
-      vfxType: "laser",
+      vfxType: "fist",
       screenShake: true,
       soundCue: "critical_beam",
     },
@@ -157,7 +164,7 @@ export const FIGHTER_MOVES: Record<string, FighterMoveSet> = {
       name: "Radiant Princess Burst",
       damage: [16, 24],
       hitCount: 4,
-      vfxType: "laser",
+      vfxType: "orb",
       screenShake: true,
       soundCue: "laser_burst",
     },
@@ -166,9 +173,9 @@ export const FIGHTER_MOVES: Record<string, FighterMoveSet> = {
       name: "Princess Nova",
       damage: [38, 50],
       hitCount: 9,
-      vfxType: "void_rift",
+      vfxType: "orb",
       screenShake: true,
-      soundCue: "blackhole_boom",
+      soundCue: "critical_beam",
     },
   },
 };
@@ -211,4 +218,7 @@ export const MOVE_EMOJI: Record<SpecialMove["vfxType"], string> = {
   laser: "🌀⚡",
   magma: "🌋",
   slash: "⚔️🌙",
+  fist: "👊💥",
+  orb: "✨🔮",
+  breath: "🐉🔥",
 };
