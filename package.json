@@ -9,5 +9,13 @@
     "dev": "npm run dev --workspace=web",
     "build": "npm run build --workspace=web",
     "start": "npm run start --workspace=web"
+  },
+  "dependencies": {
+    "@react-three/drei": "^10.7.9",
+    "@react-three/fiber": "^9.8.2",
+    "three": "^0.186.1"
+  },
+  "devDependencies": {
+    "@types/three": "^0.186.0"
   }
 }
