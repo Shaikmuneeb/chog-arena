@@ -31,6 +31,8 @@ export const FIGHTER_CLASS_META: Record<
     dark: string;
     /** Static sprite sheet used for the in-arena fighter. */
     sprite: string;
+    /** Source MP4 in /fighters/ (reference). */
+    video: string;
   }
 > = {
   berserker: {
@@ -41,6 +43,7 @@ export const FIGHTER_CLASS_META: Record<
     secondary: "#fbbf24",
     dark: "#7f1d1d",
     sprite: "/assets/chog-slash.png",
+    video: "/fighters/new chogzilla design.mp4",
   },
   samurai: {
     label: "Chog Samurai",
@@ -50,6 +53,7 @@ export const FIGHTER_CLASS_META: Record<
     secondary: "#c4b5fd",
     dark: "#3b0764",
     sprite: "/assets/chog-samurai.png",
+    video: "/fighters/chog samuri new design.mp4",
   },
   mage: {
     label: "Void Lord James",
@@ -59,6 +63,7 @@ export const FIGHTER_CLASS_META: Record<
     secondary: "#22d3ee",
     dark: "#1e1b4b",
     sprite: "/assets/void-james.png",
+    video: "/fighters/new design void lord james.mp4",
   },
   benja: {
     label: "Crimson Lord Benja",
@@ -68,6 +73,7 @@ export const FIGHTER_CLASS_META: Record<
     secondary: "#f87171",
     dark: "#450a0a",
     sprite: "/assets/chog-slash.png",
+    video: "/fighters/crimson lord benja.mp4",
   },
   ladychog: {
     label: "Lady Chog",
@@ -77,6 +83,7 @@ export const FIGHTER_CLASS_META: Record<
     secondary: "#f9a8d4",
     dark: "#500724",
     sprite: "/assets/chog-samurai.png",
+    video: "/fighters/new design lady chog.mp4",
   },
   princess: {
     label: "Chog Princess",
@@ -86,6 +93,7 @@ export const FIGHTER_CLASS_META: Record<
     secondary: "#e9d5ff",
     dark: "#3b0764",
     sprite: "/assets/keone-mage.png",
+    video: "/fighters/chog princess new design.mp4",
   },
 };
 
