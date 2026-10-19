@@ -831,29 +831,34 @@ function triggerOverdrive(m: MatchState, ai: FighterRT) {
   m.aiNextMs = 400;
 }
 
-function tryStartPlayerAttack(m: MatchState, kind: AttackKind, script: MatchScript) {
-  const p = m.fighters.challenger;
-  if (m.stage !== "fight" || p.down || p.stunMs > 0 || p.attack) return;
+function startStrike(
+  m: MatchState,
+  side: FighterSide,
+  kind: AttackKind,
+  script: MatchScript,
+) {
+  const f = m.fighters[side];
+  if (m.stage !== "fight" || f.down || f.stunMs > 0 || f.attack) return;
+  const moves = m.moves[side];
+  const cls = side === "creator" ? script.creatorClass : script.challengerClass;
   const cost = kind === "special" ? 40 : kind === "critical" ? 100 : 0;
-  if (p.meter < cost) return;
-  p.meter = Math.max(0, p.meter - cost);
-  const moves = m.moves.challenger;
+  if (f.meter < cost) return;
+  f.meter = Math.max(0, f.meter - cost);
   const move =
     kind === "special"
       ? moves.signatureMove
       : kind === "critical"
         ? moves.criticalArt
         : null;
-  const cls = script.challengerClass;
-  p.attack = {
+  f.attack = {
     kind,
     windup: WINDUP_FOR[cls][kind],
     recover: RECOVER_FOR[cls][kind],
     move,
   };
-  p.activeMoveName = move ? move.name : null;
-  p.pose = "attack";
-  p.seq += 1;
+  f.activeMoveName = move ? move.name : null;
+  f.pose = "attack";
+  f.seq += 1;
 }
 
 function applyHit(
@@ -1183,29 +1188,13 @@ function updateFight(
   const p = m.fighters.challenger;
   const ai = m.fighters.creator;
 
-  // Player manual movement (only while the fight stage is live).
-  p.blockHeld = m.heldBlock;
-  const speed = (FIGHTER_SPEED[script.challengerClass] ?? MOVE_SPEED) * (p.blockHeld ? 0.4 : 1);
-  p.moveDir = (m.heldRight ? 1 : 0) - (m.heldLeft ? 1 : 0);
-  if (p.moveDir !== 0) {
-    p.x += p.moveDir * speed * (dt / 1000);
-    p.x = clamp(p.x, playerTrack(playerSide));
-    p.toward = p.moveDir > 0 === p.x < ai.x;
-    p.leanDir = p.toward ? "forward" : "retreat";
-    if (Math.random() < 0.18) {
-      m.dust = { id: ++m.fxId, x: p.x };
-      m.dustMs = 350;
-    }
-  } else {
-    p.leanDir = null;
-  }
-
-  // Consume a queued player attack.
-  if (m.attackQueued) {
-    const kind = m.attackQueued;
-    m.attackQueued = null;
-    tryStartPlayerAttack(m, kind, script);
-  }
+  // Spectator mode: no manual input. The local fighter holds position while
+  // the opponent's AI closes the distance. Both sides trade auto-strikes
+  // driven by the shared auto-exchange timer (scheduled in the render loop).
+  p.blockHeld = false;
+  p.moveDir = 0;
+  p.toward = false;
+  p.leanDir = null;
 
   updateAI(m, dt, script, playerSide);
   updateAttack(m, p, dt, true, script, playerSide);
@@ -1417,10 +1406,44 @@ export function BattleArenaModal({
     const loop = (now: number) => {
       const dt = Math.min(now - last, 50);
       last = now;
+      /* Auto-fighter: schedule strikes on a speed-weighted interval while the
+       * fight is live and not frozen by hit-stop. */
+      if (m.stage === "fight" && !(m.hitStopMs > 0)) {
+        autoTimer.current += dt;
+        const pSpeed = FIGHTER_SPEED[script.challengerClass] ?? MOVE_SPEED;
+        const aSpeed = FIGHTER_SPEED[script.creatorClass] ?? AI_APPROACH_SPEED;
+        const interval = Math.max(700, 1500 / ((pSpeed + aSpeed) / 48));
+        if (autoTimer.current >= interval) {
+          autoTimer.current = 0;
+          scheduleAutoStrike(m, script);
+        }
+      }
       step(m, dt, script, playerSide, onRoundWin);
       const next = snapshot(m);
       viewRef.current = next;
       setView(next);
+      /* Combat log / commentary feed — append new hits as they land. */
+      const hits = next.hits;
+      if (hits.length) {
+        const newest = hits[hits.length - 1];
+        if (newest.id > lastHitId.current) {
+          lastHitId.current = newest.id;
+          const attackerName =
+            newest.side === "challenger" ? challengerFighter.name : creatorFighter.name;
+          const moveText = newest.name ? ` — ${newest.name}` : "";
+          const critText = newest.crit ? " CRITICAL" : "";
+          const multiText = newest.multi && newest.multi > 1 ? ` ×${newest.multi}` : "";
+          combatLogRef.current.push({
+            id: newest.id,
+            text: `${attackerName}${critText} hits for ${newest.dmg} DMG${multiText}${moveText}`,
+          });
+          if (combatLogRef.current.length > 12) combatLogRef.current.shift();
+          /* Auto-scroll the combat log to the newest entry. */
+          if (logEndRef.current) {
+            logEndRef.current.scrollTop = logEndRef.current.scrollHeight;
+          }
+        }
+      }
       if (m.stage !== "verdict") raf = requestAnimationFrame(loop);
     };
     raf = requestAnimationFrame(loop);
@@ -1433,111 +1456,37 @@ export function BattleArenaModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, outcome, script, playerSide]);
 
-  /* ================= MANUAL CONTROL TRIGGERS =================
-   * Shared by the keyboard handlers and the on-screen arcade buttons.
-   * These mutate the ref-based match state directly (no stale closures). */
-  const triggerPlayerMove = (dir: "left" | "right", pressed: boolean) => {
-    const m = matchRef.current;
-    if (!m) return;
-    if (dir === "left") m.heldLeft = pressed;
-    else m.heldRight = pressed;
-  };
-  const triggerPlayerBlock = (pressed: boolean) => {
-    const m = matchRef.current;
-    if (!m) return;
-    m.heldBlock = pressed;
-  };
-  const triggerPlayerAttack = (kind: AttackKind) => {
-    const m = matchRef.current;
-    if (!m || m.stage !== "fight") return;
-    m.attackQueued = kind;
-  };
+  /* ================= AUTO-FIGHTER SIMULATION ENGINE =================
+   * Spectator mode: no manual input. A shared timed exchange loop picks the
+   * next striker weighted by each fighter's speed stat, then queues a strike
+   * (light/heavy/special/critical) scaled to their meter. Both fighters run
+   * through the existing attack/hit/VFX pipeline automatically. */
+  const autoTimer = useRef(0);
+  const combatLogRef = useRef<{ id: number; text: string }[]>([]);
+  const lastHitId = useRef(0);
+  const logEndRef = useRef<HTMLDivElement>(null);
 
-  const moveRef = useRef(triggerPlayerMove);
-  moveRef.current = triggerPlayerMove;
-  const blockRef = useRef(triggerPlayerBlock);
-  blockRef.current = triggerPlayerBlock;
-  const attackRef = useRef(triggerPlayerAttack);
-  attackRef.current = triggerPlayerAttack;
-
-  /* PC keyboard: hold-to-move/block on keydown/keyup, strikes on keydown. */
-  useEffect(() => {
-    if (!isOpen) return;
-    const GAME_KEYS = new Set([
-      "KeyA",
-      "KeyD",
-      "KeyS",
-      "KeyJ",
-      "KeyK",
-      "KeyL",
-      "KeyU",
-      "ArrowLeft",
-      "ArrowRight",
-      "ArrowDown",
-      "Space",
-      "Enter",
-    ]);
-    const onDown = (e: KeyboardEvent) => {
-      if (GAME_KEYS.has(e.code)) e.preventDefault();
-      switch (e.code) {
-        case "KeyA":
-        case "ArrowLeft":
-          moveRef.current("left", true);
-          break;
-        case "KeyD":
-        case "ArrowRight":
-          moveRef.current("right", true);
-          break;
-        case "KeyS":
-        case "ArrowDown":
-          blockRef.current(true);
-          break;
-        case "KeyJ":
-        case "Space":
-        case "Enter":
-          if (!e.repeat) attackRef.current("light");
-          break;
-        case "KeyK":
-          if (!e.repeat) attackRef.current("heavy");
-          break;
-        case "KeyL":
-          if (!e.repeat) attackRef.current("special");
-          break;
-        case "KeyU":
-          if (!e.repeat) attackRef.current("critical");
-          break;
-      }
-    };
-    const onUp = (e: KeyboardEvent) => {
-      switch (e.code) {
-        case "KeyA":
-        case "ArrowLeft":
-          moveRef.current("left", false);
-          break;
-        case "KeyD":
-        case "ArrowRight":
-          moveRef.current("right", false);
-          break;
-        case "KeyS":
-        case "ArrowDown":
-          blockRef.current(false);
-          break;
-      }
-    };
-    const onBlur = () => {
-      moveRef.current("left", false);
-      moveRef.current("right", false);
-      blockRef.current(false);
-    };
-    window.addEventListener("keydown", onDown);
-    window.addEventListener("keyup", onUp);
-    window.addEventListener("blur", onBlur);
-    return () => {
-      window.removeEventListener("keydown", onDown);
-      window.removeEventListener("keyup", onUp);
-      window.removeEventListener("blur", onBlur);
-    };
-  }, [isOpen]);
+  const scheduleAutoStrike = (m: MatchState, script: MatchScript): void => {
+    const p = m.fighters.challenger;
+    const ai = m.fighters.creator;
+    const pSpeed = FIGHTER_SPEED[script.challengerClass] ?? MOVE_SPEED;
+    const aSpeed = FIGHTER_SPEED[script.creatorClass] ?? AI_APPROACH_SPEED;
+    const total = pSpeed + aSpeed;
+    const side: FighterSide = Math.random() * total < pSpeed ? "challenger" : "creator";
+    const f = m.fighters[side];
+    const meter = f.meter;
+    const canSpecial = meter >= 40;
+    const canCritical = meter >= 100;
+    let roll = Math.random();
+    let kind: AttackKind = "light";
+    if (canCritical && roll < 0.20) kind = "critical";
+    else if (canSpecial && roll < 0.50) kind = "special";
+    else if (roll < 0.70) kind = "heavy";
+    else kind = "light";
+    if (kind === "critical" && !canCritical) kind = "heavy";
+    if (kind === "special" && !canSpecial) kind = "light";
+    startStrike(m, side, kind, script);
+  };
 
   /* Narrow-viewport tracking for proportional sprite scaling. */
   useEffect(() => {
@@ -2003,148 +1952,52 @@ export function BattleArenaModal({
               )}
             </div>
 
-            {/* ===== ARCADE CONTROL DECK — split two-thumb layout =====
-                PC: A/S/D + J/K/L/U keys (badges shown on sm+).
-                Mobile: touch-action:none buttons, zero tap delay via
-                pointerdown — holds for movement/guard, instant for strikes. */}
-            <div
-              className="arcade-ctl border-t border-white/10 bg-zinc-950/95"
-              style={{ WebkitUserSelect: "none", userSelect: "none" }}
-            >
-              {/* Super meter */}
-              <div className="flex items-center gap-2 px-3 pt-2 sm:px-6">
-                <span className="text-[9px] font-black uppercase tracking-widest text-zinc-500">
-                  Super
+            {/* ================= SPECTATOR HUD =================
+                Auto-fighter exchange ticker at top, combat log at bottom,
+                cinematic viewing window in the center. */}
+            <div className="flex flex-col h-full">
+              {/* Exchange ticker — "SIMULATING COMBAT…" progress */}
+              <div className="flex items-center justify-between gap-2 px-3 pt-2 sm:px-6 border-b border-white/10 bg-black/60">
+                <span className="text-[9px] font-black uppercase tracking-widest text-amber-300 animate-pulse">
+                  SIMULATING COMBAT…
                 </span>
-                <div className="h-2 flex-1 overflow-hidden rounded-full bg-white/10">
+                <div className="flex-1 h-1 overflow-hidden rounded-full bg-white/10">
                   <div
-                    className="h-full rounded-full bg-gradient-to-r from-purple-500 via-fuchsia-400 to-amber-300 transition-[width] duration-200"
-                    style={{ width: `${view.fighters.challenger.meter}%` }}
+                    className="h-full rounded-full bg-gradient-to-r from-amber-500 to-orange-400 transition-[width] duration-1000"
+                    style={{ width: `${Math.round(((99 - Math.max(0, view.timer)) / 99) * 100)}%` }}
                   />
                 </div>
-                <span className="w-10 text-right font-mono text-[10px] text-zinc-400">
-                  {view.fighters.challenger.meter}%
+                <span className="w-12 text-right font-mono text-[10px] text-zinc-400">
+                  {String(view.timer).padStart(2, "0")}
                 </span>
               </div>
 
-              <div className="flex flex-row items-center justify-between gap-2 px-3 py-2 sm:px-6 sm:py-4">
-                {/* LEFT THUMB — movement & guard */}
-                <div className="flex items-center gap-1.5 sm:gap-2">
-                  {(
-                    [
-                      { dir: "left" as const, label: "Left", badge: "A", active: view.heldLeft },
-                      { dir: "block" as const, label: "Block", badge: "S", active: view.heldBlock },
-                      { dir: "right" as const, label: "Right", badge: "D", active: view.heldRight },
-                    ]
-                  ).map((b) => (
-                    <button
-                      key={b.dir}
-                      type="button"
-                      aria-label={`${b.label} (${b.badge})`}
-                      style={{ touchAction: "none" }}
-                      className={cn(
-                        "arcade-ctl-btn flex min-w-[62px] flex-col items-center justify-center rounded-xl border px-2.5 py-3 text-[11px] font-black uppercase tracking-wider transition-all active:scale-95 sm:min-w-[78px] sm:px-4",
-                        b.active
-                          ? "border-amber-400/80 bg-amber-500/25 text-amber-100 shadow-[0_0_16px_rgba(251,191,36,0.35)]"
-                          : "border-white/15 bg-zinc-900/80 text-zinc-300",
-                      )}
-                      onPointerDown={(e) => {
-                        e.preventDefault();
-                        e.currentTarget.setPointerCapture(e.pointerId);
-                        if (b.dir === "block") triggerPlayerBlock(true);
-                        else triggerPlayerMove(b.dir, true);
-                      }}
-                      onPointerUp={() => {
-                        if (b.dir === "block") triggerPlayerBlock(false);
-                        else triggerPlayerMove(b.dir, false);
-                      }}
-                      onPointerCancel={() => {
-                        if (b.dir === "block") triggerPlayerBlock(false);
-                        else triggerPlayerMove(b.dir, false);
-                      }}
-                      onPointerLeave={() => {
-                        if (b.dir === "block") triggerPlayerBlock(false);
-                        else triggerPlayerMove(b.dir, false);
-                      }}
-                      onTouchStart={(e) => {
-                        e.preventDefault();
-                        if (b.dir === "block") triggerPlayerBlock(true);
-                        else triggerPlayerMove(b.dir, true);
-                      }}
-                      onTouchEnd={(e) => {
-                        e.preventDefault();
-                        if (b.dir === "block") triggerPlayerBlock(false);
-                        else triggerPlayerMove(b.dir, false);
-                      }}
-                      onTouchCancel={(e) => {
-                        e.preventDefault();
-                        if (b.dir === "block") triggerPlayerBlock(false);
-                        else triggerPlayerMove(b.dir, false);
-                      }}
-                    >
-                      <span>{b.label}</span>
-                      <span className="mt-0.5 hidden rounded bg-white/10 px-1.5 py-0.5 text-[9px] font-bold tracking-normal text-zinc-400 sm:inline">
-                        {b.badge}
-                      </span>
-                    </button>
-                  ))}
-                </div>
-
-                {/* RIGHT THUMB — attacks & specials
-                    2×2 grid on mobile, horizontal row on desktop */}
-                <div className="grid grid-cols-2 gap-1.5 sm:flex sm:gap-2">
-                  {(
-                    [
-                      { kind: "light" as const, label: "Light", badge: "J" },
-                      { kind: "heavy" as const, label: "Heavy", badge: "K" },
-                      { kind: "special" as const, label: "Special", badge: "L" },
-                      { kind: "critical" as const, label: "Crit Art", badge: "U" },
-                    ]
-                  ).map((b) => {
-                    const meter = view.fighters.challenger.meter;
-                    const ready =
-                      b.kind === "special"
-                        ? meter >= 40
-                        : b.kind === "critical"
-                          ? meter >= 100
-                          : true;
-                    return (
-                      <button
-                        key={b.kind}
-                        type="button"
-                        aria-label={`${b.label} (${b.badge})`}
-                        style={{ touchAction: "none" }}
-                        className={cn(
-                          "arcade-ctl-btn flex min-w-[62px] flex-col items-center justify-center rounded-xl border px-2.5 py-3 text-[11px] font-black uppercase tracking-wider transition-all active:scale-95 sm:min-w-[78px] sm:px-4",
-                          b.kind === "special" &&
-                            ready &&
-                            "special-ready text-fuchsia-100",
-                          b.kind === "critical" &&
-                            ready &&
-                            "super-ready text-amber-100",
-                          b.kind === "light" &&
-                            "border-white/15 bg-zinc-900/80 text-zinc-200",
-                          b.kind === "heavy" &&
-                            "border-white/15 bg-zinc-900/80 text-zinc-200",
-                          !ready &&
-                            "border-white/10 bg-zinc-900/40 text-zinc-600",
-                        )}
-                        onPointerDown={(e) => {
-                          e.preventDefault();
-                          triggerPlayerAttack(b.kind);
-                        }}
-                        onTouchStart={(e) => {
-                          e.preventDefault();
-                          triggerPlayerAttack(b.kind);
-                        }}
+              {/* Combat log / commentary feed — auto-scrolls to the bottom */}
+              <div className="flex-1 overflow-hidden flex flex-col min-h-0">
+                <div
+                  className="border-t border-white/10 bg-black/80 p-2 sm:p-3 overflow-y-auto"
+                >
+                  <p className="text-[9px] font-bold uppercase tracking-widest text-zinc-500 mb-1">
+                    COMBAT LOG
+                  </p>
+                  <div
+                    className="space-y-0.5 text-[10px] font-mono leading-relaxed"
+                    ref={logEndRef}
+                  >
+                    {combatLogRef.current.map((e) => (
+                      <div
+                        key={e.id}
+                        className="text-zinc-300/90 drop-shadow-[0_0_6px_rgba(0,0,0,0.6)]"
                       >
-                        <span>{b.label}</span>
-                        <span className="mt-0.5 hidden rounded bg-white/10 px-1.5 py-0.5 text-[9px] font-bold tracking-normal text-zinc-400 sm:inline">
-                          {b.badge}
-                        </span>
-                      </button>
-                    );
-                  })}
+                        {e.text}
+                      </div>
+                    ))}
+                    {combatLogRef.current.length === 0 && (
+                      <div className="text-zinc-500/60 italic">
+                        Awaiting first strike…
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
             </div>
