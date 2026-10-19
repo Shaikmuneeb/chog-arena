@@ -20,7 +20,7 @@ export const ARENA_NPCS: ArenaNpc[] = [
     address: "0x1111111111111111111111111111111111110001",
     name: "Crimson Lord Benja",
     title: "Crimson Lord",
-    fighterClass: "benja",
+    fighterClass: "crimson_lord_benja",
     wager: parseEther("0.1"),
   },
   {
@@ -29,7 +29,7 @@ export const ARENA_NPCS: ArenaNpc[] = [
     address: "0x1111111111111111111111111111111111110002",
     name: "Chog Samurai",
     title: "10,000 TPS Blade",
-    fighterClass: "samurai",
+    fighterClass: "chog_samurai",
     wager: parseEther("0.5"),
   },
   {
@@ -38,7 +38,7 @@ export const ARENA_NPCS: ArenaNpc[] = [
     address: "0x1111111111111111111111111111111111110003",
     name: "Void Lord James",
     title: "Abyssal Claw Executioner",
-    fighterClass: "mage",
+    fighterClass: "void_lord_james",
     wager: parseEther("1"),
   },
   {
@@ -47,7 +47,7 @@ export const ARENA_NPCS: ArenaNpc[] = [
     address: "0x1111111111111111111111111111111111110004",
     name: "Warlord Chogzilla",
     title: "Arena Grand Champion",
-    fighterClass: "berserker",
+    fighterClass: "chogzila",
     wager: parseEther("2.5"),
   },
   {
@@ -56,7 +56,7 @@ export const ARENA_NPCS: ArenaNpc[] = [
     address: "0x1111111111111111111111111111111111110005",
     name: "Lady Chog",
     title: "Royal Chog",
-    fighterClass: "ladychog",
+    fighterClass: "lady_chog",
     wager: parseEther("1.5"),
   },
   {
@@ -65,7 +65,7 @@ export const ARENA_NPCS: ArenaNpc[] = [
     address: "0x1111111111111111111111111111111111110006",
     name: "Chog Princess",
     title: "Chog Princess",
-    fighterClass: "princess",
+    fighterClass: "chog_princess",
     wager: parseEther("1.2"),
   },
 ];

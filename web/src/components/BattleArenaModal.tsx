@@ -22,7 +22,6 @@ import {
   type SpecialMove,
 } from "@/data/fighterMoves";
 import { cn, formatMon, truncateAddress } from "@/lib/utils";
-import { ChromaVideo } from "./ChromaVideo";
 import {
   playDashSfx,
   playHitSfx,
@@ -76,7 +75,7 @@ export function ChromaFighter({
   moveDir?: number;
 }) {
   const theme = FIGHTER_CLASS_META[fighterClass];
-  const videoSrc = theme.video;
+  const portraitSrc = theme.portrait;
   const leanClass =
     leanDir === "forward"
       ? "fighter-lean-forward"
@@ -86,26 +85,36 @@ export function ChromaFighter({
           ? "assist-block"
           : "";
 
+  const attacking = state === "attack" || state === "dashIn";
+  const hurt = state === "hit" || state === "stagger";
+  /* Pure CSS keyframes: forward lunge on attacks, red-flash recoil on hits.
+   * The mirrored wrapper flips X for player 2, so the lunge always drives
+   * toward the opponent. */
+  const motionClass = attacking
+    ? activeMoveName
+      ? "fighter-lunge-heavy"
+      : "fighter-lunge"
+    : hurt
+      ? "fighter-hit-flash"
+      : "";
+
   let transform = "translateY(0px) scale(1)";
   let transition = "transform 120ms ease-out";
   let filter = "none";
   if (isBlocking) {
     transform = "scaleY(0.92) translateY(8px)";
     transition = "transform 120ms ease-out";
-  } else if (state === "hit" || state === "stagger") {
-    transform = "translateX(-18px) scale(1)";
+  } else if (hurt) {
+    /* keyframes drive the recoil + red flash */
+    transform = "translateX(0px) scale(1)";
     transition = "transform 150ms ease-out";
-    filter = "brightness(1.5) drop-shadow(0 0 12px red)";
   } else if (state === "dead") {
     transform = "translateY(30px) rotate(-75deg)";
     transition = "transform 400ms ease-out";
     filter = "grayscale(1) brightness(0.7)";
-  } else if (state === "attack" || state === "dashIn") {
-    if (activeMoveName) {
-      transform = "translateX(85px) translateY(-25px) rotate(18deg) scale(1.15)";
-    } else {
-      transform = "translateX(55px) rotate(10deg)";
-    }
+  } else if (attacking) {
+    /* keyframes drive the forward lunge */
+    transform = "translateX(0px) scale(1)";
     transition = "transform 90ms ease-out";
   } else if (state === "dashOut") {
     transform = "translateX(-12px) scale(1)";
@@ -139,10 +148,22 @@ export function ChromaFighter({
       aria-hidden
     >
       <div
-        className={cn("relative will-change-transform", leanClass, state === "idle" && "procedural-idle-breathe")}
+        className={cn(
+          "relative will-change-transform",
+          leanClass,
+          motionClass,
+          state === "idle" && "procedural-idle-breathe",
+        )}
         style={motionStyle}
       >
-        <ChromaVideo src={videoSrc} size={size} />
+        <img
+          src={portraitSrc}
+          alt=""
+          aria-hidden
+          draggable={false}
+          className="fighter-portrait select-none"
+          style={{ height: size, width: "auto" }}
+        />
         {isBlocking && (
           <div
             className="pointer-events-none absolute left-1/2 top-1/2 h-24 w-24 -translate-x-1/2 -translate-y-1/2"
@@ -231,12 +252,12 @@ type AttackKind = "light" | "heavy" | "special" | "critical";
 /** Per-class visual scale — sheet art fills its frame very differently
  * (Chogzilla art is edge-to-edge; Keone/James art sits small in-frame). */
 const CLASS_SIZE_SCALE: Record<FighterClass, number> = {
-  berserker: 0.72,
-  samurai: 0.92,
-  mage: 1.1,
-  benja: 0.85,
-  ladychog: 0.9,
-  princess: 0.9,
+  chogzila: 0.72,
+  chog_samurai: 0.92,
+  void_lord_james: 1.1,
+  crimson_lord_benja: 0.85,
+  lady_chog: 0.9,
+  chog_princess: 0.9,
 };
 
 /** Class-specific neon afterimage trail colors (shadow clones). */
@@ -244,33 +265,33 @@ const CLASS_AFTERIMAGE_CONFIG: Record<
   FighterClass,
   { name: string; color: string; glow: string }
 > = {
-  berserker: {
+  chogzila: {
     name: "Warlord Chogzilla",
     color: "#f97316",
     glow: "rgba(249, 115, 22, 0.85)",
   },
-  samurai: {
-    name: "Chog Samurai",
+  chog_samurai: {
+    name: "Chog chog_samurai",
     color: "#a855f7",
     glow: "rgba(168, 85, 247, 0.85)",
   },
-  mage: {
+  void_lord_james: {
     name: "Void Lord James",
     color: "#c084fc",
     glow: "rgba(192, 132, 252, 0.85)",
   },
-  benja: {
-    name: "Crimson Lord Benja",
+  crimson_lord_benja: {
+    name: "Crimson Lord crimson_lord_benja",
     color: "#ef4444",
     glow: "rgba(239, 68, 68, 0.85)",
   },
-  ladychog: {
+  lady_chog: {
     name: "Lady Chog",
     color: "#f472b6",
     glow: "rgba(244, 114, 182, 0.85)",
   },
-  princess: {
-    name: "Chog Princess",
+  chog_princess: {
+    name: "Chog chog_princess",
     color: "#c084fc",
     glow: "rgba(192, 132, 252, 0.85)",
   },
@@ -292,30 +313,30 @@ const AI_BACKSTEP_SPEED = 18; // %/s AI retreats
 
 /** Per-archetype movement speed (%/s). */
 const FIGHTER_SPEED: Record<FighterClass, number> = {
-  berserker: 14,
-  samurai: 24,
-  mage: 18,
-  benja: 34,
-  ladychog: 26,
-  princess: 20,
+  chogzila: 14,
+  chog_samurai: 24,
+  void_lord_james: 18,
+  crimson_lord_benja: 34,
+  lady_chog: 26,
+  chog_princess: 20,
 };
 
 /** Per-archetype windup timings (ms). */
 const WINDUP_FOR: Record<FighterClass, Record<AttackKind, number>> = {
-  berserker: { light: 160, heavy: 400, special: 420, critical: 500 },
-  samurai: { light: 110, heavy: 220, special: 300, critical: 380 },
-  mage: { light: 150, heavy: 260, special: 320, critical: 400 },
-  benja: { light: 90, heavy: 180, special: 260, critical: 320 },
-  ladychog: { light: 100, heavy: 200, special: 280, critical: 360 },
-  princess: { light: 120, heavy: 220, special: 300, critical: 380 },
+  chogzila: { light: 160, heavy: 400, special: 420, critical: 500 },
+  chog_samurai: { light: 110, heavy: 220, special: 300, critical: 380 },
+  void_lord_james: { light: 150, heavy: 260, special: 320, critical: 400 },
+  crimson_lord_benja: { light: 90, heavy: 180, special: 260, critical: 320 },
+  lady_chog: { light: 100, heavy: 200, special: 280, critical: 360 },
+  chog_princess: { light: 120, heavy: 220, special: 300, critical: 380 },
 };
 const RECOVER_FOR: Record<FighterClass, Record<AttackKind, number>> = {
-  berserker: { light: 220, heavy: 420, special: 360, critical: 440 },
-  samurai: { light: 140, heavy: 240, special: 280, critical: 340 },
-  mage: { light: 180, heavy: 260, special: 300, critical: 360 },
-  benja: { light: 100, heavy: 200, special: 260, critical: 320 },
-  ladychog: { light: 120, heavy: 220, special: 280, critical: 340 },
-  princess: { light: 140, heavy: 240, special: 300, critical: 360 },
+  chogzila: { light: 220, heavy: 420, special: 360, critical: 440 },
+  chog_samurai: { light: 140, heavy: 240, special: 280, critical: 340 },
+  void_lord_james: { light: 180, heavy: 260, special: 300, critical: 360 },
+  crimson_lord_benja: { light: 100, heavy: 200, special: 260, critical: 320 },
+  lady_chog: { light: 120, heavy: 220, special: 280, critical: 340 },
+  chog_princess: { light: 140, heavy: 240, special: 300, critical: 360 },
 };
 const LUNGE_SPEED = 12; // %/s forward lunge during an attack windup
 const WINDUP: Record<AttackKind, number> = {
@@ -509,8 +530,8 @@ function createMatch(script: MatchScript, playerSide: PlayerSide): MatchState {
     timer: 99,
     orbs: { creator: 0, challenger: 0 },
     fighters: {
-      creator: blank("creator", oppX, oppFacing, script.creatorClass === "berserker" ? 130 : 100),
-      challenger: blank("challenger", playerX, playerFacing, script.challengerClass === "berserker" ? 130 : 100),
+      creator: blank("creator", oppX, oppFacing, script.creatorClass === "chogzila" ? 130 : 100),
+      challenger: blank("challenger", playerX, playerFacing, script.challengerClass === "chogzila" ? 130 : 100),
     },
     moves: {
       creator: getFighterMoveSet(script.creatorClass),
@@ -2172,7 +2193,14 @@ function HudPortrait({ fighter }: { fighter: FighterDescriptor }) {
       ) : (
         /* Class sprite headshot — top crop of the idle fighter canvas */
          <span className="sprite-pixelated -mt-0.5 flex items-start justify-center">
-           <ChromaVideo src={FIGHTER_CLASS_META[fighter.fighterClass].video} size={42} />
+           <img
+            src={FIGHTER_CLASS_META[fighter.fighterClass].portrait}
+            alt=""
+            aria-hidden
+            draggable={false}
+            className="fighter-portrait"
+            style={{ height: 42, width: "auto" }}
+          />
          </span>
       )}
     </span>
@@ -2443,7 +2471,7 @@ function ChogzillaSlamFx({ x }: { x: number }) {
   );
 }
 
-/** Chog Samurai — multi-slash streaks, crescent plasma beam, sparks. */
+/** Chog chog_samurai — multi-slash streaks, crescent plasma beam, sparks. */
 function SamuraiSlashFx({ x }: { x: number }) {
   return (
     <div className="pointer-events-none absolute inset-0 z-[25]" aria-hidden>
@@ -2572,7 +2600,7 @@ function SlamFx({ x }: { x: number }) {
   );
 }
 
-/** Keone Mage signature — holographic purple/magenta portal + lightning burst. */
+/** Keone void_lord_james signature — holographic purple/magenta portal + lightning burst. */
 function KeonePortalFx({ x }: { x: number }) {
   return (
     <div className="pointer-events-none absolute inset-0 z-[25]" aria-hidden>

@@ -1,18 +1,18 @@
 export type FighterClass =
-  | "berserker"
-  | "samurai"
-  | "mage"
-  | "benja"
-  | "ladychog"
-  | "princess";
+  | "chogzila"
+  | "chog_samurai"
+  | "void_lord_james"
+  | "crimson_lord_benja"
+  | "lady_chog"
+  | "chog_princess";
 
 export const FIGHTER_CLASSES: FighterClass[] = [
-  "berserker",
-  "samurai",
-  "mage",
-  "benja",
-  "ladychog",
-  "princess",
+  "chogzila",
+  "chog_samurai",
+  "void_lord_james",
+  "crimson_lord_benja",
+  "lady_chog",
+  "chog_princess",
 ];
 
 export const FIGHTER_CLASS_META: Record<
@@ -29,86 +29,83 @@ export const FIGHTER_CLASS_META: Record<
     secondary: string;
     /** Dark armor shade. */
     dark: string;
-    /** Static sprite sheet used for the in-arena fighter. */
-    sprite: string;
-    /** Source MP4 in /fighters/ (reference). */
-    video: string;
+    /** Unique static portrait for this character — never shared. */
+    portrait: string;
   }
 > = {
-  berserker: {
+  chogzila: {
     label: "Chogzilla",
     profileLabel: "Warlord Chogzilla",
     blurb: "Spiky crimson armor + giant battle axe",
     primary: "#dc2626",
     secondary: "#fbbf24",
     dark: "#7f1d1d",
-    sprite: "/assets/chog-slash.png?zila",
-    video: "/fighters/new chogzilla design.mp4",
+    portrait: "/fighters/portraits/chogzila.png",
   },
-  samurai: {
+  chog_samurai: {
     label: "Chog Samurai",
     profileLabel: "Chog Samurai",
     blurb: "Cyber-monad samurai + glowing katana",
     primary: "#7c3aed",
     secondary: "#c4b5fd",
     dark: "#3b0764",
-    sprite: "/assets/chog-samurai.png",
-    video: "/fighters/chog samuri new design.mp4",
+    portrait: "/fighters/portraits/chog_samurai.png",
   },
-  mage: {
+  void_lord_james: {
     label: "Void Lord James",
     profileLabel: "Void Lord James",
     blurb: "Close-range VOID CLAW SLAM + jagged void lightning",
     primary: "#4c1d95",
     secondary: "#22d3ee",
     dark: "#1e1b4b",
-    sprite: "/assets/void-james.png",
-    video: "/fighters/new design void lord james.mp4",
+    portrait: "/fighters/portraits/void_lord_james.png",
   },
-  benja: {
+  crimson_lord_benja: {
     label: "Crimson Lord Benja",
     profileLabel: "Crimson Lord Benja",
     blurb: "Crimson lord armor + heavy blade",
     primary: "#991b1b",
     secondary: "#f87171",
     dark: "#450a0a",
-    sprite: "/assets/chog-slash.png?benja",
-    video: "/fighters/crimson lord benja.mp4",
+    portrait: "/fighters/portraits/crimson_lord_benja.png",
   },
-  ladychog: {
+  lady_chog: {
     label: "Lady Chog",
     profileLabel: "Lady Chog",
     blurb: "Royal chog garb + elegant strikes",
     primary: "#be185d",
     secondary: "#f9a8d4",
     dark: "#500724",
-    sprite: "/assets/chog-samurai.png?lady",
-    video: "/fighters/new design lady chog.mp4",
+    portrait: "/fighters/portraits/lady_chog.png",
   },
-  princess: {
+  chog_princess: {
     label: "Chog Princess",
     profileLabel: "Chog Princess",
     blurb: "Princess chog regalia + radiant magic",
     primary: "#7c3aed",
     secondary: "#e9d5ff",
     dark: "#3b0764",
-    sprite: "/assets/keone-mage.png?princess",
-    video: "/fighters/chog princess new design.mp4",
+    portrait: "/fighters/portraits/chog_princess.png",
   },
-};
-
-/** Direct MP4 path per character id (no fallbacks). */
-export const FIGHTER_VIDEO_PATHS: Record<string, string> = {
-  void_lord_james: "/fighters/new design void lord james.mp4",
-  crimson_lord_benja: "/fighters/crimson lord benja.mp4",
-  lady_chog: "/fighters/new design lady chog.mp4",
-  chog_samurai: "/fighters/chog samuri new design.mp4",
-  chog_princess: "/fighters/chog princess new design.mp4",
-  chogzila: "/fighters/new chogzilla design.mp4",
 };
 
 export function isFighterClass(value: unknown): value is FighterClass {
   return (
     typeof value === "string" && (FIGHTER_CLASSES as string[]).includes(value)
   );
+}
+
+/** Migrates legacy (pre-rename) class ids stored in old profiles. */
+export function migrateFighterClass(value: unknown): FighterClass {
+  if (isFighterClass(value)) return value;
+  const legacy: Record<string, FighterClass> = {
+    berserker: "chogzila",
+    samurai: "chog_samurai",
+    mage: "void_lord_james",
+    benja: "crimson_lord_benja",
+    ladychog: "lady_chog",
+    princess: "chog_princess",
+    "void-james": "void_lord_james",
+  };
+  return legacy[value as string] ?? "chogzila";
 }

@@ -29,7 +29,6 @@ import {
   type ArenaNpc,
 } from "@/config/arenaNpcs";
 import { FIGHTER_CLASS_META, type FighterClass } from "@/config/fighterClasses";
-import { ChromaVideo } from "./ChromaVideo";
 import { cn, formatMon, truncateAddress } from "@/lib/utils";
 import { pushToast } from "./Toast";
 import { AcceptDuelModal } from "./AcceptDuelModal";
@@ -203,7 +202,7 @@ export function DuelBoard({ duels, onDuelSettled, onCreateDuel }: DuelBoardProps
               profileUsername={getProfile(duel.creator)?.username}
               profileTitle={getProfile(duel.creator)?.title}
               profileClass={
-                getProfile(duel.creator)?.fighterClass ?? "berserker"
+                getProfile(duel.creator)?.fighterClass ?? "chogzila"
               }
               canceling={cancelingId === duel.id}
               onCancel={() => void cancelDuel(duel)}
@@ -241,12 +240,12 @@ export function DuelBoard({ duels, onDuelSettled, onCreateDuel }: DuelBoardProps
  * high-impact Fight NPC button (right). Name shown exactly once.
  */
 const FIGHTER_STYLE: Record<string, string> = {
-  benja: "Bloodline Overlord • Aggressive",
-  ladychog: "Royal Duelist • Technical",
-  princess: "Astral Sovereign • Magic",
-  samurai: "Blade Saint • Fast",
-  mage: "Void Sovereign • Heavy",
-  berserker: "Apex Predator • Power",
+  crimson_lord_benja: "Bloodline Overlord • Aggressive",
+  lady_chog: "Royal Duelist • Technical",
+  chog_princess: "Astral Sovereign • Magic",
+  chog_samurai: "Blade Saint • Fast",
+  void_lord_james: "Void Sovereign • Heavy",
+  chogzila: "Apex Predator • Power",
 };
 
 function NpcFighterCard({
@@ -281,7 +280,14 @@ function NpcFighterCard({
           aria-hidden
         />
         <div className="absolute inset-0 flex items-center justify-center transition-transform duration-300 group-hover:scale-125">
-          <ChromaVideo src={classMeta.video} size={150} className="scale-110" />
+          <img
+           src={classMeta.portrait}
+           alt=""
+           aria-hidden
+           draggable={false}
+           className="fighter-portrait scale-110"
+           style={{ height: 150, width: "auto" }}
+         />
         </div>
       </div>
       <div className="absolute inset-x-0 bottom-0 z-20 bg-gradient-to-t from-black via-black/60 to-transparent p-4">

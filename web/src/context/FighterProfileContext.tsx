@@ -10,7 +10,7 @@ import {
 } from "react";
 import { cn, truncateAddress } from "@/lib/utils";
 import {
-  isFighterClass,
+  migrateFighterClass,
   type FighterClass,
 } from "@/config/fighterClasses";
 import { ARENA_NPCS } from "@/config/arenaNpcs";
@@ -72,9 +72,7 @@ export function FighterProfileProvider({
             avatarUrl: typeof value.avatarUrl === "string" ? value.avatarUrl : "",
             title: typeof value.title === "string" ? value.title : "",
             /* Class renames migrate stored profiles. */
-            fighterClass: isFighterClass(value.fighterClass)
-              ? value.fighterClass
-              : "berserker",
+            fighterClass: migrateFighterClass(value.fighterClass),
           };
         }
       }
@@ -138,7 +136,7 @@ export function useFighterProfile() {
   return ctx;
 }
 
-/** Word initials ("Keone Mage" → "KM"), else first 2 letters / 2 hex chars. */
+/** Word initials ("Keone void_lord_james" → "KM"), else first 2 letters / 2 hex chars. */
 function getInitials(
   username?: string,
   address?: string | null,

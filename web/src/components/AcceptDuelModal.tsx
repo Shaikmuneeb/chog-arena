@@ -35,7 +35,6 @@ import {
   type DuelOutcome,
   type FighterDescriptor,
 } from "./BattleArenaModal";
-import { ChromaVideo } from "./ChromaVideo";
 
 import type { ArenaDuel } from "./DuelBoard";
 
@@ -506,7 +505,7 @@ export function AcceptDuelModal({ duel, onClose, onSettled }: AcceptDuelModalPro
         name:
           getProfile(duel.creator)?.username ?? truncateAddress(duel.creator),
         title: getProfile(duel.creator)?.title,
-        fighterClass: getProfile(duel.creator)?.fighterClass ?? "berserker",
+        fighterClass: getProfile(duel.creator)?.fighterClass ?? "chogzila",
       };
   const challengerFighter: FighterDescriptor = {
     address: address ?? ZERO,
@@ -514,7 +513,7 @@ export function AcceptDuelModal({ duel, onClose, onSettled }: AcceptDuelModalPro
       ? (getProfile(address)?.username ?? truncateAddress(address))
       : "Challenger",
     title: getProfile(address)?.title,
-    fighterClass: getProfile(address)?.fighterClass ?? "berserker",
+    fighterClass: getProfile(address)?.fighterClass ?? "chogzila",
   };
 
   return (
@@ -560,9 +559,13 @@ export function AcceptDuelModal({ duel, onClose, onSettled }: AcceptDuelModalPro
               <div className="flex flex-col items-center gap-6">
                 <div className="flex items-center justify-center gap-8">
                   <div className="flex flex-col items-center">
-                    <ChromaVideo
-                      src={FIGHTER_CLASS_META[creatorFighter.fighterClass].video}
-                      size={180}
+                    <img
+                      src={FIGHTER_CLASS_META[creatorFighter.fighterClass].portrait}
+                      alt=""
+                      aria-hidden
+                      draggable={false}
+                      className="fighter-portrait"
+                      style={{ height: 180, width: "auto" }}
                     />
                     <p className="mt-2 text-lg font-black uppercase tracking-wider text-white">
                       {creatorFighter.name}
@@ -573,9 +576,13 @@ export function AcceptDuelModal({ duel, onClose, onSettled }: AcceptDuelModalPro
                   </div>
                   <div className="flex flex-col items-center">
                     <div className="scale-x-[-1]">
-                      <ChromaVideo
-                        src={FIGHTER_CLASS_META[challengerFighter.fighterClass].video}
-                        size={180}
+                      <img
+                        src={FIGHTER_CLASS_META[challengerFighter.fighterClass].portrait}
+                        alt=""
+                        aria-hidden
+                        draggable={false}
+                        className="fighter-portrait"
+                        style={{ height: 180, width: "auto" }}
                       />
                     </div>
                     <p className="mt-2 text-lg font-black uppercase tracking-wider text-white">
@@ -758,7 +765,7 @@ function FighterCard({
   const { getProfile } = useFighterProfile();
   const profile = !placeholder && address !== ZERO ? getProfile(address) : null;
   const fighterClass: FighterClass =
-    npc?.fighterClass ?? profile?.fighterClass ?? "berserker";
+    npc?.fighterClass ?? profile?.fighterClass ?? "chogzila";
   const theme = FIGHTER_CLASS_META[fighterClass];
 
   return (
@@ -779,7 +786,14 @@ function FighterCard({
         <>
            {/* Full-body fighter preview */}
            <div className="flex justify-center">
-             <ChromaVideo src={theme.video} size={110} />
+              <img
+                src={theme.portrait}
+                alt=""
+                aria-hidden
+                draggable={false}
+                className="fighter-portrait"
+                style={{ height: 110, width: "auto" }}
+              />
            </div>
           <div className="-mt-2 flex items-center gap-2">
             <FighterAvatarBadge address={address} size="sm" />

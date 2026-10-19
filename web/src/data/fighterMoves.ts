@@ -28,8 +28,8 @@ export interface FighterMoveSet {
 }
 
 export const FIGHTER_MOVES: Record<string, FighterMoveSet> = {
-  berserker: {
-    id: "berserker",
+  chogzila: {
+    id: "chogzila",
     name: "Warlord Chogzilla",
     classBadge: "Arena Executioner",
     idleFrames: 4,
@@ -53,8 +53,8 @@ export const FIGHTER_MOVES: Record<string, FighterMoveSet> = {
       soundCue: "volcano_boom",
     },
   },
-  samurai: {
-    id: "samurai",
+  chog_samurai: {
+    id: "chog_samurai",
     name: "Chog Samurai",
     classBadge: "Samurai of Monad",
     idleFrames: 4,
@@ -78,8 +78,8 @@ export const FIGHTER_MOVES: Record<string, FighterMoveSet> = {
       soundCue: "speed_slash",
     },
   },
-  "void-james": {
-    id: "void-james",
+  void_lord_james: {
+    id: "void_lord_james",
     name: "Void Lord James",
     classBadge: "Abyssal Executioner",
     idleFrames: 4,
@@ -103,8 +103,8 @@ export const FIGHTER_MOVES: Record<string, FighterMoveSet> = {
       soundCue: "blackhole_boom",
     },
   },
-  benja: {
-    id: "benja",
+  crimson_lord_benja: {
+    id: "crimson_lord_benja",
     name: "Crimson Lord Benja",
     classBadge: "Crimson Lord",
     idleFrames: 4,
@@ -128,8 +128,8 @@ export const FIGHTER_MOVES: Record<string, FighterMoveSet> = {
       soundCue: "volcano_boom",
     },
   },
-  ladychog: {
-    id: "ladychog",
+  lady_chog: {
+    id: "lady_chog",
     name: "Lady Chog",
     classBadge: "Royal Chog",
     idleFrames: 4,
@@ -153,8 +153,8 @@ export const FIGHTER_MOVES: Record<string, FighterMoveSet> = {
       soundCue: "critical_beam",
     },
   },
-  princess: {
-    id: "princess",
+  chog_princess: {
+    id: "chog_princess",
     name: "Chog Princess",
     classBadge: "Chog Princess",
     idleFrames: 4,
@@ -180,18 +180,8 @@ export const FIGHTER_MOVES: Record<string, FighterMoveSet> = {
   },
 };
 
-/** Internal FighterClass keys → FIGHTER_MOVES ids. */
-const CLASS_MOVESET_ID: Record<FighterClass, string> = {
-  berserker: "berserker",
-  samurai: "samurai",
-  mage: "void-james",
-  benja: "benja",
-  ladychog: "ladychog",
-  princess: "princess",
-};
-
 export function getFighterMoveSet(cls: FighterClass): FighterMoveSet {
-  return FIGHTER_MOVES[CLASS_MOVESET_ID[cls]] ?? FIGHTER_MOVES.berserker;
+  return FIGHTER_MOVES[cls] ?? FIGHTER_MOVES.chogzila;
 }
 
 /** Map named sound cues onto the existing arenaAudio impact types. */

@@ -14,7 +14,6 @@ import {
 } from "@/config/fighterClasses";
 
 import { cn, truncateAddress } from "@/lib/utils";
-import { ChromaVideo } from "./ChromaVideo";
 import { pushToast } from "./Toast";
 
 type ProfileModalProps = {
@@ -63,7 +62,7 @@ export function ProfileModal({ open, onClose }: ProfileModalProps) {
   const [username, setUsername] = useState("");
   const [avatarUrl, setAvatarUrl] = useState("");
   const [title, setTitle] = useState<string>(FIGHTER_TITLES[0]);
-  const [fighterClass, setFighterClass] = useState<FighterClass>("berserker");
+  const [fighterClass, setFighterClass] = useState<FighterClass>("chogzila");
   const [urlInput, setUrlInput] = useState("");
   const [previewFailed, setPreviewFailed] = useState(false);
 
@@ -74,7 +73,7 @@ export function ProfileModal({ open, onClose }: ProfileModalProps) {
     setUsername(current?.username ?? "");
     setAvatarUrl(current?.avatarUrl ?? "");
     setTitle(current?.title ?? FIGHTER_TITLES[0]);
-    setFighterClass(current?.fighterClass ?? "berserker");
+    setFighterClass(current?.fighterClass ?? "chogzila");
     setUrlInput("");
     setPreviewFailed(false);
   }, [open, address, getProfile]);
@@ -304,7 +303,14 @@ export function ProfileModal({ open, onClose }: ProfileModalProps) {
                         : "border-white/10 bg-black/40 hover:border-white/25",
                     )}
                   >
-                     <ChromaVideo src={meta.video} size={88} />
+                     <img
+                       src={meta.portrait}
+                       alt=""
+                       aria-hidden
+                       draggable={false}
+                       className="fighter-portrait"
+                       style={{ height: 88, width: "auto" }}
+                     />
                     <span
                       className="text-[10px] font-extrabold uppercase tracking-wider"
                       style={{ color: selected ? meta.secondary : "#a1a1aa" }}
