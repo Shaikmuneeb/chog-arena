@@ -290,11 +290,6 @@ function NpcFighterCard({
       />
   {/* Portrait */}
   <div className="relative aspect-[3/4] overflow-hidden" style={{ boxShadow: `inset 0 0 40px ${classMeta.primary}33` }}>
-        <div
-          className="absolute inset-0 opacity-50 blur-2xl"
-          style={{ background: `radial-gradient(circle, ${classMeta.primary}88, transparent 70%)` }}
-          aria-hidden
-        />
         <div className="absolute inset-0 flex items-center justify-center transition-transform duration-300 group-hover:scale-125">
           <img
            src={classMeta.portrait}
