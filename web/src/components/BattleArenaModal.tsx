@@ -1,10 +1,26 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+} from "react";
+import dynamic from "next/dynamic";
 import { ExternalLink, Loader2, Swords } from "lucide-react";
 import { useFighterProfile } from "@/context/FighterProfileContext";
 import type { FighterClass } from "@/config/fighterClasses";
 import { FIGHTER_CLASS_META, FIGHTER_ROSTER_BY_ID } from "@/config/fighterClasses";
+import { has3DModel, type Fighter3DState } from "@/config/fighterModels";
+import type { StageFighter3D } from "./Fighter3D";
+
+/* three.js + R3F are heavy — load the 3D layer only when a duel starts. */
+const FighterStage3D = dynamic(
+  () => import("./Fighter3D").then((m) => m.FighterStage3D),
+  { ssr: false },
+);
 export type SpriteState =
   | "idle"
   | "dashIn"
@@ -273,7 +289,7 @@ const CLASS_AFTERIMAGE_CONFIG: Record<
     glow: "rgba(249, 115, 22, 0.85)",
   },
   chog_samurai: {
-    name: "Chog chog_samurai",
+    name: "Chog Samurai",
     color: "#a855f7",
     glow: "rgba(168, 85, 247, 0.85)",
   },
@@ -283,7 +299,7 @@ const CLASS_AFTERIMAGE_CONFIG: Record<
     glow: "rgba(192, 132, 252, 0.85)",
   },
   crimson_lord_benja: {
-    name: "Crimson Lord crimson_lord_benja",
+    name: "Crimson Lord Benja",
     color: "#ef4444",
     glow: "rgba(239, 68, 68, 0.85)",
   },
@@ -293,7 +309,7 @@ const CLASS_AFTERIMAGE_CONFIG: Record<
     glow: "rgba(244, 114, 182, 0.85)",
   },
   chog_princess: {
-    name: "Chog chog_princess",
+    name: "Chog Princess",
     color: "#c084fc",
     glow: "rgba(192, 132, 252, 0.85)",
   },
@@ -305,6 +321,25 @@ function stageSize(f: FighterDescriptor, narrow = false): number {
   return Math.round(
     225 * (CLASS_SIZE_SCALE[f.fighterClass] ?? 1) * (narrow ? 0.68 : 1),
   );
+}
+
+/** Map a 2D fighter pose onto the 3D animation state machine. */
+function toFighter3DState(pose: SpriteState, blocking: boolean): Fighter3DState {
+  if (blocking) return "block";
+  switch (pose) {
+    case "attack":
+    case "dashIn":
+      return "attack";
+    case "hit":
+    case "stagger":
+      return "hit";
+    case "dead":
+      return "ko";
+    case "victory":
+      return "victory";
+    default:
+      return "idle";
+  }
 }
 
 /* ------------------------------------------------------------------ tuning */
@@ -1333,6 +1368,9 @@ export function BattleArenaModal({
 }: BattleArenaModalProps) {
   const [view, setView] = useState<View>(initialView);
   const [narrow, setNarrow] = useState(false);
+  /* mirror of `narrow` for the rAF loop (no stale closure) */
+  const narrowRef = useRef(false);
+  narrowRef.current = narrow;
 
   /* Manual best-of-3 round scoreboard. Refs are the authoritative counters
    * (updated synchronously inside the rAF loop); state mirrors them for
@@ -1344,6 +1382,41 @@ export function BattleArenaModal({
 
   const matchRef = useRef<MatchState | null>(null);
   const viewRef = useRef<View>(initialView);
+
+  /* ================= 3D FIGHTER LAYER =================
+   * Fighters that ship a rigged Meshy model are drawn in a transparent R3F
+   * canvas that sits behind the 2D sprites; everyone else keeps the 2D
+   * treatment. The array is mutated in place every frame so the canvas
+   * never re-renders — it just reads the latest values in useFrame. */
+  const fighters3DRef = useRef<StageFighter3D[]>([
+    {
+      side: "creator",
+      fighterClass: creatorFighter.fighterClass,
+      state: "idle",
+      x: 68,
+      facing: "left",
+      height: 225,
+    },
+    {
+      side: "challenger",
+      fighterClass: challengerFighter.fighterClass,
+      state: "idle",
+      x: 32,
+      facing: "right",
+      height: 225,
+    },
+  ]);
+  /* which side has a live 3D model (falls back to the sprite if it fails) */
+  const [threeReady, setThreeReady] = useState<{
+    creator: boolean;
+    challenger: boolean;
+  }>({ creator: false, challenger: false });
+  const handle3DStatus = useCallback(
+    (side: "creator" | "challenger", ok: boolean) => {
+      setThreeReady((prev) => (prev[side] === ok ? prev : { ...prev, [side]: ok }));
+    },
+    [],
+  );
 
   const nameOf = (side: FighterSide): string =>
     side === "creator" ? creatorFighter.name : challengerFighter.name;
@@ -1424,6 +1497,18 @@ export function BattleArenaModal({
       const next = snapshot(m);
       viewRef.current = next;
       setView(next);
+
+      /* Mirror the fight state into the 3D layer (mutated in place). */
+      for (const entry of fighters3DRef.current) {
+        const f = next.fighters[entry.side];
+        entry.x = f.x;
+        entry.facing = f.facing;
+        entry.height = stageSize(
+          entry.side === "creator" ? creatorFighter : challengerFighter,
+          narrowRef.current,
+        );
+        entry.state = toFighter3DState(f.pose, f.blockHeld);
+      }
       /* Combat log / commentary feed — newest first, like a live feed. */
       const hits = next.hits;
       if (hits.length) {
@@ -1707,15 +1792,33 @@ export function BattleArenaModal({
                   );
                 })}
 
+                {/* 3D fighter layer — rigged models are drawn in a transparent
+                    R3F canvas that lines up pixel-for-pixel with the 2D
+                    sprites. Fighters without a model keep the 2D treatment.
+                    The canvas mounts whenever a character SHIPS a model; if
+                    that model fails to load, `threeReady` stays false and the
+                    2D sprite takes over. */}
+                {(has3DModel(creatorFighter.fighterClass) ||
+                  has3DModel(challengerFighter.fighterClass)) && (
+                  <FighterStage3D
+                    fightersRef={fighters3DRef}
+                    onStatus={handle3DStatus}
+                  />
+                )}
+
                 {/* Fighters + Motion Afterimages (Shadow Clones) */}
                 {(["creator", "challenger"] as const).map((side) => {
                   const f = view.fighters[side];
                   const desc = side === "creator" ? creatorFighter : challengerFighter;
                   const classCfg = CLASS_AFTERIMAGE_CONFIG[desc.fighterClass];
+                  /* a live 3D model replaces the 2D sprite for that fighter */
+                  const use3D =
+                    has3DModel(desc.fighterClass) && threeReady[side];
 
                   const isDashing = f.moveDir !== 0;
                   const isSpecialOrCrit = f.pose === "attack" && Boolean(f.activeMoveName);
-                  const showAfterimages = isDashing || isSpecialOrCrit;
+                  const showAfterimages =
+                    !use3D && (isDashing || isSpecialOrCrit);
 
                   const dirSign = f.moveDir !== 0 ? f.moveDir : (f.facing === "right" ? 1 : -1);
                   const offsets = [-dirSign * 3.5, -dirSign * 7.5, -dirSign * 11.5];
@@ -1751,8 +1854,16 @@ export function BattleArenaModal({
 
                        {/* Main Fighter Body */}
                        <div
-                         className="sprite-pixelated absolute bottom-5 z-30"
-                         style={{ left: `${f.x}%`, transform: "translateX(-50%)", opacity: 1, visibility: "visible" }}
+                         className={cn(
+                           "sprite-pixelated absolute bottom-5 z-30",
+                           use3D && "pointer-events-none",
+                         )}
+                         style={{
+                           left: `${f.x}%`,
+                           transform: "translateX(-50%)",
+                           opacity: use3D ? 0 : 1,
+                           visibility: "visible",
+                         }}
                        >
                         <div className="assist-stance">
                           <ChromaFighter
