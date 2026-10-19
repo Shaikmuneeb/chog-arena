@@ -288,11 +288,8 @@ function NpcFighterCard({
         }}
         aria-hidden
       />
-      {/* Portrait */}
-      <div
-        className="relative aspect-[3/4] overflow-hidden bg-black/60"
-        style={{ boxShadow: `inset 0 0 40px ${classMeta.primary}33` }}
-      >
+  {/* Portrait */}
+  <div className="relative aspect-[3/4] overflow-hidden" style={{ boxShadow: `inset 0 0 40px ${classMeta.primary}33` }}>
         <div
           className="absolute inset-0 opacity-50 blur-2xl"
           style={{ background: `radial-gradient(circle, ${classMeta.primary}88, transparent 70%)` }}
