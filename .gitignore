@@ -27,3 +27,6 @@ docs/
 .env.*
 !.env.example
 
+
+# 3D animation clips (241MB) - kept on disk, not tracked in git
+web/public/models/**/*.fbx
