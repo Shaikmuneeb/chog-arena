@@ -7,7 +7,21 @@ import { Swords } from "lucide-react";
 import { ArenaHeader } from "@/components/ArenaHeader";
 import { CreateDuelModal } from "@/components/CreateDuelModal";
 import { DuelBoard, type ArenaDuel } from "@/components/DuelBoard";
+import type { FighterClass } from "@/config/fighterClasses";
 import { CHOG_ARENA_ADDRESS, chogArenaAbi } from "@/contracts";
+
+/**
+ * The 6 unique fighters the arena renders — hardcoded by character id so
+ * every card / combat view maps 1:1 to its own portrait. No fallbacks.
+ */
+const ROSTER: FighterClass[] = [
+  "chogzila",
+  "chog_samurai",
+  "void_lord_james",
+  "crimson_lord_benja",
+  "lady_chog",
+  "chog_princess",
+];
 
 export default function Home() {
   const [duels, setDuels] = useState<ArenaDuel[]>([]);
@@ -83,7 +97,12 @@ export default function Home() {
           </div>
         </section>
 
-        <DuelBoard duels={duels} onDuelSettled={handleSettled} onCreateDuel={() => setCreateOpen(true)} />
+        <DuelBoard
+          duels={duels}
+          onDuelSettled={handleSettled}
+          onCreateDuel={() => setCreateOpen(true)}
+          roster={ROSTER}
+        />
       </main>
 
       <CreateDuelModal

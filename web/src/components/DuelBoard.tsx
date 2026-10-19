@@ -28,7 +28,11 @@ import {
   NPC_DUEL_ID_BASE,
   type ArenaNpc,
 } from "@/config/arenaNpcs";
-import { FIGHTER_CLASS_META, type FighterClass } from "@/config/fighterClasses";
+import {
+  FIGHTER_CLASSES,
+  FIGHTER_CLASS_META,
+  type FighterClass,
+} from "@/config/fighterClasses";
 import { cn, formatMon, truncateAddress } from "@/lib/utils";
 import { pushToast } from "./Toast";
 import { AcceptDuelModal } from "./AcceptDuelModal";
@@ -59,6 +63,8 @@ type DuelBoardProps = {
   duels: ArenaDuel[];
   onDuelSettled: (duelId: number) => void;
   onCreateDuel?: () => void;
+  /** The 6 unique fighter ids, in roster order — one card per index. */
+  roster?: FighterClass[];
 };
 
 /**
@@ -67,7 +73,12 @@ type DuelBoardProps = {
  * "Accept Challenge" opens the VS matchup modal; own duels can be cancelled
  * to reclaim the staked MON.
  */
-export function DuelBoard({ duels, onDuelSettled, onCreateDuel }: DuelBoardProps) {
+export function DuelBoard({
+  duels,
+  onDuelSettled,
+  onCreateDuel,
+  roster = FIGHTER_CLASSES,
+}: DuelBoardProps) {
   const config = useConfig();
   const { address, chainId: walletChainId } = useAccount();
   const appChainId = useChainId();
@@ -155,13 +166,21 @@ export function DuelBoard({ duels, onDuelSettled, onCreateDuel }: DuelBoardProps
   // Arena NPC challengers + local optimistic entries + live on-chain
   // duels (deduped by id). NPCs and player duels render in SEPARATE
   // sections — never mixed into one list.
-  const npcDuels: ArenaDuel[] = ARENA_NPCS.map((npc, i) => ({
-    id: NPC_DUEL_ID_BASE + i,
-    creator: npc.address,
-    betAmount: npc.wager,
-    status: "open",
-    npc,
-  }));
+  // Built BY INDEX off the unique fighter roster, so each card gets exactly
+  // its own character asset — no shared/duplicated portraits.
+  const npcDuels: ArenaDuel[] = roster.flatMap((cls, i): ArenaDuel[] => {
+    const npc = ARENA_NPCS.find((n) => n.fighterClass === cls);
+    if (!npc) return [];
+    return [
+      {
+        id: NPC_DUEL_ID_BASE + i,
+        creator: npc.address,
+        betAmount: npc.wager,
+        status: "open",
+        npc,
+      },
+    ];
+  });
   const lobby = liveDuels ?? [];
   const localIds = new Set(duels.map((d) => d.id));
   const merged = [...duels, ...lobby.filter((d) => !localIds.has(d.id))];
