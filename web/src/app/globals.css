@@ -316,8 +316,8 @@ body {
  * into any dark backdrop. Pure CSS, no video/canvas decode. */
 .fighter-portrait {
   object-fit: contain;
-  -webkit-mask-image: radial-gradient(70% 80% at 50% 48%, #000 42%, transparent 80%);
-  mask-image: radial-gradient(70% 80% at 50% 48%, #000 42%, transparent 80%);
+  -webkit-mask-image: radial-gradient(64% 74% at 50% 46%, #000 38%, transparent 78%);
+  mask-image: radial-gradient(64% 74% at 50% 46%, #000 38%, transparent 78%);
 }
 
 /* Crisp pixel-art scaling for every fighter canvas/sprite wrapper. */

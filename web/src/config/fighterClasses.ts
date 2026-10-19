@@ -22,6 +22,8 @@ export type FighterRosterEntry = {
   name: string;
   /** The character's designated source design MP4. */
   video: string;
+  /** Animated GIF loop of that design — used in the combat stage. */
+  gif: string;
   /** Static poster frame of that MP4 — what the UI actually renders. */
   image: string;
   /** Hardcoded stake price for this fighter's arena challenge. */
@@ -39,6 +41,7 @@ export const FIGHTER_ROSTER: readonly FighterRosterEntry[] = [
     id: "chogzila",
     name: "Warlord Chogzila",
     video: "/fighters/new chogzilla design.mp4",
+    gif: "/fighters/new chogzilla design.gif",
     image: "/fighters/portraits/chogzila.png",
     price: "2.5 MON",
   },
@@ -46,6 +49,7 @@ export const FIGHTER_ROSTER: readonly FighterRosterEntry[] = [
     id: "chog_samurai",
     name: "Chog Samurai",
     video: "/fighters/chog samuri new design.mp4",
+    gif: "/fighters/chog samuri new design.gif",
     image: "/fighters/portraits/chog_samurai.png",
     price: "0.5 MON",
   },
@@ -53,6 +57,7 @@ export const FIGHTER_ROSTER: readonly FighterRosterEntry[] = [
     id: "void_lord_james",
     name: "Void Lord James",
     video: "/fighters/new design void lord james.mp4",
+    gif: "/fighters/new design void lord james.gif",
     image: "/fighters/portraits/void_lord_james.png",
     price: "1 MON",
   },
@@ -60,6 +65,7 @@ export const FIGHTER_ROSTER: readonly FighterRosterEntry[] = [
     id: "crimson_lord_benja",
     name: "Crimson Lord Benja",
     video: "/fighters/crimson lord benja.mp4",
+    gif: "/fighters/crimson lord benja.gif",
     image: "/fighters/portraits/crimson_lord_benja.png",
     price: "0.1 MON",
   },
@@ -67,6 +73,7 @@ export const FIGHTER_ROSTER: readonly FighterRosterEntry[] = [
     id: "lady_chog",
     name: "Lady Chog",
     video: "/fighters/new design lady chog.mp4",
+    gif: "/fighters/new design lady chog.gif",
     image: "/fighters/portraits/lady_chog.png",
     price: "1.5 MON",
   },
@@ -74,6 +81,7 @@ export const FIGHTER_ROSTER: readonly FighterRosterEntry[] = [
     id: "chog_princess",
     name: "Chog Princess",
     video: "/fighters/chog princess new design.mp4",
+    gif: "/fighters/chog princess new design.gif",
     image: "/fighters/portraits/chog_princess.png",
     price: "1.2 MON",
   },

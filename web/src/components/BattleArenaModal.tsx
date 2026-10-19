@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react"
 import { ExternalLink, Loader2, Swords } from "lucide-react";
 import { useFighterProfile } from "@/context/FighterProfileContext";
 import type { FighterClass } from "@/config/fighterClasses";
-import { FIGHTER_CLASS_META } from "@/config/fighterClasses";
+import { FIGHTER_CLASS_META, FIGHTER_ROSTER_BY_ID } from "@/config/fighterClasses";
 export type SpriteState =
   | "idle"
   | "dashIn"
@@ -75,7 +75,9 @@ export function ChromaFighter({
   moveDir?: number;
 }) {
   const theme = FIGHTER_CLASS_META[fighterClass];
-  const portraitSrc = theme.portrait;
+  /* Animated GIF loop for the combat stage — the fighter id resolves to its
+   * own asset, never a neighbour's. */
+  const portraitSrc = FIGHTER_ROSTER_BY_ID[fighterClass].gif;
   const leanClass =
     leanDir === "forward"
       ? "fighter-lean-forward"

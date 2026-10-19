@@ -27,7 +27,11 @@ import {
   FighterAvatarBadge,
   useFighterProfile,
 } from "@/context/FighterProfileContext";
-import { FIGHTER_CLASS_META, type FighterClass } from "@/config/fighterClasses";
+import {
+  FIGHTER_CLASS_META,
+  FIGHTER_ROSTER_BY_ID,
+  type FighterClass,
+} from "@/config/fighterClasses";
 import type { ArenaNpc } from "@/config/arenaNpcs";
 import { pushToast, updateToast } from "./Toast";
 import {
@@ -560,7 +564,7 @@ export function AcceptDuelModal({ duel, onClose, onSettled }: AcceptDuelModalPro
                 <div className="flex items-center justify-center gap-8">
                   <div className="flex flex-col items-center">
                     <img
-                      src={FIGHTER_CLASS_META[creatorFighter.fighterClass].portrait}
+                      src={FIGHTER_ROSTER_BY_ID[creatorFighter.fighterClass].gif}
                       alt=""
                       aria-hidden
                       draggable={false}
@@ -577,7 +581,7 @@ export function AcceptDuelModal({ duel, onClose, onSettled }: AcceptDuelModalPro
                   <div className="flex flex-col items-center">
                     <div className="scale-x-[-1]">
                       <img
-                        src={FIGHTER_CLASS_META[challengerFighter.fighterClass].portrait}
+                        src={FIGHTER_ROSTER_BY_ID[challengerFighter.fighterClass].gif}
                         alt=""
                         aria-hidden
                         draggable={false}
@@ -787,7 +791,7 @@ function FighterCard({
            {/* Full-body fighter preview */}
            <div className="flex justify-center">
               <img
-                src={theme.portrait}
+                src={FIGHTER_ROSTER_BY_ID[fighterClass].gif}
                 alt=""
                 aria-hidden
                 draggable={false}
