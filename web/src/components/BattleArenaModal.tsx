@@ -163,7 +163,7 @@ export function ChromaFighter({
           alt=""
           aria-hidden
           draggable={false}
-          className="fighter-portrait select-none"
+          className="fighter-gif select-none"
           style={{ height: size, width: "auto" }}
         />
         {isBlocking && (
@@ -1424,26 +1424,29 @@ export function BattleArenaModal({
       const next = snapshot(m);
       viewRef.current = next;
       setView(next);
-      /* Combat log / commentary feed — append new hits as they land. */
+      /* Combat log / commentary feed — newest first, like a live feed. */
       const hits = next.hits;
       if (hits.length) {
         const newest = hits[hits.length - 1];
         if (newest.id > lastHitId.current) {
           lastHitId.current = newest.id;
+          const attackerSide = newest.side;
           const attackerName =
-            newest.side === "challenger" ? challengerFighter.name : creatorFighter.name;
-          const moveText = newest.name ? ` — ${newest.name}` : "";
+            attackerSide === "challenger"
+              ? challengerFighter.name
+              : creatorFighter.name;
+          const attackerClass =
+            attackerSide === "challenger"
+              ? challengerFighter.fighterClass
+              : creatorFighter.fighterClass;
+          const signature = FIGHTER_ROSTER_BY_ID[attackerClass].style;
+          const moveText = newest.name ?? signature;
           const critText = newest.crit ? " CRITICAL" : "";
           const multiText = newest.multi && newest.multi > 1 ? ` ×${newest.multi}` : "";
-          combatLogRef.current.push({
-            id: newest.id,
-            text: `${attackerName}${critText} hits for ${newest.dmg} DMG${multiText}${moveText}`,
-          });
-          if (combatLogRef.current.length > 12) combatLogRef.current.shift();
-          /* Auto-scroll the combat log to the newest entry. */
-          if (logEndRef.current) {
-            logEndRef.current.scrollTop = logEndRef.current.scrollHeight;
-          }
+          const line = `${attackerName} uses ${moveText}${critText} (-${newest.dmg} HP)${multiText}`;
+          latestMoveRef.current = line;
+          combatLogRef.current.unshift({ id: newest.id, text: line });
+          if (combatLogRef.current.length > 5) combatLogRef.current.pop();
         }
       }
       if (m.stage !== "verdict") raf = requestAnimationFrame(loop);
@@ -1466,6 +1469,7 @@ export function BattleArenaModal({
   const autoTimer = useRef(0);
   const combatLogRef = useRef<{ id: number; text: string }[]>([]);
   const lastHitId = useRef(0);
+  const latestMoveRef = useRef<string>("SIMULATING COMBAT…");
   const logEndRef = useRef<HTMLDivElement>(null);
 
   const scheduleAutoStrike = (m: MatchState, script: MatchScript): void => {
@@ -1605,6 +1609,13 @@ export function BattleArenaModal({
                   className="absolute inset-0 bg-gradient-to-t from-zinc-950 via-zinc-950/80 to-zinc-950/60"
                   aria-hidden
                 />
+
+                {/* Floating move banner — the latest exchange, front and centre */}
+                <div className="pointer-events-none absolute inset-x-0 top-4 z-[33] flex justify-center">
+                  <div className="max-w-[92%] truncate rounded-full border border-yellow-500/30 bg-black/70 px-5 py-1.5 text-center text-[10px] font-bold uppercase tracking-widest text-yellow-400 animate-pulse sm:text-xs">
+                    {latestMoveRef.current}
+                  </div>
+                </div>
 
                 {/* Critical Art Cut-In Dark Vignette */}
                 {isCriticalArt && (
@@ -1974,31 +1985,36 @@ export function BattleArenaModal({
                 </span>
               </div>
 
-              {/* Combat log / commentary feed — auto-scrolls to the bottom */}
+              {/* Combat log / commentary feed — newest first, newest highlighted */}
               <div className="flex-1 overflow-hidden flex flex-col min-h-0">
                 <div
                   className="border-t border-white/10 bg-black/80 p-2 sm:p-3 overflow-y-auto"
                 >
-                  <p className="text-[9px] font-bold uppercase tracking-widest text-zinc-500 mb-1">
-                    COMBAT LOG
+                  <p className="text-[9px] font-bold uppercase tracking-widest text-amber-400/90 mb-1">
+                    Automated Match Feed
                   </p>
                   <div
                     className="space-y-0.5 text-[10px] font-mono leading-relaxed"
                     ref={logEndRef}
                   >
-                    {combatLogRef.current.map((e) => (
-                      <div
-                        key={e.id}
-                        className="text-zinc-300/90 drop-shadow-[0_0_6px_rgba(0,0,0,0.6)]"
-                      >
-                        {e.text}
-                      </div>
-                    ))}
                     {combatLogRef.current.length === 0 && (
                       <div className="text-zinc-500/60 italic">
-                        Awaiting first strike…
+                        Match started! Auto-battle simulation underway…
                       </div>
                     )}
+                    {combatLogRef.current.map((e, i) => (
+                      <div
+                        key={e.id}
+                        className={cn(
+                          "transition-opacity drop-shadow-[0_0_6px_rgba(0,0,0,0.6)]",
+                          i === 0
+                            ? "font-bold text-white"
+                            : "text-zinc-300 opacity-50",
+                        )}
+                      >
+                        ⚔️ {e.text}
+                      </div>
+                    ))}
                   </div>
                 </div>
               </div>
@@ -2071,12 +2087,20 @@ function HudSide({
   hp: number;
   align: "left" | "right";
 }) {
+  /* P1 keeps the red -> purple brand gradient, P2 the blue -> indigo one;
+   * both fall back to amber then red as their HP drops. */
   const barColor =
-    hp > 50
-      ? "from-emerald-500 to-lime-400"
-      : hp > 25
-        ? "from-amber-500 to-yellow-400"
-        : "from-red-600 to-rose-500";
+    align === "left"
+      ? hp > 50
+        ? "from-red-600 to-purple-600"
+        : hp > 25
+          ? "from-amber-500 to-red-600"
+          : "from-rose-600 to-red-700"
+      : hp > 50
+        ? "from-blue-600 to-indigo-600"
+        : hp > 25
+          ? "from-amber-500 to-blue-700"
+          : "from-rose-600 to-red-700";
 
   const identity = (
     <div

@@ -24,6 +24,8 @@ export type FighterRosterEntry = {
   video: string;
   /** Animated GIF loop of that design — used in the combat stage. */
   gif: string;
+  /** Signature move name used by the combat commentary feed. */
+  style: string;
   /** Static poster frame of that MP4 — what the UI actually renders. */
   image: string;
   /** Hardcoded stake price for this fighter's arena challenge. */
@@ -42,6 +44,7 @@ export const FIGHTER_ROSTER: readonly FighterRosterEntry[] = [
     name: "Warlord Chogzila",
     video: "/fighters/new chogzilla design.mp4",
     gif: "/fighters/new chogzilla design.gif",
+    style: "Atomic Plasma Breath",
     image: "/fighters/portraits/chogzila.png",
     price: "2.5 MON",
   },
@@ -50,6 +53,7 @@ export const FIGHTER_ROSTER: readonly FighterRosterEntry[] = [
     name: "Chog Samurai",
     video: "/fighters/chog samuri new design.mp4",
     gif: "/fighters/chog samuri new design.gif",
+    style: "Thunderstrike Flash",
     image: "/fighters/portraits/chog_samurai.png",
     price: "0.5 MON",
   },
@@ -58,6 +62,7 @@ export const FIGHTER_ROSTER: readonly FighterRosterEntry[] = [
     name: "Void Lord James",
     video: "/fighters/new design void lord james.mp4",
     gif: "/fighters/new design void lord james.gif",
+    style: "Void Dimension Cleave",
     image: "/fighters/portraits/void_lord_james.png",
     price: "1 MON",
   },
@@ -66,6 +71,7 @@ export const FIGHTER_ROSTER: readonly FighterRosterEntry[] = [
     name: "Crimson Lord Benja",
     video: "/fighters/crimson lord benja.mp4",
     gif: "/fighters/crimson lord benja.gif",
+    style: "Crimson Hellfire Combo",
     image: "/fighters/portraits/crimson_lord_benja.png",
     price: "0.1 MON",
   },
@@ -74,6 +80,7 @@ export const FIGHTER_ROSTER: readonly FighterRosterEntry[] = [
     name: "Lady Chog",
     video: "/fighters/new design lady chog.mp4",
     gif: "/fighters/new design lady chog.gif",
+    style: "Phantom Blade Dance",
     image: "/fighters/portraits/lady_chog.png",
     price: "1.5 MON",
   },
@@ -82,6 +89,7 @@ export const FIGHTER_ROSTER: readonly FighterRosterEntry[] = [
     name: "Chog Princess",
     video: "/fighters/chog princess new design.mp4",
     gif: "/fighters/chog princess new design.gif",
+    style: "Supernova Astral Beam",
     image: "/fighters/portraits/chog_princess.png",
     price: "1.2 MON",
   },

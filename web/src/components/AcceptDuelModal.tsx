@@ -568,7 +568,7 @@ export function AcceptDuelModal({ duel, onClose, onSettled }: AcceptDuelModalPro
                       alt=""
                       aria-hidden
                       draggable={false}
-                      className="fighter-portrait"
+                      className="fighter-gif"
                       style={{ height: 180, width: "auto" }}
                     />
                     <p className="mt-2 text-lg font-black uppercase tracking-wider text-white">
@@ -585,7 +585,7 @@ export function AcceptDuelModal({ duel, onClose, onSettled }: AcceptDuelModalPro
                         alt=""
                         aria-hidden
                         draggable={false}
-                        className="fighter-portrait"
+                        className="fighter-gif"
                         style={{ height: 180, width: "auto" }}
                       />
                     </div>
@@ -795,7 +795,7 @@ function FighterCard({
                 alt=""
                 aria-hidden
                 draggable={false}
-                className="fighter-portrait"
+                className="fighter-gif"
                 style={{ height: 110, width: "auto" }}
               />
            </div>
