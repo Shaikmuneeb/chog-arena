@@ -29,9 +29,10 @@ import {
   type ArenaNpc,
 } from "@/config/arenaNpcs";
 import {
-  FIGHTER_CLASSES,
   FIGHTER_CLASS_META,
+  FIGHTER_ROSTER,
   type FighterClass,
+  type FighterRosterEntry,
 } from "@/config/fighterClasses";
 import { cn, formatMon, truncateAddress } from "@/lib/utils";
 import { pushToast } from "./Toast";
@@ -46,6 +47,8 @@ export type ArenaDuel = {
   mine?: boolean;
   /** Arena NPC challenger (demo opponent with its own fighter class). */
   npc?: ArenaNpc;
+  /** Static roster entry bound to this duel (id, asset, price). */
+  rosterEntry?: FighterRosterEntry;
 };
 
 const ZERO = zeroAddress;
@@ -63,8 +66,12 @@ type DuelBoardProps = {
   duels: ArenaDuel[];
   onDuelSettled: (duelId: number) => void;
   onCreateDuel?: () => void;
-  /** The 6 unique fighter ids, in roster order — one card per index. */
-  roster?: FighterClass[];
+  /**
+   * The static roster array. Each entry carries its own character id, its own
+   * designated asset and its own price — the grid renders these objects
+   * directly, so an image can never shift onto another fighter.
+   */
+  roster?: readonly FighterRosterEntry[];
 };
 
 /**
@@ -77,7 +84,7 @@ export function DuelBoard({
   duels,
   onDuelSettled,
   onCreateDuel,
-  roster = FIGHTER_CLASSES,
+  roster = FIGHTER_ROSTER,
 }: DuelBoardProps) {
   const config = useConfig();
   const { address, chainId: walletChainId } = useAccount();
@@ -166,18 +173,21 @@ export function DuelBoard({
   // Arena NPC challengers + local optimistic entries + live on-chain
   // duels (deduped by id). NPCs and player duels render in SEPARATE
   // sections — never mixed into one list.
-  // Built BY INDEX off the unique fighter roster, so each card gets exactly
-  // its own character asset — no shared/duplicated portraits.
-  const npcDuels: ArenaDuel[] = roster.flatMap((cls, i): ArenaDuel[] => {
-    const npc = ARENA_NPCS.find((n) => n.fighterClass === cls);
+  // Each roster entry resolves to its challenger BY CHARACTER ID, so the
+  // card always shows the asset + price bound to that exact fighter.
+  const npcDuels: ArenaDuel[] = roster.flatMap((entry): ArenaDuel[] => {
+    const npc = ARENA_NPCS.find((n) => n.fighterClass === entry.id);
     if (!npc) return [];
     return [
       {
-        id: NPC_DUEL_ID_BASE + i,
+        /* Duel id derives from the fighter's own on-chain npcId, never from
+         * its position in the array — reordering never remaps a duel. */
+        id: NPC_DUEL_ID_BASE + npc.npcId,
         creator: npc.address,
         betAmount: npc.wager,
         status: "open",
         npc,
+        rosterEntry: entry,
       },
     ];
   });
@@ -231,11 +241,12 @@ export function DuelBoard({
         </ul>
       )}
 
-      {/* Arcade roster grid */}
+      {/* Arcade roster grid — renders the static roster objects directly,
+          keyed by character id so React never re-orders a fighter's asset. */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {npcDuels.map((duel) => (
           <NpcFighterCard
-            key={duel.id}
+            key={duel.rosterEntry?.id ?? duel.id}
             duel={duel}
             onFight={() => setActiveDuel(duel)}
           />
@@ -278,6 +289,12 @@ function NpcFighterCard({
   if (!npc) return null;
   const classMeta = FIGHTER_CLASS_META[npc.fighterClass];
   const style = FIGHTER_STYLE[npc.fighterClass] ?? npc.title;
+  /* The roster entry owns this card's identity: its own asset, its own
+   * name and its own hardcoded price. Never derived from a neighbour. */
+  const entry = duel.rosterEntry;
+  const portraitSrc = entry?.image ?? classMeta.portrait;
+  const displayName = entry?.name ?? npc.name;
+  const priceLabel = entry?.price ?? `${formatMon(duel.betAmount)} MON`;
   return (
     <li className="group relative flex flex-col overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-900/80 transition-all duration-300 hover:border-purple-500/50 hover:bg-zinc-900/95 hover:shadow-[0_0_28px_-8px_rgba(168,85,247,0.45)]">
       {/* Class-tinted top edge */}
@@ -292,7 +309,7 @@ function NpcFighterCard({
   <div className="relative aspect-[3/4] overflow-hidden" style={{ boxShadow: `inset 0 0 40px ${classMeta.primary}33` }}>
         <div className="absolute inset-0 flex items-center justify-center transition-transform duration-300 group-hover:scale-125">
           <img
-           src={classMeta.portrait}
+           src={portraitSrc}
            alt=""
            aria-hidden
            draggable={false}
@@ -303,11 +320,11 @@ function NpcFighterCard({
       </div>
       <div className="absolute inset-x-0 bottom-0 z-20 bg-gradient-to-t from-black via-black/60 to-transparent p-4">
         <p className="text-xl font-black uppercase tracking-wider text-white">
-          {npc.name}
+          {displayName}
         </p>
         <div className="mt-1 flex items-center justify-between">
           <span className="font-mono text-sm font-black tabular-nums text-amber-300">
-            {formatMon(duel.betAmount)} MON
+            {priceLabel}
           </span>
           <button
             type="button"

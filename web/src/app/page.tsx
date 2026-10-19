@@ -7,21 +7,15 @@ import { Swords } from "lucide-react";
 import { ArenaHeader } from "@/components/ArenaHeader";
 import { CreateDuelModal } from "@/components/CreateDuelModal";
 import { DuelBoard, type ArenaDuel } from "@/components/DuelBoard";
-import type { FighterClass } from "@/config/fighterClasses";
+import { FIGHTER_ROSTER } from "@/config/fighterClasses";
 import { CHOG_ARENA_ADDRESS, chogArenaAbi } from "@/contracts";
 
 /**
- * The 6 unique fighters the arena renders — hardcoded by character id so
- * every card / combat view maps 1:1 to its own portrait. No fallbacks.
+ * The roster grid renders the static FIGHTER_ROSTER array — an explicit
+ * object list where every entry is bound to its own character id, its own
+ * designated asset and its own price. Nothing is resolved by index.
  */
-const ROSTER: FighterClass[] = [
-  "chogzila",
-  "chog_samurai",
-  "void_lord_james",
-  "crimson_lord_benja",
-  "lady_chog",
-  "chog_princess",
-];
+const ROSTER = FIGHTER_ROSTER;
 
 export default function Home() {
   const [duels, setDuels] = useState<ArenaDuel[]>([]);

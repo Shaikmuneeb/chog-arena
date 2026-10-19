@@ -9,8 +9,8 @@ import {
   type FighterClass,
 } from "@/context/FighterProfileContext";
 import {
-  FIGHTER_CLASSES,
   FIGHTER_CLASS_META,
+  FIGHTER_ROSTER,
 } from "@/config/fighterClasses";
 
 import { cn, truncateAddress } from "@/lib/utils";
@@ -288,12 +288,13 @@ export function ProfileModal({ open, onClose }: ProfileModalProps) {
               Fighter Class
             </p>
             <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
-              {FIGHTER_CLASSES.map((cls) => {
+              {FIGHTER_ROSTER.map((entry) => {
+                const cls = entry.id;
                 const meta = FIGHTER_CLASS_META[cls];
                 const selected = fighterClass === cls;
                 return (
                   <button
-                    key={cls}
+                    key={entry.id}
                     type="button"
                     onClick={() => setFighterClass(cls)}
                     className={cn(
@@ -304,7 +305,7 @@ export function ProfileModal({ open, onClose }: ProfileModalProps) {
                     )}
                   >
                      <img
-                       src={meta.portrait}
+                       src={entry.image}
                        alt=""
                        aria-hidden
                        draggable={false}
