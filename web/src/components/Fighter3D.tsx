@@ -399,18 +399,20 @@ function StageScene({
 
   return (
     <>
-      <ambientLight intensity={0.75} />
-      <hemisphereLight args={["#c4b5fd", "#0a0a12", 0.7]} />
+      <ambientLight intensity={1.4} />
+      <hemisphereLight args={["#c4b5fd", "#0a0a12", 0.9]} />
       <directionalLight
         position={[-60, 90, 120]}
-        intensity={1.5}
+        intensity={2.4}
         color="#fff4e6"
       />
       <directionalLight
         position={[70, 40, -80]}
-        intensity={0.8}
+        intensity={1.1}
         color="#a855f7"
       />
+      <pointLight position={[-160, 40, 90]} intensity={1.4} color="#ec4899" />
+      <pointLight position={[160, 40, 90]} intensity={1.4} color="#8b5cf6" />
       {three.map((spec) => (
         <FighterModel
           key={spec.side}
@@ -612,18 +614,20 @@ export function FighterPreview3D({
         }}
       >
         <Suspense fallback={null}>
-          <ambientLight intensity={0.9} />
-          <hemisphereLight args={["#e9d5ff", "#1a1030", 0.8]} />
+          <ambientLight intensity={1.5} />
+          <hemisphereLight args={["#e9d5ff", "#1a1030", 1]} />
           <directionalLight
             position={[-40, 60, 90]}
-            intensity={1.6}
+            intensity={2.4}
             color="#fff4e6"
           />
           <directionalLight
             position={[50, 30, -60]}
-            intensity={0.9}
+            intensity={1.2}
             color="#a855f7"
           />
+          <pointLight position={[-60, 20, 60]} intensity={1.2} color="#ec4899" />
+          <pointLight position={[60, 20, 60]} intensity={1.2} color="#8b5cf6" />
           <PreviewRig fighterClass={fighterClass} state={state} facing={facing} />
         </Suspense>
         <AdaptiveDpr pixelated />
