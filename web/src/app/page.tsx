@@ -57,15 +57,18 @@ export default function Home() {
     <>
       <ArenaHeader />
       <main className="mx-auto max-w-6xl space-y-8 px-4 py-8">
-        {/* Create Duel CTA */}
+        {/* Create Duel CTA — pure CSS arena glow, no flat background images */}
         <section className="relative overflow-hidden rounded-3xl border border-white/10 bg-zinc-900 p-8 text-center shadow-[0_0_60px_rgba(244,63,94,0.08)]">
           <div
-            className="absolute inset-0 bg-cover bg-center"
-            style={{ backgroundImage: "url(/assets/arena-background.jpg)" }}
+            className="absolute inset-0"
+            style={{
+              background:
+                "radial-gradient(ellipse at 50% 120%, rgba(168,85,247,0.35), transparent 55%), radial-gradient(ellipse at 15% 0%, rgba(236,72,153,0.22), transparent 50%), linear-gradient(180deg, #0b0616 0%, #12081f 60%, #05030c 100%)",
+            }}
             aria-hidden
           />
           <div
-            className="absolute inset-0 bg-gradient-to-b from-black/60 via-black/45 to-black/75"
+            className="absolute inset-0 bg-gradient-to-b from-black/50 via-black/35 to-black/70"
             aria-hidden
           />
           <div className="relative z-10">

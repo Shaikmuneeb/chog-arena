@@ -1,7 +1,16 @@
 "use client";
 
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import { AdaptiveDpr, Preload, useAnimations, useFBX } from "@react-three/drei";
+import {
+  AdaptiveDpr,
+  Center,
+  Grid,
+  MeshReflectorMaterial,
+  Preload,
+  Text3D,
+  useAnimations,
+  useFBX,
+} from "@react-three/drei";
 import * as THREE from "three";
 import { FBXLoader } from "three/examples/jsm/loaders/FBXLoader.js";
 import * as SkeletonUtils from "three/examples/jsm/utils/SkeletonUtils.js";
@@ -32,7 +41,7 @@ export type StageFighter3D = {
 
 /* ------------------------------------------------------------------ loading */
 
-/** One fetch per clip file — many consumers share it. */
+/** One fetch per clip file â€” many consumers share it. */
 const fbxCache = new Map<string, Promise<THREE.Group>>();
 
 function loadFbx(url: string): Promise<THREE.Group> {
@@ -123,7 +132,7 @@ function measureBindBox(object: THREE.Object3D): THREE.Box3 {
  * Collects the fighter's clips and hands them to drei's `useAnimations`.
  *
  * Every Mixamo export names its clip "mixamo.com", so the clips are RENAMED
- * after their action state — that is what makes `actions[state]` resolve.
+ * after their action state â€” that is what makes `actions[state]` resolve.
  *
  * The clip load is ASYNC (each FBX is ~10-20MB), so a clip may not exist
  * yet when an action fires. Two things make that safe:
@@ -210,14 +219,18 @@ function FighterModel({
 
   /* the skin texture (the FBX's own path is broken) */
   const [texture, setTexture] = useState<THREE.Texture | null>(null);
+  const [textureSettled, setTextureSettled] = useState(false);
   useEffect(() => {
     let cancelled = false;
     loadSkinTexture(textureUrl(cfg))
       .then((tex) => {
-        if (!cancelled) setTexture(tex);
+        if (cancelled) return;
+        setTexture(tex);
+        setTextureSettled(true);
       })
       .catch(() => {
-        /* texture missing — the mesh still renders, just untextured */
+        /* texture missing â€” the mesh still renders, just untextured */
+        if (!cancelled) setTextureSettled(true);
       });
     return () => {
       cancelled = true;
@@ -228,7 +241,7 @@ function FighterModel({
     if (texture) applySkinTexture(scene, texture);
   }, [scene, texture]);
 
-  /* the stage needs every clip — the fight can throw any of them */
+  /* the stage needs every clip â€” the fight can throw any of them */
   const ALL_STATES = Object.keys(cfg.clips) as FighterActionState[];
   const { actions, mixer, loaded } = useFighterActions(
     cfg,
@@ -289,7 +302,7 @@ function FighterModel({
     g.position.copy(prevPos);
     g.rotation.copy(prevRot);
     scene.rotation.copy(prevSceneRot);
-    /* Normalise the rig so its feet sit on y = 0 — the FBX origin is not at
+    /* Normalise the rig so its feet sit on y = 0 â€” the FBX origin is not at
      * the feet, which would otherwise float the model off the ground. */
     scene.position.y = -box.min.y;
     g.updateMatrixWorld(true);
@@ -299,23 +312,21 @@ function FighterModel({
       centerX: center.x,
       minY: 0,
     };
-  }, [scene, spec.facing]);
+  }, [scene, spec.facing, textureSettled]);
 
   /* ---- per-frame: transform + action state machine ---- */
   useFrame((_, delta) => {
     const live = fightersRef.current.find((f) => f.side === spec.side);
     if (!live || !group.current) return;
 
-    const worldX = (live.x / 100) * size.width - size.width / 2;
+    const worldX = (live.x / 100 - 0.5) * STAGE_WIDTH;
     const facingLeft = live.facing === "left";
 
     const bbox = group.current.userData.bbox as
       | { sizeY: number; centerX: number; minY: number }
       | undefined;
     if (bbox && bbox.sizeY > 0) {
-      /* the fighters scale with the stage so the viewport feels immersive */
-      const targetHeight = size.height * 0.46;
-      const scale = targetHeight / bbox.sizeY;
+      const scale = FIGHTER_HEIGHT / bbox.sizeY;
       group.current.scale.setScalar(scale);
       /* forward lunge on attacks, mirroring the 2D sprite punch */
       const foe = fightersRef.current.find((f) => f.side !== spec.side);
@@ -324,15 +335,20 @@ function FighterModel({
         : facingLeft
           ? -1
           : 1;
-      const lunge = live.state.endsWith("Attack") || live.state === "special" || live.state === "critical" ? toward * 48 : 0;
+      const lunge =
+        live.state.endsWith("Attack") ||
+        live.state === "special" ||
+        live.state === "critical"
+          ? toward * 0.55
+          : 0;
       /* the rotation mirrors the model's local X, so the centring offset
        * flips with the facing direction. */
       group.current.position.x =
         worldX + lunge + (facingLeft ? bbox.centerX : -bbox.centerX) * scale;
-      group.current.position.y = -size.height / 2 + 70 - bbox.minY * scale;
+      group.current.position.y = -bbox.minY * scale;
     } else {
       group.current.position.x = worldX;
-      group.current.position.y = -size.height / 2 + 70;
+      group.current.position.y = 0;
     }
 
     /* action state machine */
@@ -379,11 +395,107 @@ function FighterModel({
     void delta;
   });
 
+  /* Hold the fighter back until its skin texture has landed â€” otherwise the
+   * rig pops in as an untextured white silhouette for a frame. */
+  if (!textureSettled) return null;
+
   return (
     <group ref={group}>
       <primitive object={scene} />
     </group>
   );
+}
+
+/* ------------------------------------------------------------------ the arena */
+
+/* World units: the fighters are ~2.4 units tall, the stage is ~10.5 units wide. */
+const FIGHTER_HEIGHT = 2.6;
+const STAGE_WIDTH = 12;
+
+/**
+ * The arena backdrop: large extruded neon "CWO" lettering glowing behind the
+ * fighters, a dark reflective floor with a cyberpunk grid, and accent
+ * lighting. Everything is real 3D geometry â€” no flat background images.
+ */
+function ArenaBackdrop() {
+  return (
+    <group>
+      {/* ---- extruded neon CWO sign, deep behind and above the fighters ---- */}
+      <group position={[0, 4.3, -8]}>
+        <Center>
+          <Text3D
+            font="/fonts/helvetiker_bold.typeface.json"
+            size={2}
+            height={0.5}
+            curveSegments={10}
+            bevelEnabled
+            bevelThickness={0.05}
+            bevelSize={0.05}
+            bevelOffset={0}
+            bevelSegments={4}
+            letterSpacing={0.04}
+          >
+            CWO
+            <meshStandardMaterial
+              color="#0b0616"
+              emissive="#c026d3"
+              emissiveIntensity={2.2}
+              metalness={0.9}
+              roughness={0.18}
+            />
+          </Text3D>
+        </Center>
+        {/* soft magenta / cyan bloom behind the letters */}
+        <pointLight position={[0, 0, 2.2]} intensity={22} distance={16} color="#e879f9" />
+        <pointLight position={[-3, 0, 1.6]} intensity={12} distance={12} color="#22d3ee" />
+        <pointLight position={[3, 0, 1.6]} intensity={12} distance={12} color="#6366f1" />
+      </group>
+
+      {/* ---- dark reflective floor ---- */}
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, 0]}>
+        <planeGeometry args={[60, 60]} />
+        <MeshReflectorMaterial
+          resolution={1024}
+          mixBlur={1.4}
+          mixStrength={26}
+          blur={[380, 100]}
+          depthScale={1.2}
+          minDepthThreshold={0.35}
+          maxDepthThreshold={1.35}
+          mirror={0.6}
+          color="#05030c"
+          metalness={0.9}
+          roughness={0.65}
+        />
+      </mesh>
+
+      {/* ---- cyberpunk grid on the floor ---- */}
+      <Grid
+        position={[0, 0.02, 0]}
+        args={[60, 60]}
+        cellSize={0.85}
+        cellThickness={0.7}
+        cellColor="#2a1145"
+        sectionSize={4.25}
+        sectionThickness={1.5}
+        sectionColor="#7c3aed"
+        fadeDistance={26}
+        fadeStrength={1.5}
+        infiniteGrid
+        followCamera={false}
+      />
+    </group>
+  );
+}
+
+/** Frames the arena: a slight downward tilt so the floor reads in 3D. */
+function CameraRig() {
+  const { camera } = useThree();
+  useEffect(() => {
+    camera.lookAt(0, 1.55, 0);
+    camera.updateProjectionMatrix();
+  }, [camera]);
+  return null;
 }
 
 /* ------------------------------------------------------------------ the stage */
@@ -395,24 +507,30 @@ function StageScene({
   fightersRef: MutableRefObject<StageFighter3D[]>;
   onStatus?: (side: "creator" | "challenger", ok: boolean) => void;
 }) {
+  const { size } = useThree();
   const three = fightersRef.current.filter((f) => fighter3DConfig(f.fighterClass));
 
   return (
     <>
-      <ambientLight intensity={1.4} />
-      <hemisphereLight args={["#c4b5fd", "#0a0a12", 0.9]} />
+      <color attach="background" args={["#05030c"]} />
+      <fog attach="fog" args={["#05030c", 9, 30]} />
+      <CameraRig />
+      <ArenaBackdrop />
+      <ambientLight intensity={0.9} />
+      <hemisphereLight args={["#c4b5fd", "#0a0a12", 0.7]} />
       <directionalLight
-        position={[-60, 90, 120]}
+        position={[-6, 9, 8]}
         intensity={2.4}
         color="#fff4e6"
       />
       <directionalLight
-        position={[70, 40, -80]}
+        position={[7, 4, -4]}
         intensity={1.1}
         color="#a855f7"
       />
-      <pointLight position={[-160, 40, 90]} intensity={1.4} color="#ec4899" />
-      <pointLight position={[160, 40, 90]} intensity={1.4} color="#8b5cf6" />
+      <pointLight position={[-4, 1.6, 4]} intensity={9} color="#ec4899" />
+      <pointLight position={[4, 1.6, 4]} intensity={9} color="#8b5cf6" />
+      <pointLight position={[0, 0.4, 3]} intensity={5} color="#22d3ee" />
       {three.map((spec) => (
         <FighterModel
           key={spec.side}
@@ -427,7 +545,7 @@ function StageScene({
 
 /**
  * Cinematic 3D layer for the battle stage. The canvas is fully transparent
- * so the arena shows straight through — no flat panels behind the models.
+ * so the arena shows straight through â€” no flat panels behind the models.
  */
 export function FighterStage3D({
   fightersRef,
@@ -439,12 +557,16 @@ export function FighterStage3D({
   return (
     <div className="pointer-events-none absolute inset-0 z-[25]">
       <Canvas
-        orthographic
-        camera={{ position: [0, 0, 400], zoom: 1, near: 0.1, far: 2000 }}
+        camera={{
+          position: [0, 1.5, 9],
+          fov: 42,
+          near: 0.1,
+          far: 80,
+        }}
         gl={{ alpha: true, antialias: true }}
         dpr={[1, 1.75]}
         style={{ background: "transparent" }}
-        /* no flat black plane behind the models — the clear is fully
+        /* no flat black plane behind the models â€” the clear is fully
          * transparent so the arena shows straight through the canvas */
         onCreated={({ gl }) => {
           gl.setClearColor(0x000000, 0);
@@ -481,13 +603,18 @@ function PreviewRig({
   const scene = useMemo(() => SkeletonUtils.clone(source), [source]);
 
   const [texture, setTexture] = useState<THREE.Texture | null>(null);
+  const [textureSettled, setTextureSettled] = useState(false);
   useEffect(() => {
     let cancelled = false;
     loadSkinTexture(textureUrl(cfg))
       .then((tex) => {
-        if (!cancelled) setTexture(tex);
+        if (cancelled) return;
+        setTexture(tex);
+        setTextureSettled(true);
       })
-      .catch(() => {});
+      .catch(() => {
+        if (!cancelled) setTextureSettled(true);
+      });
     return () => {
       cancelled = true;
     };
@@ -550,7 +677,7 @@ function PreviewRig({
       centerX: center.x,
       minY: 0,
     };
-  }, [scene, facing]);
+  }, [scene, facing, textureSettled]);
 
   useFrame(() => {
     if (!group.current) return;
@@ -561,15 +688,18 @@ function PreviewRig({
       | { sizeY: number; centerX: number; minY: number }
       | undefined;
     if (bbox && bbox.sizeY > 0) {
-      const targetHeight = height * 0.84;
+      /* the idle clips raise the arms above the bind pose — leave headroom */
+      const targetHeight = height * 0.6;
       const scale = targetHeight / bbox.sizeY;
       group.current.scale.setScalar(scale);
       group.current.position.x =
         (facingLeft ? bbox.centerX : -bbox.centerX) * scale;
-      group.current.position.y = -height / 2 + 6 - bbox.minY * scale;
+      group.current.position.y = -height / 2 + 14 - bbox.minY * scale;
     }
     desired.current = state;
   });
+
+  if (!textureSettled) return null;
 
   return (
     <group ref={group}>
@@ -579,7 +709,7 @@ function PreviewRig({
 }
 
 /**
- * A clean 3D preview of a single fighter — the only character imagery the
+ * A clean 3D preview of a single fighter â€” the only character imagery the
  * app uses now. No 2D sprite sheets, no GIF loops.
  */
 export function FighterPreview3D({

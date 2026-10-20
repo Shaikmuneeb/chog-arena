@@ -1452,25 +1452,6 @@ export function BattleArenaModal({
                   transformOrigin: "50% 90%",
                 }}
               >
-                {/* Arena backdrop — bright and unobstructed so no flat dark
-                    plane ever sits behind the 3D fighters. */}
-                <div
-                  className="absolute inset-0 bg-cover bg-center"
-                  style={{
-                    backgroundImage: "url(/assets/arena-background.jpg)",
-                    filter: "brightness(0.72) contrast(1.05) saturate(1.05)",
-                  }}
-                  aria-hidden
-                />
-                {/* Soft radial vignette for depth — a gradient, never a slab */}
-                <div
-                  className="absolute inset-0"
-                  style={{
-                    background:
-                      "radial-gradient(ellipse at 50% 55%, transparent 35%, rgba(3,3,10,0.55) 100%)",
-                  }}
-                  aria-hidden
-                />
                 {/* Soft floor light instead of a dark gradient slab */}
                 <div
                   className="absolute inset-x-0 bottom-0 h-[38%] bg-gradient-to-t from-[#2a1d4d]/55 via-[#241a3d]/20 to-transparent"
