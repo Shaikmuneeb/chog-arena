@@ -143,37 +143,32 @@ type AttackKind = "light" | "heavy" | "special" | "critical";
  * Map the simulation onto the 3D animation states — every strike kind gets
  * its own Mixamo clip (light / heavy / special / critical).
  */
-function toFighter3DState(
-  pose: SpriteState,
-  blocking: boolean,
-  attackKind: AttackKind | null,
-): FighterActionState {
-  if (blocking) return "block";
-  switch (pose) {
-    case "attack":
-    case "dashIn":
-      if (attackKind === "light") return "lightAttack";
-      if (attackKind === "heavy") return "heavyAttack";
-      if (attackKind === "special") return "special";
-      if (attackKind === "critical") return "critical";
-      return "lightAttack";
-    case "hit":
-    case "stagger":
-      return "hit";
-    case "dead":
-      return "ko";
-    case "victory":
-      return "victory";
-    default:
-      return "idle";
-  }
-}
 
 /* ------------------------------------------------------------------ tuning */
 
 const MOVE_SPEED = 24; // %/s player slide speed
 const AI_APPROACH_SPEED = 24; // %/s AI closes distance aggressively
 const AI_BACKSTEP_SPEED = 18; // %/s AI retreats
+
+/**
+ * How long each strike's animation is held, so the full Mixamo clip can
+ * play instead of being cut off after the first few frames. The clips run
+ * 2-5s, the old pose window was only ~300ms — that is why the fighters
+ * looked frozen.
+ */
+const ACTION_HOLD: Record<AttackKind, number> = {
+  light: 1150,
+  heavy: 1550,
+  special: 2100,
+  critical: 2600,
+};
+
+/** How long a hit reaction is held so the flinch clip can finish. */
+const HIT_HOLD = 640;
+
+/** AI cadence: how long a fighter waits between decisions (ms). */
+const AI_DECIDE_MIN = 380;
+const AI_DECIDE_MAX = 720;
 
 /** Per-archetype movement speed (%/s). */
 const FIGHTER_SPEED: Record<FighterClass, number> = {
@@ -280,6 +275,14 @@ type FighterRT = {
   toward: boolean;
   leanDir: "forward" | "retreat" | null;
   activeMoveName: string | null;
+  /** The strike currently being animated — drives which Mixamo clip plays. */
+  actionKind: AttackKind | null;
+  /** ms left on the current animation, so the clip can play to its end. */
+  actionTimer: number;
+  /** ms left on the current hit reaction. */
+  hitTimer: number;
+  /** ms until this fighter picks its next action (AI cadence timer). */
+  nextActionMs: number;
 };
 
 type AiAction =
@@ -331,7 +334,7 @@ type MatchState = {
     kind: "special" | "critical";
   } | null;
   moveFxMs: number;
-  cinematic: { id: number; kind: "critical" | "ko"; moveName?: string } | null;
+  cinematic: { id: number; kind: "critical" | "special" | "ko"; moveName?: string } | null;
   cinematicMs: number;
   combo: { id: number; count: number } | null;
   comboMs: number;
@@ -385,6 +388,10 @@ function createMatch(script: MatchScript, playerSide: PlayerSide): MatchState {
     toward: false,
     leanDir: null,
     activeMoveName: null,
+    actionKind: null,
+    actionTimer: 0,
+    hitTimer: 0,
+    nextActionMs: 600,
   });
   return {
     stage: "faceoff",
@@ -441,6 +448,32 @@ function createMatch(script: MatchScript, playerSide: PlayerSide): MatchState {
 
 /* ------------------------------------------------------------ view snapshot */
 
+/**
+ * Which Mixamo clip a fighter should be playing right now.
+ *
+ * The strike's animation outlives its damage window (ACTION_HOLD), so the
+ * clip plays to the end instead of being cut after the first few frames —
+ * that is what made the fighters look frozen mid-punch.
+ */
+function fighterActionState(f: FighterRT): FighterActionState {
+  if (f.down) return "ko";
+  if (f.pose === "victory") return "victory";
+  if (f.hurtMs > 0 || f.hitTimer > 0) return "hit";
+  if (f.blockHeld) return "block";
+  switch (f.actionKind) {
+    case "light":
+      return "lightAttack";
+    case "heavy":
+      return "heavyAttack";
+    case "special":
+      return "special";
+    case "critical":
+      return "critical";
+    default:
+      return "idle";
+  }
+}
+
 type FighterView = {
   x: number;
   hp: number;
@@ -456,8 +489,8 @@ type FighterView = {
   toward: boolean;
   leanDir: "forward" | "retreat" | null;
   activeMoveName: string | null;
-  /** Kind of the strike currently being thrown (drives the 3D clip). */
-  attackKind: AttackKind | null;
+  /** Which animation the 3D rig should be playing right now. */
+  action: FighterActionState;
 };
 
 type View = {
@@ -476,7 +509,7 @@ type View = {
     vfx: SpecialMove["vfxType"];
     kind: "special" | "critical";
   } | null;
-  cinematic: { id: number; kind: "critical" | "ko"; moveName?: string } | null;
+  cinematic: { id: number; kind: "critical" | "special" | "ko"; moveName?: string } | null;
   combo: { id: number; count: number } | null;
   camShake: boolean;
   hitStop: boolean;
@@ -504,7 +537,7 @@ function fighterView(f: FighterRT): FighterView {
     toward: f.toward,
     leanDir: f.leanDir,
     activeMoveName: f.activeMoveName,
-    attackKind: f.attack?.kind ?? null,
+    action: fighterActionState(f),
   };
 }
 
@@ -569,8 +602,8 @@ function refreshFighterPose(f: FighterRT) {
   let pose: SpriteState;
   if (f.down) pose = "dead";
   else if (f.shieldMs > 0) pose = "secondWind";
-  else if (f.attack) pose = "attack";
-  else if (f.hurtMs > 0) pose = f.hurtHeavy ? "stagger" : "hit";
+  else if (f.attack || f.actionTimer > 0) pose = "attack";
+  else if (f.hurtMs > 0 || f.hitTimer > 0) pose = f.hurtHeavy ? "stagger" : "hit";
   else if (f.stunMs > 0) pose = "idle";
   else if (f.moveDir !== 0) pose = f.toward ? "dashIn" : "dashOut";
   else pose = "idle";
@@ -584,6 +617,17 @@ function tickFighter(f: FighterRT, dt: number) {
   if (f.hurtMs > 0) f.hurtMs -= dt;
   if (f.shieldMs > 0) f.shieldMs -= dt;
   if (f.stunMs > 0) f.stunMs -= dt;
+  if (f.actionTimer > 0) {
+    f.actionTimer -= dt;
+    if (f.actionTimer <= 0) {
+      f.actionTimer = 0;
+      f.actionKind = null;
+    }
+  }
+  if (f.hitTimer > 0) {
+    f.hitTimer -= dt;
+    if (f.hitTimer <= 0) f.hitTimer = 0;
+  }
   refreshFighterPose(f);
 }
 
@@ -617,6 +661,16 @@ function startRound(
   ai.stunMs = 0;
   p.blockHeld = false;
   ai.blockHeld = false;
+  /* clear the running animations so the next round starts from a clean
+   * idle (otherwise the hit flash/animation carries over). */
+  p.actionKind = null;
+  ai.actionKind = null;
+  p.actionTimer = 0;
+  ai.actionTimer = 0;
+  p.hitTimer = 0;
+  ai.hitTimer = 0;
+  p.nextActionMs = 500;
+  ai.nextActionMs = 500;
   p.x = playerSide === "left" ? 32 : 68;
   ai.x = playerSide === "left" ? 68 : 32;
   p.pose = "idle";
@@ -656,8 +710,14 @@ function startKO(
   loser.down = true;
   loser.pose = "dead";
   loser.seq += 1;
+  /* the K.O. clip has to be able to take over from the strike that landed */
+  loser.actionKind = null;
+  loser.actionTimer = 0;
+  loser.hitTimer = 0;
   win.pose = "victory";
   win.seq += 1;
+  win.actionKind = null;
+  win.actionTimer = 0;
   m.cinematic = { id: ++m.fxId, kind: "ko" };
   m.cinematicMs = 750;
   playHitSfx();
@@ -724,6 +784,10 @@ function startStrike(
     move,
   };
   f.activeMoveName = move ? move.name : null;
+  /* the animation outlives the strike's damage window so the whole Mixamo
+   * clip can play — the pose alone only lasted ~300ms. */
+  f.actionKind = kind;
+  f.actionTimer = ACTION_HOLD[kind];
   f.pose = "attack";
   f.seq += 1;
 }
@@ -797,6 +861,10 @@ function applyHit(
 
   defender.hurtMs = a.kind === "light" ? 220 : 340;
   defender.hurtHeavy = a.kind !== "light";
+  /* hold the flinch clip long enough to read, not just one hit-stop frame */
+  defender.hitTimer = HIT_HOLD;
+  defender.actionKind = null;
+  defender.actionTimer = 0;
   defender.hurtBright = true;
   defender.pose = "hit";
   defender.seq += 1;
@@ -813,8 +881,14 @@ function applyHit(
     m.comboMs = 1500;
   }
   if (a.kind === "special" || a.kind === "critical") {
-    m.cinematic = { id: ++m.fxId, kind: "critical", moveName: a.move?.name };
-    m.cinematicMs = a.kind === "critical" ? 1100 : 750;
+    /* a signature move gets a light banner (the animation must stay
+     * visible); only the critical art gets the full screen cut-in. */
+    m.cinematic = {
+      id: ++m.fxId,
+      kind: a.kind === "critical" ? "critical" : "special",
+      moveName: a.move?.name,
+    };
+    m.cinematicMs = a.kind === "critical" ? 1100 : 900;
     m.moveFx = {
       id: ++m.fxId,
       x: defender.x,
@@ -873,139 +947,119 @@ function updateAttack(
   }
 }
 
-function updateAI(
+/**
+ * The auto-fighter brain — shared by BOTH sides.
+ *
+ * Every fighter gets the same aggressive loop: always square up to the
+ * opponent, close the distance when out of range, then throw a strike on a
+ * short cadence (light / heavy / special / critical) or raise a guard when
+ * the opponent is winding up. Because the brain is symmetric, the match
+ * looks like two characters actually trading blows instead of one fighter
+ * standing still while the other walks in.
+ */
+function updateAutoFighter(
   m: MatchState,
   dt: number,
   script: MatchScript,
   playerSide: PlayerSide,
+  side: FighterSide,
 ) {
-  const ai = m.fighters.creator;
-  const p = m.fighters.challenger;
-  if (ai.down || ai.stunMs > 0) {
-    ai.moveDir = 0;
-    ai.leanDir = null;
+  const f = m.fighters[side];
+  const foe = m.fighters[side === "creator" ? "challenger" : "creator"];
+  const cls = side === "creator" ? script.creatorClass : script.challengerClass;
+  const track = side === "creator" ? oppTrack(playerSide) : playerTrack(playerSide);
+  const speed = FIGHTER_SPEED[cls] ?? AI_APPROACH_SPEED;
+
+  if (f.down || f.stunMs > 0) {
+    f.moveDir = 0;
+    f.leanDir = null;
+    f.blockHeld = false;
     return;
   }
 
-  // If AI is executing an attack, let the attack cycle complete
-  if (ai.attack) {
-    ai.moveDir = 0;
-    ai.leanDir = null;
+  /* 1) always face the opponent */
+  f.facing = foe.x >= f.x ? "right" : "left";
+
+  /* 2) mid-strike: let the attack cycle finish */
+  if (f.attack) {
+    f.moveDir = 0;
+    f.leanDir = null;
     return;
   }
 
-  const dist = Math.abs(ai.x - p.x);
+  const dist = Math.abs(f.x - foe.x);
   const reach = REACH.light;
 
-  // OUT OF RANGE: Aggressively walk/dash across the stage towards the player
-  if (dist > reach - 2) {
-    const dir = Math.sign(p.x - ai.x) || (playerSide === "left" ? -1 : 1);
-    ai.moveDir = dir;
-    ai.toward = true;
-    ai.leanDir = "forward";
-    ai.x += dir * (FIGHTER_SPEED[script.creatorClass] ?? AI_APPROACH_SPEED) * (dt / 1000);
-    ai.x = clamp(ai.x, oppTrack(playerSide));
-    ai.blockHeld = false;
+  /* 3) too close: re-open the gap so the fighters never overlap */
+  if (dist < 15) {
+    const away = Math.sign(f.x - foe.x) || 1;
+    f.moveDir = away;
+    f.toward = false;
+    f.leanDir = "retreat";
+    f.x += away * speed * 0.5 * (dt / 1000);
+    f.x = clamp(f.x, track);
+    f.blockHeld = false;
+    return;
+  }
 
-    // Ground dust puffs while closing distance
+  /* 4) out of range: walk into striking distance */
+  if (dist > reach - 3) {
+    const dir = Math.sign(foe.x - f.x) || (f.facing === "left" ? -1 : 1);
+    f.moveDir = dir;
+    f.toward = true;
+    f.leanDir = "forward";
+    f.x += dir * speed * (dt / 1000);
+    f.x = clamp(f.x, track);
+    f.blockHeld = false;
     if (Math.random() < 0.16) {
-      m.dust = { id: ++m.fxId, x: ai.x };
+      m.dust = { id: ++m.fxId, x: f.x };
       m.dustMs = 350;
     }
     return;
   }
 
-  // IN RANGE: Active mix-ups and attacks (cadence: 160-280ms)
-  m.aiNextMs -= dt;
-  if (m.aiNextMs <= 0) {
-    m.aiNextMs = randInt(160, 280);
+  /* 5) in range: aggressive mix-ups */
+  f.nextActionMs -= dt;
+  if (f.nextActionMs > 0) {
+    /* hold the current intent (e.g. keep the guard up between decisions) */
+    f.moveDir = 0;
+    f.leanDir = null;
+    return;
+  }
+  f.nextActionMs = randInt(AI_DECIDE_MIN, AI_DECIDE_MAX);
 
-    // If player is attacking in wind-up, 40% chance AI raises guard
-    if (p.attack && p.attack.windup > 0 && Math.random() < 0.42) {
-      ai.blockHeld = true;
-      ai.moveDir = 0;
-      ai.leanDir = null;
-      return;
-    }
+  const roll = Math.random();
 
-    ai.blockHeld = false;
+  /* the opponent is winding up — sometimes raise the guard */
+  if (foe.attack && foe.attack.windup > 0 && roll < 0.45) {
+    f.blockHeld = true;
+    f.moveDir = 0;
+    f.leanDir = null;
+    return;
+  }
 
-    // Super Meter attacks
-    const roll = Math.random();
-    if (ai.meter >= 100 && roll < 0.45) {
-      // Critical Art
-      ai.meter = 0;
-      const move = m.moves.creator.criticalArt;
-      ai.attack = {
-        kind: "critical",
-        windup: WINDUP_FOR[script.creatorClass].critical,
-        recover: RECOVER_FOR[script.creatorClass].critical,
-        move,
-      };
-      ai.activeMoveName = move.name;
-      ai.pose = "attack";
-      ai.seq += 1;
-      ai.moveDir = 0;
-      ai.leanDir = null;
-    } else if (ai.meter >= 40 && roll < 0.40) {
-      // Signature Special
-      ai.meter -= 40;
-      const move = m.moves.creator.signatureMove;
-      ai.attack = {
-        kind: "special",
-        windup: WINDUP_FOR[script.creatorClass].special,
-        recover: RECOVER_FOR[script.creatorClass].special,
-        move,
-      };
-      ai.activeMoveName = move.name;
-      ai.pose = "attack";
-      ai.seq += 1;
-      ai.moveDir = 0;
-      ai.leanDir = null;
-    } else {
-      // Light / Heavy strikes or quick guard / micro-step
-      const actRoll = Math.random();
-      if (actRoll < 0.45) {
-        ai.attack = {
-          kind: "light",
-          windup: WINDUP_FOR[script.creatorClass].light,
-          recover: RECOVER_FOR[script.creatorClass].light,
-          move: null,
-        };
-        ai.activeMoveName = null;
-        ai.pose = "attack";
-        ai.seq += 1;
-        ai.moveDir = 0;
-        ai.leanDir = null;
-      } else if (actRoll < 0.75) {
-        ai.attack = {
-          kind: "heavy",
-          windup: WINDUP_FOR[script.creatorClass].heavy,
-          recover: RECOVER_FOR[script.creatorClass].heavy,
-          move: null,
-        };
-        ai.activeMoveName = null;
-        ai.pose = "attack";
-        ai.seq += 1;
-        ai.moveDir = 0;
-        ai.leanDir = null;
-      } else if (actRoll < 0.88) {
-        // Short tactical guard
-        ai.blockHeld = true;
-        m.aiNextMs = randInt(160, 240);
-        ai.moveDir = 0;
-        ai.leanDir = null;
-      } else {
-        // Micro backstep to bait whiff
-        const retreatDir = Math.sign(ai.x - p.x) || (playerSide === "left" ? 1 : -1);
-        ai.x += retreatDir * ((FIGHTER_SPEED[script.creatorClass] ?? AI_APPROACH_SPEED) * 0.75) * (dt / 1000);
-        ai.x = clamp(ai.x, oppTrack(playerSide));
-        ai.moveDir = retreatDir;
-        ai.leanDir = "retreat";
-      }
-    }
+  f.blockHeld = false;
+  f.moveDir = 0;
+  f.leanDir = null;
+
+  /* 6) pick a strike — specials and criticals need meter, so fall back */
+  let kind: AttackKind = "light";
+  if (f.meter >= 100 && roll < 0.30) kind = "critical";
+  else if (f.meter >= 40 && roll < 0.55) kind = "special";
+  else if (roll < 0.72) kind = "heavy";
+
+  startStrike(m, side, kind, script);
+
+  /* 7) occasionally shuffle backwards to bait a whiff */
+  if (kind === "light" && Math.random() < 0.18) {
+    const retreat = Math.sign(f.x - foe.x) || (f.facing === "left" ? 1 : -1);
+    f.x += retreat * speed * 0.6 * (dt / 1000);
+    f.x = clamp(f.x, track);
+    f.moveDir = retreat;
+    f.leanDir = "retreat";
   }
 }
+
 
 function syncMechanics(m: MatchState, script: MatchScript) {
   const p = m.fighters.challenger;
@@ -1055,15 +1109,11 @@ function updateFight(
   const p = m.fighters.challenger;
   const ai = m.fighters.creator;
 
-  // Spectator mode: no manual input. The local fighter holds position while
-  // the opponent's AI closes the distance. Both sides trade auto-strikes
-  // driven by the shared auto-exchange timer (scheduled in the render loop).
-  p.blockHeld = false;
-  p.moveDir = 0;
-  p.toward = false;
-  p.leanDir = null;
-
-  updateAI(m, dt, script, playerSide);
+  /* Spectator mode: no manual input. BOTH fighters are driven by the same
+   * auto-fighter brain, so they square up, close the distance and trade
+   * strikes instead of one standing still. */
+  updateAutoFighter(m, dt, script, playerSide, "creator");
+  updateAutoFighter(m, dt, script, playerSide, "challenger");
   updateAttack(m, p, dt, true, script, playerSide);
   updateAttack(m, ai, dt, false, script, playerSide);
   tickFighter(p, dt);
@@ -1152,7 +1202,7 @@ const emptyFighterView: FighterView = {
   toward: false,
   leanDir: null,
   activeMoveName: null,
-  attackKind: null,
+  action: "idle",
 };
 
 const initialView: View = {
@@ -1308,18 +1358,6 @@ export function BattleArenaModal({
     const loop = (now: number) => {
       const dt = Math.min(now - last, 50);
       last = now;
-      /* Auto-fighter: schedule strikes on a speed-weighted interval while the
-       * fight is live and not frozen by hit-stop. */
-      if (m.stage === "fight" && !(m.hitStopMs > 0)) {
-        autoTimer.current += dt;
-        const pSpeed = FIGHTER_SPEED[script.challengerClass] ?? MOVE_SPEED;
-        const aSpeed = FIGHTER_SPEED[script.creatorClass] ?? AI_APPROACH_SPEED;
-        const interval = Math.max(700, 1500 / ((pSpeed + aSpeed) / 48));
-        if (autoTimer.current >= interval) {
-          autoTimer.current = 0;
-          scheduleAutoStrike(m, script);
-        }
-      }
       /* Hold the face-off until the 3D rigs are on stage. */
       if (!rigsReadyRef.current && m.stage === "faceoff") {
         m.stageMs = 0;
@@ -1334,7 +1372,7 @@ export function BattleArenaModal({
         const f = next.fighters[entry.side];
         entry.x = f.x;
         entry.facing = f.facing;
-        entry.state = toFighter3DState(f.pose, f.blockHeld, f.attackKind);
+        entry.state = next.fighters[entry.side].action;
       }
       if (m.stage !== "verdict") raf = requestAnimationFrame(loop);
     };
@@ -1347,35 +1385,6 @@ export function BattleArenaModal({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, outcome, script, playerSide]);
-
-  /* ================= AUTO-FIGHTER SIMULATION ENGINE =================
-   * Spectator mode: no manual input. A shared timed exchange loop picks the
-   * next striker weighted by each fighter's speed stat, then queues a strike
-   * (light/heavy/special/critical) scaled to their meter. Both fighters run
-   * through the existing attack/hit/VFX pipeline automatically. */
-  const autoTimer = useRef(0);
-
-  const scheduleAutoStrike = (m: MatchState, script: MatchScript): void => {
-    const p = m.fighters.challenger;
-    const ai = m.fighters.creator;
-    const pSpeed = FIGHTER_SPEED[script.challengerClass] ?? MOVE_SPEED;
-    const aSpeed = FIGHTER_SPEED[script.creatorClass] ?? AI_APPROACH_SPEED;
-    const total = pSpeed + aSpeed;
-    const side: FighterSide = Math.random() * total < pSpeed ? "challenger" : "creator";
-    const f = m.fighters[side];
-    const meter = f.meter;
-    const canSpecial = meter >= 40;
-    const canCritical = meter >= 100;
-    let roll = Math.random();
-    let kind: AttackKind = "light";
-    if (canCritical && roll < 0.20) kind = "critical";
-    else if (canSpecial && roll < 0.50) kind = "special";
-    else if (roll < 0.70) kind = "heavy";
-    else kind = "light";
-    if (kind === "critical" && !canCritical) kind = "heavy";
-    if (kind === "special" && !canSpecial) kind = "light";
-    startStrike(m, side, kind, script);
-  };
 
   if (!outcome || !script) return null;
 
@@ -1660,8 +1669,10 @@ export function BattleArenaModal({
                 </div>
               )}
 
-              {/* Cinematic camera: vignette + color flash + big arcade text */}
-              {view.cinematic && (
+              {/* Cinematic camera: vignette + color flash + big arcade text.
+                  A signature move only gets a light banner so the Mixamo
+                  animation stays visible behind it. */}
+              {view.cinematic && view.cinematic.kind !== "special" && (
                 <div
                   key={`cine-${view.cinematic.id}`}
                   className="pointer-events-none absolute inset-0 z-[32]"
@@ -1695,6 +1706,19 @@ export function BattleArenaModal({
                         {view.cinematic.moveName}
                       </p>
                     )}
+                  </div>
+                </div>
+              )}
+
+              {/* Signature move — a light banner, the animation plays through */}
+              {view.cinematic?.kind === "special" && (
+                <div
+                  key={`spec-${view.cinematic.id}`}
+                  className="pointer-events-none absolute inset-x-0 top-6 z-[31] flex justify-center"
+                  aria-live="assertive"
+                >
+                  <div className="rounded-full border border-fuchsia-400/40 bg-black/70 px-5 py-1.5 text-center text-[10px] font-black uppercase tracking-[0.3em] text-fuchsia-200 drop-shadow-[0_0_12px_rgba(232,121,249,0.7)] sm:text-xs">
+                    {view.cinematic.moveName ?? "SIGNATURE MOVE"}
                   </div>
                 </div>
               )}

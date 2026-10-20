@@ -41,7 +41,7 @@ export type StageFighter3D = {
 
 /* ------------------------------------------------------------------ loading */
 
-/** One fetch per clip file â€” many consumers share it. */
+/** One fetch per clip file — many consumers share it. */
 const fbxCache = new Map<string, Promise<THREE.Group>>();
 
 function loadFbx(url: string): Promise<THREE.Group> {
@@ -132,7 +132,7 @@ function measureBindBox(object: THREE.Object3D): THREE.Box3 {
  * Collects the fighter's clips and hands them to drei's `useAnimations`.
  *
  * Every Mixamo export names its clip "mixamo.com", so the clips are RENAMED
- * after their action state â€” that is what makes `actions[state]` resolve.
+ * after their action state — that is what makes `actions[state]` resolve.
  *
  * The clip load is ASYNC (each FBX is ~10-20MB), so a clip may not exist
  * yet when an action fires. Two things make that safe:
@@ -205,6 +205,9 @@ function FighterModel({
   const cfg = fighter3DConfig(spec.fighterClass) as Fighter3DConfig;
   const group = useRef<THREE.Group>(null);
   const desired = useRef<FighterActionState>("idle");
+  /** materials of the rig, cached for the hit flash */
+  const materialCache = useRef<THREE.MeshPhongMaterial[] | null>(null);
+  const wasHit = useRef(false);
   /* the ortho camera is 1 world unit = 1 px, so the canvas size IS the stage
    * size in pixels and the 3D fighters line up with the stage. */
   const { size } = useThree();
@@ -229,7 +232,7 @@ function FighterModel({
         setTextureSettled(true);
       })
       .catch(() => {
-        /* texture missing â€” the mesh still renders, just untextured */
+        /* texture missing — the mesh still renders, just untextured */
         if (!cancelled) setTextureSettled(true);
       });
     return () => {
@@ -238,10 +241,24 @@ function FighterModel({
   }, [cfg]);
 
   useEffect(() => {
-    if (texture) applySkinTexture(scene, texture);
+    if (!texture) return;
+    applySkinTexture(scene, texture);
+    /* cache the materials so the hit flash can toggle their emissive */
+    const mats: THREE.MeshPhongMaterial[] = [];
+    scene.traverse((node) => {
+      const mesh = node as THREE.Mesh;
+      if (!mesh.isMesh) return;
+      const list = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+      for (const mat of list) {
+        if (mat && (mat as THREE.MeshPhongMaterial).emissive) {
+          mats.push(mat as THREE.MeshPhongMaterial);
+        }
+      }
+    });
+    materialCache.current = mats;
   }, [scene, texture]);
 
-  /* the stage needs every clip â€” the fight can throw any of them */
+  /* the stage needs every clip — the fight can throw any of them */
   const ALL_STATES = Object.keys(cfg.clips) as FighterActionState[];
   const { actions, mixer, loaded } = useFighterActions(
     cfg,
@@ -258,7 +275,9 @@ function FighterModel({
       const action = actions[key];
       if (action && action !== current) action.fadeOut(0.15);
     }
-    current.reset();
+    /* the idle loop is never restarted (that made the fighter twitch);
+     * strikes restart so each punch reads as a new blow. */
+    if (desired.current !== "idle") current.reset();
     current.setEffectiveTimeScale(1);
     current.setLoop(
       desired.current === "idle" ||
@@ -302,7 +321,7 @@ function FighterModel({
     g.position.copy(prevPos);
     g.rotation.copy(prevRot);
     scene.rotation.copy(prevSceneRot);
-    /* Normalise the rig so its feet sit on y = 0 â€” the FBX origin is not at
+    /* Normalise the rig so its feet sit on y = 0 — the FBX origin is not at
      * the feet, which would otherwise float the model off the ground. */
     scene.position.y = -box.min.y;
     g.updateMatrixWorld(true);
@@ -360,7 +379,9 @@ function FighterModel({
           const other = actions[key];
           if (other && other !== action) other.fadeOut(0.15);
         }
-        action.reset();
+        /* strikes restart so every blow reads; the idle loop is left alone
+         * so the fighter never twitches back to frame zero. */
+        if (live.state !== "idle") action.reset();
         action.setEffectiveTimeScale(1);
         action.setLoop(
           live.state === "idle" ||
@@ -375,27 +396,24 @@ function FighterModel({
       }
     }
 
-    /* red damage flash on hit */
-    if (live.state === "hit") {
-      const pulse = Math.sin(performance.now() / 40) * 0.5 + 0.5;
-      scene.traverse((node) => {
-        const mesh = node as THREE.Mesh;
-        if (!mesh.isMesh) return;
-        const materials = Array.isArray(mesh.material)
-          ? mesh.material
-          : [mesh.material];
-        for (const material of materials) {
-          const mat = material as THREE.MeshPhongMaterial;
-          if (mat.emissive) mat.emissive.setRGB(pulse * 0.22, 0, 0);
-        }
-      });
+    /* red damage flash on hit — cleared the moment the hit ends, otherwise
+     * the fighter stays tinted red for the rest of the match. */
+    const materials = materialCache.current;
+    if (materials) {
+      if (live.state === "hit") {
+        const pulse = Math.sin(performance.now() / 40) * 0.5 + 0.5;
+        for (const mat of materials) mat.emissive.setRGB(pulse * 0.22, 0, 0);
+      } else if (wasHit.current) {
+        for (const mat of materials) mat.emissive.setRGB(0, 0, 0);
+      }
     }
+    wasHit.current = live.state === "hit";
 
     void mixer;
     void delta;
   });
 
-  /* Hold the fighter back until its skin texture has landed â€” otherwise the
+  /* Hold the fighter back until its skin texture has landed — otherwise the
    * rig pops in as an untextured white silhouette for a frame. */
   if (!textureSettled) return null;
 
@@ -415,7 +433,7 @@ const STAGE_WIDTH = 12;
 /**
  * The arena backdrop: large extruded neon "CWO" lettering glowing behind the
  * fighters, a dark reflective floor with a cyberpunk grid, and accent
- * lighting. Everything is real 3D geometry â€” no flat background images.
+ * lighting. Everything is real 3D geometry — no flat background images.
  */
 function ArenaBackdrop() {
   return (
@@ -545,7 +563,7 @@ function StageScene({
 
 /**
  * Cinematic 3D layer for the battle stage. The canvas is fully transparent
- * so the arena shows straight through â€” no flat panels behind the models.
+ * so the arena shows straight through — no flat panels behind the models.
  */
 export function FighterStage3D({
   fightersRef,
@@ -566,7 +584,7 @@ export function FighterStage3D({
         gl={{ alpha: true, antialias: true }}
         dpr={[1, 1.75]}
         style={{ background: "transparent" }}
-        /* no flat black plane behind the models â€” the clear is fully
+        /* no flat black plane behind the models — the clear is fully
          * transparent so the arena shows straight through the canvas */
         onCreated={({ gl }) => {
           gl.setClearColor(0x000000, 0);
@@ -621,7 +639,8 @@ function PreviewRig({
   }, [cfg]);
 
   useEffect(() => {
-    if (texture) applySkinTexture(scene, texture);
+    if (!texture) return;
+    applySkinTexture(scene, texture);
   }, [scene, texture]);
 
   /* a preview only needs the clip it is showing */
@@ -709,7 +728,7 @@ function PreviewRig({
 }
 
 /**
- * A clean 3D preview of a single fighter â€” the only character imagery the
+ * A clean 3D preview of a single fighter — the only character imagery the
  * app uses now. No 2D sprite sheets, no GIF loops.
  */
 export function FighterPreview3D({
