@@ -39,7 +39,8 @@ export const FIGHTER_3D: Partial<Record<FighterClass, Fighter3DConfig>> = {
       attack: "Combo Punch.fbx",
       hit: "Medium Hit To Head.fbx",
       block: "Body Block.fbx",
-      ko: "Brutal Assassination.fbx",
+      /* she ships no knock-out clip — the hard hit is held as the K.O. pose */
+      ko: "Medium Hit To Head.fbx",
       victory: "Victory Idle.fbx",
     },
   },

@@ -1433,19 +1433,28 @@ export function BattleArenaModal({
                   transformOrigin: "50% 90%",
                 }}
               >
-                {/* Arena background art — heavily dimmed + softened */}
+                {/* Arena backdrop — bright and unobstructed so no flat dark
+                    plane ever sits behind the 3D fighters. */}
                 <div
                   className="absolute inset-0 bg-cover bg-center"
                   style={{
                     backgroundImage: "url(/assets/arena-background.jpg)",
-                    filter: "brightness(0.5) contrast(0.9) blur(2px)",
+                    filter: "brightness(0.72) contrast(1.05) saturate(1.05)",
                   }}
                   aria-hidden
                 />
-                {/* Heavy dark gradient overlay — keeps HUD, fighters, and
-                    floating text crisp against a quiet backdrop */}
+                {/* Soft radial vignette for depth — a gradient, never a slab */}
                 <div
-                  className="absolute inset-0 bg-gradient-to-t from-zinc-950 via-zinc-950/80 to-zinc-950/60"
+                  className="absolute inset-0"
+                  style={{
+                    background:
+                      "radial-gradient(ellipse at 50% 55%, transparent 35%, rgba(3,3,10,0.55) 100%)",
+                  }}
+                  aria-hidden
+                />
+                {/* Soft floor light instead of a dark gradient slab */}
+                <div
+                  className="absolute inset-x-0 bottom-0 h-[38%] bg-gradient-to-t from-[#2a1d4d]/55 via-[#241a3d]/20 to-transparent"
                   aria-hidden
                 />
 
@@ -1465,8 +1474,8 @@ export function BattleArenaModal({
                   />
                 )}
 
-                {/* Arena floor — subtle gradient, no harsh graphics */}
-                <div className="absolute inset-x-0 bottom-0 h-[38%] bg-gradient-to-b from-transparent via-[#241a3d]/40 to-[#120d22]/70">
+                {/* Arena floor — perspective grid only, no dark slab */}
+                <div className="absolute inset-x-0 bottom-0 h-[38%]">
                   <svg
                     className="absolute inset-0 h-full w-full"
                     viewBox="0 0 800 160"

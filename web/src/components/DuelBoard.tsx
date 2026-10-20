@@ -297,7 +297,7 @@ function NpcFighterCard({
   const displayName = entry?.name ?? npc.name;
   const priceLabel = entry?.price ?? `${formatMon(duel.betAmount)} MON`;
   return (
-    <li className="group relative flex flex-col overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-900/80 transition-all duration-300 hover:border-purple-500/50 hover:bg-zinc-900/95 hover:shadow-[0_0_28px_-8px_rgba(168,85,247,0.45)]">
+    <li className="group relative flex flex-col overflow-hidden rounded-2xl border border-white/10 bg-white/[0.02] transition-all duration-300 hover:border-purple-500/50 hover:bg-white/[0.04] hover:shadow-[0_0_28px_-8px_rgba(168,85,247,0.45)]">
       {/* Class-tinted top edge */}
       <div
         className="absolute inset-x-0 top-0 h-px opacity-70"
@@ -306,8 +306,8 @@ function NpcFighterCard({
         }}
         aria-hidden
       />
-  {/* Portrait */}
-  <div className="relative aspect-[3/4] overflow-hidden" style={{ boxShadow: `inset 0 0 40px ${classMeta.primary}33` }}>
+  {/* Portrait — transparent, no panel behind the character */}
+  <div className="relative aspect-[4/5] overflow-hidden">
         <div className="absolute inset-0 flex items-center justify-center transition-transform duration-300 group-hover:scale-125">
           <img
            src={portraitSrc}
@@ -315,11 +315,11 @@ function NpcFighterCard({
            aria-hidden
            draggable={false}
            className="fighter-portrait scale-110"
-           style={{ height: 150, width: "auto" }}
+           style={{ height: 190, width: "auto" }}
          />
         </div>
       </div>
-      <div className="absolute inset-x-0 bottom-0 z-20 bg-gradient-to-t from-black via-black/60 to-transparent p-4">
+      <div className="absolute inset-x-0 bottom-0 z-20 bg-gradient-to-t from-black/80 via-black/40 to-transparent p-4">
         <p className="text-xl font-black uppercase tracking-wider text-white">
           {displayName}
         </p>

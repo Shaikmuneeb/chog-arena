@@ -89,7 +89,10 @@ function FighterModel({
   const root = useRef<THREE.Group>(null);
   const mixer = useRef<THREE.AnimationMixer | null>(null);
   const actions = useRef<Record<string, THREE.AnimationAction>>({});
+  const pending = useRef<Set<Fighter3DState>>(new Set());
   const activeState = useRef<Fighter3DState | null>(null);
+  /** the state the simulation is asking for right now */
+  const desiredState = useRef<Fighter3DState>("idle");
   const [model, setModel] = useState<THREE.Group | null>(null);
   const [texture, setTexture] = useState<THREE.Texture | null>(null);
   const [failed, setFailed] = useState(false);
@@ -151,13 +154,15 @@ function FighterModel({
       action.play();
       actions.current.idle = action;
     }
-    /* one-shot clips (attack / hit) fall back to idle when they finish */
+    /* One-shot clips (attack / hit) settle back to idle. The simulation owns
+     * the state, so we only blend to idle when the sim has already moved on
+     * — otherwise the next frame would re-fire the finished clip. */
     const onFinished = (event: { action: THREE.AnimationAction }) => {
       const key = Object.keys(actions.current).find(
         (k) => actions.current[k] === event.action,
       );
       if (!key || key === "ko" || key === "victory" || key === "idle") return;
-      activeState.current = "idle";
+      if (desiredState.current === key) return;
       const idle = actions.current.idle;
       if (idle) {
         idle.reset();
@@ -174,25 +179,81 @@ function FighterModel({
     };
   }, [model, texture]);
 
-  /* ---- fetch a clip the first time a state is requested ---- */
-  const ensureClip = (state: Fighter3DState) => {
+  /* ---- fetch a clip and wire it to a mixer action --------------------
+   * Every Mixamo export names its clip "mixamo.com", so drei's useAnimations
+   * can't tell them apart — we drive the AnimationMixer directly instead.
+   *
+   * The load is ASYNC (each FBX is ~11MB), so the action may not exist yet
+   * when a state fires. Two things make that safe:
+   *   1. all clips are pre-fetched in the background as soon as the rig
+   *      lands, so they are ready long before the first exchange;
+   *   2. if a clip arrives while its state is still the active one, it is
+   *      played immediately instead of being dropped. */
+  const requestClip = (state: Fighter3DState) => {
     const m = mixer.current;
-    if (!m || actions.current[state]) return;
+    if (!m || actions.current[state] || pending.current.has(state)) return;
     const file = cfg.clips[state];
     if (!file) return;
+    pending.current.add(state);
     loadFbx(assetUrl(`${cfg.dir}/${file}`))
       .then((group) => {
+        pending.current.delete(state);
         const clip = group.animations?.[0];
         if (!clip || !mixer.current) return;
+        /* name the clip after its state so the action map stays readable */
+        clip.name = state;
         const action = mixer.current.clipAction(clip);
         action.enabled = true;
         action.setEffectiveWeight(0);
         actions.current[state] = action;
+        /* the state may already be live — play it now */
+        if (activeState.current === state) playState(state);
       })
       .catch(() => {
+        pending.current.delete(state);
         /* clip unavailable — the fighter stays on the last animation */
       });
   };
+
+  /* ---- play the action for a state (cross-fading the others out) ---- */
+  const playState = (state: Fighter3DState) => {
+    const m = mixer.current;
+    if (!m) return;
+    const action = actions.current[state];
+    if (!action) {
+      /* not fetched yet — fetch it and play on arrival */
+      requestClip(state);
+      return;
+    }
+    action.reset();
+    action.enabled = true;
+    action.setEffectiveTimeScale(1);
+    action.setLoop(
+      state === "idle" || state === "block" || state === "victory"
+        ? THREE.LoopRepeat
+        : THREE.LoopOnce,
+      Infinity,
+    );
+    action.clampWhenFinished = state === "ko";
+    action.setEffectiveWeight(1);
+    action.fadeIn(0.18).fadeOut(0.18);
+    action.play();
+    for (const [key, other] of Object.entries(actions.current)) {
+      if (key !== state) other.fadeOut(0.18);
+    }
+  };
+
+  /* ---- pre-fetch every clip once the rig + mixer are ready, so the first
+   *     attack/hit/block/KO plays instantly instead of waiting on a
+   *     ~11MB download mid-exchange. */
+  useEffect(() => {
+    if (!model || !mixer.current) return;
+    (Object.keys(cfg.clips) as Fighter3DState[]).forEach((state) => {
+      if (state === "idle") return; // the rig's own clip is the idle action
+      requestClip(state);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [model, texture]);
 
   /* ---- per-frame: transform + animation state machine ---- */
   useFrame((_, delta) => {
@@ -237,35 +298,10 @@ function FighterModel({
     }
 
     /* animation state machine */
+    desiredState.current = live.state;
     if (live.state !== activeState.current) {
       activeState.current = live.state;
-      const m = mixer.current;
-      if (m) {
-        ensureClip(live.state);
-        const next = actions.current[live.state];
-        if (next) {
-          next.reset();
-          next.enabled = true;
-          next.setEffectiveTimeScale(1);
-          next.setLoop(
-            live.state === "idle" ||
-              live.state === "block" ||
-              live.state === "victory"
-              ? THREE.LoopRepeat
-              : THREE.LoopOnce,
-            Infinity,
-          );
-          next.clampWhenFinished = live.state === "ko";
-          next.fadeIn(0.18).fadeOut(0.18);
-          next.play();
-          /* cross-fade out whatever was running */
-          for (const [key, action] of Object.entries(actions.current)) {
-            if (key !== live.state && action !== next) {
-              action.fadeOut(0.18);
-            }
-          }
-        }
-      }
+      playState(live.state);
     }
 
     /* one-shot clips fall back to idle when they finish (mixer event) */
@@ -390,6 +426,12 @@ export function FighterStage3D({
         gl={{ alpha: true, antialias: true }}
         dpr={[1, 1.75]}
         style={{ background: "transparent" }}
+        /* no flat black plane behind the models — the clear is fully
+         * transparent so the arena shows straight through the canvas */
+        onCreated={({ gl }) => {
+          gl.setClearColor(0x000000, 0);
+          gl.domElement.style.background = "transparent";
+        }}
       >
         <Suspense fallback={null}>
           <StageScene fightersRef={fightersRef} onStatus={onStatus} />

@@ -775,7 +775,7 @@ function FighterCard({
   return (
     <div
       className={cn(
-        "flex flex-col items-center gap-3 rounded-xl border border-white/10 bg-black/40 px-4 py-5 text-center",
+        "flex flex-col items-center gap-3 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-5 text-center",
         side === "left"
           ? "sm:border-r-0 sm:rounded-r-none"
           : "sm:border-l-0 sm:rounded-l-none",
