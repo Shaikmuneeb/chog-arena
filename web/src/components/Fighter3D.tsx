@@ -295,20 +295,14 @@ function FighterModel({
   useEffect(() => {
     if (!group.current) return;
     const g = group.current;
-    /* Measure the model in its FACING orientation: the quarter turn swaps
-     * its width and depth, so a rest-pose box would mis-centre it. */
+    /* Measure the rig in its LOCAL space: the group is rotated every frame
+     * to face the opponent, so the rest-pose box is what we need. */
     const prevScale = g.scale.clone();
     const prevPos = g.position.clone();
     const prevRot = g.rotation.clone();
-    const prevSceneRot = scene.rotation.clone();
     g.scale.setScalar(1);
     g.position.set(0, 0, 0);
     g.rotation.set(0, 0, 0);
-    scene.rotation.set(
-      0,
-      spec.facing === "left" ? -Math.PI / 2 + 0.42 : Math.PI / 2 - 0.42,
-      0,
-    );
     g.updateMatrixWorld(true);
 
     const box = measureBindBox(scene);
@@ -320,7 +314,6 @@ function FighterModel({
     g.scale.copy(prevScale);
     g.position.copy(prevPos);
     g.rotation.copy(prevRot);
-    scene.rotation.copy(prevSceneRot);
     /* Normalise the rig so its feet sit on y = 0 — the FBX origin is not at
      * the feet, which would otherwise float the model off the ground. */
     scene.position.y = -box.min.y;
@@ -329,9 +322,10 @@ function FighterModel({
     g.userData.bbox = {
       sizeY: sizeV.y || 1,
       centerX: center.x,
+      centerZ: center.z,
       minY: 0,
     };
-  }, [scene, spec.facing, textureSettled]);
+  }, [scene, textureSettled]);
 
   /* ---- per-frame: transform + action state machine ---- */
   useFrame((_, delta) => {
@@ -342,13 +336,32 @@ function FighterModel({
     const facingLeft = live.facing === "left";
 
     const bbox = group.current.userData.bbox as
-      | { sizeY: number; centerX: number; minY: number }
+      | { sizeY: number; centerX: number; centerZ: number; minY: number }
       | undefined;
+
+    /* ---- look at the opponent ----------------------------------------
+     * The rigs are authored facing +Z, so the yaw that points a fighter
+     * at its target is atan2(dx, dz). Both fighters live on the same
+     * z-plane, so dz is 0 and the yaw is +/- PI/2 — never toward the
+     * camera. A small offset keeps a 3/4 view instead of a flat
+     * profile. The yaw is re-applied at the end of the frame, after
+     * the mixer has run, so a clip can never turn them back to camera. */
+    const foe = fightersRef.current.find((f) => f.side !== spec.side);
+    const foeWorldX = foe
+      ? (foe.x / 100 - 0.5) * STAGE_WIDTH
+      : worldX + (facingLeft ? -1 : 1);
+    const dx = foeWorldX - worldX;
+    const yaw =
+      Math.abs(dx) < 1e-4
+        ? group.current.rotation.y
+        : dx >= 0
+          ? Math.PI / 2 - FACE_OFFSET
+          : -Math.PI / 2 + FACE_OFFSET;
+
     if (bbox && bbox.sizeY > 0) {
       const scale = FIGHTER_HEIGHT / bbox.sizeY;
       group.current.scale.setScalar(scale);
       /* forward lunge on attacks, mirroring the 2D sprite punch */
-      const foe = fightersRef.current.find((f) => f.side !== spec.side);
       const toward = foe
         ? Math.sign(foe.x - live.x) || (facingLeft ? -1 : 1)
         : facingLeft
@@ -360,15 +373,18 @@ function FighterModel({
         live.state === "critical"
           ? toward * 0.55
           : 0;
-      /* the rotation mirrors the model's local X, so the centring offset
-       * flips with the facing direction. */
-      group.current.position.x =
-        worldX + lunge + (facingLeft ? bbox.centerX : -bbox.centerX) * scale;
+      /* the group is yawed, so the model's local centre has to be rotated
+       * into world space or the fighter drifts off its mark. */
+      const c = Math.cos(yaw);
+      const s = Math.sin(yaw);
+      const rotatedCenterX = bbox.centerX * c + bbox.centerZ * s;
+      group.current.position.x = worldX + lunge - rotatedCenterX * scale;
       group.current.position.y = -bbox.minY * scale;
     } else {
       group.current.position.x = worldX;
       group.current.position.y = 0;
     }
+    group.current.rotation.y = yaw;
 
     /* action state machine */
     if (live.state !== desired.current) {
@@ -379,7 +395,7 @@ function FighterModel({
           const other = actions[key];
           if (other && other !== action) other.fadeOut(0.15);
         }
-        /* strikes restart so every blow reads; the idle loop is left alone
+        /* strikes restart so each blow reads; the idle loop is left alone
          * so the fighter never twitches back to frame zero. */
         if (live.state !== "idle") action.reset();
         action.setEffectiveTimeScale(1);
@@ -409,6 +425,10 @@ function FighterModel({
     }
     wasHit.current = live.state === "hit";
 
+    /* Facing is re-asserted LAST — after the mixer update — so the
+     * animation can never rotate a fighter back toward the camera. */
+    group.current.rotation.y = yaw;
+
     void mixer;
     void delta;
   });
@@ -429,6 +449,12 @@ function FighterModel({
 /* World units: the fighters are ~2.4 units tall, the stage is ~10.5 units wide. */
 const FIGHTER_HEIGHT = 2.6;
 const STAGE_WIDTH = 12;
+
+/**
+ * Keeps a 3/4 view instead of a flat profile when a fighter looks at its
+ * opponent (the rig is authored facing +Z).
+ */
+const FACE_OFFSET = 0.42;
 
 /**
  * The arena backdrop: large extruded neon "CWO" lettering glowing behind the
