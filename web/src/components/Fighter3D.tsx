@@ -208,6 +208,8 @@ function FighterModel({
   /** materials of the rig, cached for the hit flash */
   const materialCache = useRef<THREE.MeshPhongMaterial[] | null>(null);
   const wasHit = useRef(false);
+  /** bind-pose root offsets, used to cancel the clips' root motion */
+  const restRoot = useRef<{ hips?: THREE.Vector3; arm?: THREE.Vector3 }>({});
   /* the ortho camera is 1 world unit = 1 px, so the canvas size IS the stage
    * size in pixels and the 3D fighters line up with the stage. */
   const { size } = useThree();
@@ -290,6 +292,20 @@ function FighterModel({
     current.clampWhenFinished = desired.current === "ko";
     current.fadeIn(0.15).play();
   }, [actions, loaded, desired]);
+
+  /* Capture the rig's bind-pose root offsets. Mixamo clips animate the root
+   * (hips / armature) which lifts the model off the floor and pushes it along
+   * Z — these values let us cancel that motion out every frame. */
+  useEffect(() => {
+    const hips = scene.getObjectByName("mixamorig:Hips");
+    const arm = scene.children.find(
+      (c) => c.name === "Armature" || c.type === "Group",
+    ) as THREE.Object3D | undefined;
+    restRoot.current = {
+      hips: hips?.position.clone(),
+      arm: arm?.position.clone(),
+    };
+  }, [scene]);
 
   /* ---- compute the fit once the mesh is in ---- */
   useEffect(() => {
@@ -410,6 +426,25 @@ function FighterModel({
         action.clampWhenFinished = live.state === "ko";
         action.fadeIn(0.15).play();
       }
+    } else if (live.state === "idle") {
+      /* The fight-idle loop must always be alive — a rig with no running
+       * action falls back to the bind / T-pose. */
+      const idle = actions.idle;
+      if (idle && (idle.weight < 0.01 || !idle.isRunning())) {
+        idle.reset();
+        idle.setEffectiveWeight(1);
+        idle.fadeIn(0.2).play();
+      }
+    }
+
+    /* On a K.O. every other clip on the loser is stopped, so the knock-out
+     * animation is the only thing driving the body. */
+    if (live.state === "ko") {
+      for (const key of Object.keys(actions)) {
+        if (key === "ko") continue;
+        const other = actions[key];
+        if (other && other.isRunning()) other.stop();
+      }
     }
 
     /* red damage flash on hit — cleared the moment the hit ends, otherwise
@@ -428,6 +463,30 @@ function FighterModel({
     /* Facing is re-asserted LAST — after the mixer update — so the
      * animation can never rotate a fighter back toward the camera. */
     group.current.rotation.y = yaw;
+
+    /* ---- floor lock ------------------------------------------------
+     * The mixer has already run (drei's useAnimations ticks before this
+     * frame callback). Mixamo clips carry root motion that lifts the rig
+     * off the floor and shoves it along Z. Cancel it: the feet stay on
+     * the floor, the fighter never drifts toward the camera, and only X
+     * is ever used to slide. */
+    const hips = scene.getObjectByName("mixamorig:Hips");
+    const rest = restRoot.current;
+    let dy = 0;
+    let dz = 0;
+    if (hips && rest.hips) {
+      dy += hips.position.y - rest.hips.y;
+      dz += hips.position.z - rest.hips.z;
+    }
+    const arm = scene.children.find(
+      (c) => c.name === "Armature" || c.type === "Group",
+    ) as THREE.Object3D | undefined;
+    if (arm && rest.arm) {
+      dy += arm.position.y - rest.arm.y;
+      dz += arm.position.z - rest.arm.z;
+    }
+    group.current.position.y = -dy * group.current.scale.y;
+    group.current.position.z = -dz * group.current.scale.z;
 
     void mixer;
     void delta;

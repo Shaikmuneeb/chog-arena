@@ -166,9 +166,18 @@ const ACTION_HOLD: Record<AttackKind, number> = {
 /** How long a hit reaction is held so the flinch clip can finish. */
 const HIT_HOLD = 640;
 
+/**
+ * The fighting gap, in stage percent of CENTRE distance. The 3D stage is 12
+ * world units wide and each fighter is ~1.2 units across, so a 23% centre
+ * distance leaves about 1.6 units of clear air between the two bodies. The
+ * tracks below stop them either side of the CWO lettering, so they always
+ * flank the logo and never walk into it.
+ */
+const FIGHT_GAP = 23;
+
 /** AI cadence: how long a fighter waits between decisions (ms). */
-const AI_DECIDE_MIN = 380;
-const AI_DECIDE_MAX = 720;
+const AI_DECIDE_MIN = 900;
+const AI_DECIDE_MAX = 1650;
 
 /** Per-archetype movement speed (%/s). */
 const FIGHTER_SPEED: Record<FighterClass, number> = {
@@ -227,8 +236,8 @@ const MOVE_FX_MS: Record<SpecialMove["vfxType"], number> = {
   breath: 900,
 };
 /** Horizontal tracks each fighter is confined to (stage %). */
-const TRACK_LEFT: [number, number] = [10, 42];
-const TRACK_RIGHT: [number, number] = [58, 90];
+const TRACK_LEFT: [number, number] = [10, 38.5];
+const TRACK_RIGHT: [number, number] = [61.5, 90];
 
 function randInt(min: number, max: number): number {
   return Math.floor(min + Math.random() * (max - min + 1));
@@ -348,6 +357,12 @@ type MatchState = {
   dashSfxMs: number;
   banner: string | null;
   bannerMs: number;
+  /** K.O. banner, shown above the fighters after the knock-out animation. */
+  koBanner: string | null;
+  /** ms before the K.O. banner appears. */
+  koBannerDelayMs: number;
+  /** ms the K.O. banner stays up. */
+  koBannerMs: number;
   roundWinner: FighterSide | null;
   matchWinner: FighterSide | null;
 };
@@ -441,6 +456,9 @@ function createMatch(script: MatchScript, playerSide: PlayerSide): MatchState {
     dashSfxMs: 0,
     banner: null,
     bannerMs: 0,
+    koBanner: null,
+    koBannerDelayMs: 0,
+    koBannerMs: 0,
     roundWinner: null,
     matchWinner: null,
   };
@@ -498,6 +516,7 @@ type View = {
   round: 1 | 2 | 3;
   timer: number;
   banner: string | null;
+  koBanner: string | null;
   orbs: Record<FighterSide, number>;
   fighters: Record<FighterSide, FighterView>;
   impact: { id: number; x: number } | null;
@@ -547,6 +566,7 @@ function snapshot(m: MatchState): View {
     round: m.round,
     timer: Math.max(0, Math.ceil(m.timer)),
     banner: m.bannerMs > 0 ? m.banner : null,
+    koBanner: m.koBannerMs > 0 ? m.koBanner : null,
     orbs: { ...m.orbs },
     fighters: {
       creator: fighterView(m.fighters.creator),
@@ -587,6 +607,17 @@ function decayFx(m: MatchState, dt: number) {
   if (m.cinematicMs <= 0) m.cinematic = null;
   m.comboMs -= dt;
   if (m.comboMs <= 0) m.combo = null;
+  /* the K.O. banner waits for the knock-out animation to finish */
+  if (m.koBannerDelayMs > 0) {
+    m.koBannerDelayMs -= dt;
+    if (m.koBannerDelayMs <= 0) {
+      m.koBannerDelayMs = 0;
+      m.koBannerMs = 1100;
+    }
+  } else if (m.koBannerMs > 0) {
+    m.koBannerMs -= dt;
+    if (m.koBannerMs <= 0) m.koBanner = null;
+  }
   m.camShakeMs -= dt;
   m.guardMs -= dt;
   if (m.guardMs <= 0) m.guard = null;
@@ -702,9 +733,16 @@ function startKO(
   m.roundWinner = winner;
   m.stage = "ko";
   m.stageMs = 0;
-  m.stageDur = 1750;
-  m.banner = `ROUND ${m.round} K.O.!`;
-  m.bannerMs = 1750;
+  m.stageDur = 2600;
+  /* the knock-out animation gets 1.5s to play before the banner appears */
+  m.banner = null;
+  m.bannerMs = 0;
+  m.koBanner = null;
+  m.koBannerDelayMs = 0;
+  m.koBannerMs = 0;
+  m.koBanner = `ROUND ${m.round} K.O.`;
+  m.koBannerDelayMs = 1500;
+  m.koBannerMs = 1100;
   const loser = winner === "challenger" ? m.fighters.creator : m.fighters.challenger;
   const win = winner === "challenger" ? m.fighters.challenger : m.fighters.creator;
   loser.down = true;
@@ -991,7 +1029,7 @@ function updateAutoFighter(
   const reach = REACH.light;
 
   /* 3) too close: re-open the gap so the fighters never overlap */
-  if (dist < 15) {
+  if (dist < FIGHT_GAP - 1.5) {
     const away = Math.sign(f.x - foe.x) || 1;
     f.moveDir = away;
     f.toward = false;
@@ -1002,8 +1040,8 @@ function updateAutoFighter(
     return;
   }
 
-  /* 4) out of range: walk into striking distance */
-  if (dist > reach - 3) {
+  /* 4) out of range: walk into striking distance (and stop at the gap) */
+  if (dist > FIGHT_GAP) {
     const dir = Math.sign(foe.x - f.x) || (f.facing === "left" ? -1 : 1);
     f.moveDir = dir;
     f.toward = true;
@@ -1210,6 +1248,7 @@ const initialView: View = {
   round: 1,
   timer: 99,
   banner: null,
+  koBanner: null,
   orbs: { creator: 0, challenger: 0 },
   fighters: { creator: emptyFighterView, challenger: emptyFighterView },
   impact: null,
@@ -1242,12 +1281,18 @@ export function BattleArenaModal({
   challengerFighter,
   explorerTxUrl,
   isOpen = true,
-  playerSide = "left",
+  playerSide: _playerSide = "left",
   onPlayAgain,
   onPlayAgainBusy = false,
   onClose,
 }: BattleArenaModalProps) {
   const [view, setView] = useState<View>(initialView);
+
+  /* The stage layout is fixed by CHARACTER, not by role: Chog Princess
+   * always stands to the left of the CWO lettering and Void Lord James to
+   * the right, so they always flank the logo instead of crossing it. */
+  const playerSide: PlayerSide =
+    challengerFighter.fighterClass === "chog_princess" ? "left" : "right";
 
   /* Manual best-of-3 round scoreboard. Refs are the authoritative counters
    * (updated synchronously inside the rAF loop); state mirrors them for
@@ -1690,17 +1735,17 @@ export function BattleArenaModal({
                     style={{ animationDelay: "140ms" }}
                   />
                   <div className="absolute inset-0 flex flex-col items-center justify-center gap-1">
-                    <p
-                      className={cn(
-                        "cinematic-text whitespace-nowrap font-black italic tracking-[0.12em]",
-                        view.cinematic.kind === "ko" &&
-                          "text-6xl text-amber-300 drop-shadow-[0_0_30px_rgba(251,191,36,0.95)] sm:text-7xl",
-                        view.cinematic.kind === "critical" &&
-                          "text-5xl bg-gradient-to-r from-red-400 via-amber-300 to-red-500 bg-clip-text text-transparent drop-shadow-[0_0_24px_rgba(239,68,68,0.9)] sm:text-6xl",
-                      )}
-                    >
-                      {view.cinematic.kind === "ko" ? "K.O." : "CRITICAL ART"}
-                    </p>
+                    {view.cinematic.kind === "ko" ? null : (
+                      <p
+                        className={cn(
+                          "cinematic-text whitespace-nowrap font-black italic tracking-[0.12em]",
+                          view.cinematic.kind === "critical" &&
+                            "text-5xl bg-gradient-to-r from-red-400 via-amber-300 to-red-500 bg-clip-text text-transparent drop-shadow-[0_0_24px_rgba(239,68,68,0.9)] sm:text-6xl",
+                        )}
+                      >
+                        CRITICAL ART
+                      </p>
+                    )}
                     {view.cinematic.moveName && (
                       <p className="cinematic-move-name whitespace-nowrap text-xs font-black uppercase tracking-[0.35em] text-white/90 drop-shadow-[0_0_12px_rgba(255,255,255,0.6)] sm:text-sm">
                         {view.cinematic.moveName}
@@ -1723,7 +1768,21 @@ export function BattleArenaModal({
                 </div>
               )}
 
-              {/* Banner overlays: ROUND N // FIGHT!, K.O., sync events */}
+              {/* K.O. banner — sits ABOVE the fighters, never on the body */}
+              {view.koBanner && (
+                <div
+                  className="pointer-events-none absolute inset-x-0 top-8 z-[33] flex justify-center"
+                  aria-live="assertive"
+                >
+                  <div className="animate-round-banner text-center">
+                    <p className="whitespace-nowrap bg-gradient-to-r from-amber-200 via-yellow-100 to-amber-200 bg-clip-text text-4xl font-black tracking-[0.15em] text-transparent drop-shadow-[0_0_26px_rgba(251,191,36,0.85)] sm:text-5xl">
+                      {view.koBanner}
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {/* Banner overlays: ROUND N // FIGHT!, sync events */}
               {view.banner && !view.cinematic && !view.shieldFx && (
                 <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center">
                   <div className="animate-round-banner text-center">
@@ -1744,7 +1803,7 @@ export function BattleArenaModal({
                 <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
                   <div className="flex flex-col items-center gap-1">
                     <p className="animate-pop-in whitespace-nowrap bg-gradient-to-r from-red-300 via-amber-200 to-orange-300 bg-clip-text text-4xl font-black tracking-widest text-transparent drop-shadow-[0_0_22px_rgba(239,68,68,0.9)] sm:text-5xl">
-                      ⚔️ READY?
+                      ?? READY?
                     </p>
                     <p className="text-[10px] font-bold uppercase tracking-[0.35em] text-zinc-400">
                       {nameOf(leftSide)} vs {nameOf(rightSide)} · Best of 3
@@ -2395,11 +2454,11 @@ function VerdictScreen({
         {/* Trophy / Skull Championship Emblem */}
         {won ? (
           <div className="mx-auto mb-2 flex h-14 w-14 items-center justify-center rounded-full border border-amber-400/40 bg-amber-500/20 text-3xl shadow-[0_0_24px_rgba(251,191,36,0.6)] animate-pop-in">
-            🏆
+            ??
           </div>
         ) : (
           <div className="mx-auto mb-2 flex h-14 w-14 items-center justify-center rounded-full border border-red-500/40 bg-red-500/20 text-3xl shadow-[0_0_24px_rgba(239,68,68,0.5)] animate-pop-in">
-            💀
+            ??
           </div>
         )}
 
@@ -2438,7 +2497,7 @@ function VerdictScreen({
 
         {clutch && (
           <p className="mx-auto mt-4 inline-block animate-pop-in rounded-full border border-orange-400/50 bg-orange-500/15 px-4 py-1.5 text-xs font-extrabold tracking-wide text-orange-200 shadow-[0_0_18px_rgba(251,146,60,0.5)]">
-            🔥 CLUTCH RESURRECTION WIN
+            ?? CLUTCH RESURRECTION WIN
           </p>
         )}
 
