@@ -1803,7 +1803,7 @@ export function BattleArenaModal({
                 <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
                   <div className="flex flex-col items-center gap-1">
                     <p className="animate-pop-in whitespace-nowrap bg-gradient-to-r from-red-300 via-amber-200 to-orange-300 bg-clip-text text-4xl font-black tracking-widest text-transparent drop-shadow-[0_0_22px_rgba(239,68,68,0.9)] sm:text-5xl">
-                      ?? READY?
+                      ⚔️ READY?
                     </p>
                     <p className="text-[10px] font-bold uppercase tracking-[0.35em] text-zinc-400">
                       {nameOf(leftSide)} vs {nameOf(rightSide)} · Best of 3
@@ -2454,11 +2454,11 @@ function VerdictScreen({
         {/* Trophy / Skull Championship Emblem */}
         {won ? (
           <div className="mx-auto mb-2 flex h-14 w-14 items-center justify-center rounded-full border border-amber-400/40 bg-amber-500/20 text-3xl shadow-[0_0_24px_rgba(251,191,36,0.6)] animate-pop-in">
-            ??
+            🏆
           </div>
         ) : (
           <div className="mx-auto mb-2 flex h-14 w-14 items-center justify-center rounded-full border border-red-500/40 bg-red-500/20 text-3xl shadow-[0_0_24px_rgba(239,68,68,0.5)] animate-pop-in">
-            ??
+            💀
           </div>
         )}
 
@@ -2497,7 +2497,7 @@ function VerdictScreen({
 
         {clutch && (
           <p className="mx-auto mt-4 inline-block animate-pop-in rounded-full border border-orange-400/50 bg-orange-500/15 px-4 py-1.5 text-xs font-extrabold tracking-wide text-orange-200 shadow-[0_0_18px_rgba(251,146,60,0.5)]">
-            ?? CLUTCH RESURRECTION WIN
+            🔥 CLUTCH RESURRECTION WIN
           </p>
         )}
 
