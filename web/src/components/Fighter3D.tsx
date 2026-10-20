@@ -39,6 +39,51 @@ export type StageFighter3D = {
   facing: "left" | "right";
 };
 
+/**
+ * Remove the Mixamo root-motion track from a clip.
+ *
+ * Every Mixamo export animates `mixamorig:Hips.position`, which carries the
+ * character's root motion: the mesh slides forward, lifts off the floor and
+ * changes scale as the clip plays. Stripping that track keeps the rotations
+ * (so the animation still reads) while the rig stays planted where it is.
+ */
+function stripRootMotion(clip: THREE.AnimationClip): THREE.AnimationClip {
+  const copy = clip.clone();
+  copy.tracks = copy.tracks.filter(
+    (t) => !/Hips\.position$/i.test(t.name),
+  );
+  return copy;
+}
+
+/**
+ * Fixed stage slots. The fighters stand on a fixed line either side of the
+ * CWO lettering and never cross it — no stage-% mapping, no drifting.
+ */
+const CHARACTER_SLOT: Partial<Record<FighterClass, number>> = {
+  chog_princess: -2.2,
+  void_lord_james: 2.2,
+};
+
+/** How far a fighter lunges on an attack (world units). */
+const ATTACK_LUNGE = 0.3;
+
+/**
+ * How long a hit flinch is held before it freezes (seconds). The Mixamo hit
+ * clips carry a full fall further in, so the window has to be short enough
+ * that only the impact/recoil is shown — never a body going down.
+ */
+const FLINCH_WINDOW = 0.16;
+
+/**
+ * Which clip a state actually plays.
+ *  - ko      : no Mixamo death clip — the body is laid out by hand
+ *  - victory : the winner holds the standing fight-idle
+ */
+function playableState(state: FighterActionState): FighterActionState {
+  if (state === "ko" || state === "victory") return "idle";
+  return state;
+}
+
 /* ------------------------------------------------------------------ loading */
 
 /** One fetch per clip file — many consumers share it. */
@@ -158,7 +203,8 @@ function useFighterActions(
         const group = await loadFbx(clipUrl(cfg, cfg.clips[state]));
         const clip = group.animations?.[0];
         if (!clip) return null;
-        const copy = clip.clone();
+        /* strip the root motion so the rig never leaves the floor */
+        const copy = stripRootMotion(clip);
         copy.name = state;
         return copy;
       }),
@@ -208,8 +254,8 @@ function FighterModel({
   /** materials of the rig, cached for the hit flash */
   const materialCache = useRef<THREE.MeshPhongMaterial[] | null>(null);
   const wasHit = useRef(false);
-  /** bind-pose root offsets, used to cancel the clips' root motion */
-  const restRoot = useRef<{ hips?: THREE.Vector3; arm?: THREE.Vector3 }>({});
+  /** current X lunge offset (world units) */
+  const lungeRef = useRef(0);
   /* the ortho camera is 1 world unit = 1 px, so the canvas size IS the stage
    * size in pixels and the 3D fighters line up with the stage. */
   const { size } = useThree();
@@ -271,7 +317,9 @@ function FighterModel({
   /* ---- play the action for the current state ---- */
   useEffect(() => {
     if (!loaded) return;
-    const current = actions[desired.current] ?? actions.idle;
+    /* a knock-out is posed by hand — never play a clip for it */
+    if (desired.current === "ko") return;
+    const current = actions[playableState(desired.current)] ?? actions.idle;
     if (!current) return;
     for (const key of Object.keys(actions)) {
       const action = actions[key];
@@ -279,33 +327,18 @@ function FighterModel({
     }
     /* the idle loop is never restarted (that made the fighter twitch);
      * strikes restart so each punch reads as a new blow. */
-    if (desired.current !== "idle") current.reset();
+    const state = playableState(desired.current);
+    if (state !== "idle") current.reset();
     current.setEffectiveTimeScale(1);
     current.setLoop(
-      desired.current === "idle" ||
-        desired.current === "block" ||
-        desired.current === "victory"
+      state === "idle" || state === "block"
         ? THREE.LoopRepeat
         : THREE.LoopOnce,
       Infinity,
     );
-    current.clampWhenFinished = desired.current === "ko";
+    current.clampWhenFinished = state === "hit";
     current.fadeIn(0.15).play();
   }, [actions, loaded, desired]);
-
-  /* Capture the rig's bind-pose root offsets. Mixamo clips animate the root
-   * (hips / armature) which lifts the model off the floor and pushes it along
-   * Z — these values let us cancel that motion out every frame. */
-  useEffect(() => {
-    const hips = scene.getObjectByName("mixamorig:Hips");
-    const arm = scene.children.find(
-      (c) => c.name === "Armature" || c.type === "Group",
-    ) as THREE.Object3D | undefined;
-    restRoot.current = {
-      hips: hips?.position.clone(),
-      arm: arm?.position.clone(),
-    };
-  }, [scene]);
 
   /* ---- compute the fit once the mesh is in ---- */
   useEffect(() => {
@@ -333,6 +366,9 @@ function FighterModel({
     /* Normalise the rig so its feet sit on y = 0 — the FBX origin is not at
      * the feet, which would otherwise float the model off the ground. */
     scene.position.y = -box.min.y;
+    /* yaw first, then the fall pitch, so a knock-down drops the fighter
+     * backwards relative to the direction it is facing. */
+    g.rotation.order = "YXZ";
     g.updateMatrixWorld(true);
 
     g.userData.bbox = {
@@ -348,25 +384,24 @@ function FighterModel({
     const live = fightersRef.current.find((f) => f.side === spec.side);
     if (!live || !group.current) return;
 
-    const worldX = (live.x / 100 - 0.5) * STAGE_WIDTH;
-    const facingLeft = live.facing === "left";
-
     const bbox = group.current.userData.bbox as
       | { sizeY: number; centerX: number; centerZ: number; minY: number }
       | undefined;
+    if (bbox && bbox.sizeY > 0) {
+      group.current.scale.setScalar(FIGHTER_HEIGHT / bbox.sizeY);
+    }
 
-    /* ---- look at the opponent ----------------------------------------
-     * The rigs are authored facing +Z, so the yaw that points a fighter
-     * at its target is atan2(dx, dz). Both fighters live on the same
-     * z-plane, so dz is 0 and the yaw is +/- PI/2 — never toward the
-     * camera. A small offset keeps a 3/4 view instead of a flat
-     * profile. The yaw is re-applied at the end of the frame, after
-     * the mixer has run, so a clip can never turn them back to camera. */
+    /* ---- fixed stage slots ------------------------------------------
+     * Each character owns a slot on the stage: the Princess stands on the
+     * left of the CWO lettering, James on the right. They never cross it. */
+    const slotX = CHARACTER_SLOT[spec.fighterClass] ?? 0;
     const foe = fightersRef.current.find((f) => f.side !== spec.side);
-    const foeWorldX = foe
-      ? (foe.x / 100 - 0.5) * STAGE_WIDTH
-      : worldX + (facingLeft ? -1 : 1);
-    const dx = foeWorldX - worldX;
+    const foeSlotX = foe ? CHARACTER_SLOT[foe.fighterClass] ?? 0 : -slotX;
+
+    /* ---- look at the opponent ---------------------------------------
+     * The rigs are authored facing +Z, so the yaw that points a fighter
+     * at its target is +/- PI/2 — never toward the camera. */
+    const dx = foeSlotX - slotX;
     const yaw =
       Math.abs(dx) < 1e-4
         ? group.current.rotation.y
@@ -374,76 +409,76 @@ function FighterModel({
           ? Math.PI / 2 - FACE_OFFSET
           : -Math.PI / 2 + FACE_OFFSET;
 
-    if (bbox && bbox.sizeY > 0) {
-      const scale = FIGHTER_HEIGHT / bbox.sizeY;
-      group.current.scale.setScalar(scale);
-      /* forward lunge on attacks, mirroring the 2D sprite punch */
-      const toward = foe
-        ? Math.sign(foe.x - live.x) || (facingLeft ? -1 : 1)
-        : facingLeft
-          ? -1
-          : 1;
-      const lunge =
-        live.state.endsWith("Attack") ||
-        live.state === "special" ||
-        live.state === "critical"
-          ? toward * 0.55
-          : 0;
-      /* the group is yawed, so the model's local centre has to be rotated
-       * into world space or the fighter drifts off its mark. */
-      const c = Math.cos(yaw);
-      const s = Math.sin(yaw);
-      const rotatedCenterX = bbox.centerX * c + bbox.centerZ * s;
-      group.current.position.x = worldX + lunge - rotatedCenterX * scale;
-      group.current.position.y = -bbox.minY * scale;
-    } else {
-      group.current.position.x = worldX;
-      group.current.position.y = 0;
-    }
+    /* ---- attack lunge: at most ATTACK_LUNGE on X, then it returns -- */
+    const attacking =
+      live.state.endsWith("Attack") ||
+      live.state === "special" ||
+      live.state === "critical";
+    const toward = dx >= 0 ? 1 : -1;
+    const lungeTarget = attacking ? toward * ATTACK_LUNGE : 0;
+    lungeRef.current +=
+      (lungeTarget - lungeRef.current) * Math.min(1, delta * 0.012);
+
+    /* ---- the floor lock ---------------------------------------------
+     * Feet on the floor, fixed z line, X only for sliding. */
+    group.current.position.x = slotX + lungeRef.current;
+    group.current.position.y = 0;
+    group.current.position.z = 0;
     group.current.rotation.y = yaw;
 
-    /* action state machine */
-    if (live.state !== desired.current) {
-      desired.current = live.state;
-      const action = actions[live.state] ?? actions.idle;
-      if (action) {
-        for (const key of Object.keys(actions)) {
-          const other = actions[key];
-          if (other && other !== action) other.fadeOut(0.15);
-        }
-        /* strikes restart so each blow reads; the idle loop is left alone
-         * so the fighter never twitches back to frame zero. */
-        if (live.state !== "idle") action.reset();
-        action.setEffectiveTimeScale(1);
-        action.setLoop(
-          live.state === "idle" ||
-            live.state === "block" ||
-            live.state === "victory"
-            ? THREE.LoopRepeat
-            : THREE.LoopOnce,
-          Infinity,
-        );
-        action.clampWhenFinished = live.state === "ko";
-        action.fadeIn(0.15).play();
-      }
-    } else if (live.state === "idle") {
-      /* The fight-idle loop must always be alive — a rig with no running
-       * action falls back to the bind / T-pose. */
-      const idle = actions.idle;
-      if (idle && (idle.weight < 0.01 || !idle.isRunning())) {
-        idle.reset();
-        idle.setEffectiveWeight(1);
-        idle.fadeIn(0.2).play();
-      }
-    }
-
-    /* On a K.O. every other clip on the loser is stopped, so the knock-out
-     * animation is the only thing driving the body. */
+    /* ---- states ------------------------------------------------------
+     * ko       : stop the mixer and lay the model on its back on the floor
+     * victory  : the winner holds the standing fight-idle
+     * hit      : a short in-place flinch (never a fall while HP > 0)
+     * otherwise: the standing fight-idle */
     if (live.state === "ko") {
-      for (const key of Object.keys(actions)) {
-        if (key === "ko") continue;
-        const other = actions[key];
-        if (other && other.isRunning()) other.stop();
+      if (desired.current !== "ko") {
+        desired.current = "ko";
+        mixer.stopAllAction();
+      }
+      /* lying on its back, at its own X, y stays 0 */
+      group.current.rotation.x = -Math.PI / 2;
+    } else {
+      group.current.rotation.x = 0;
+      const wanted = playableState(live.state);
+      if (wanted !== desired.current) {
+        desired.current = wanted;
+        const action = actions[wanted] ?? actions.idle;
+        if (action) {
+          for (const key of Object.keys(actions)) {
+            const other = actions[key];
+            if (other && other !== action) other.fadeOut(0.15);
+          }
+          /* strikes restart so each blow reads; the idle loop is left alone
+           * so the fighter never twitches back to frame zero. */
+          if (wanted !== "idle") action.reset();
+          action.setEffectiveTimeScale(1);
+          action.setLoop(
+            wanted === "idle" || wanted === "block"
+              ? THREE.LoopRepeat
+              : THREE.LoopOnce,
+            Infinity,
+          );
+          action.clampWhenFinished = wanted === "hit";
+          action.fadeIn(0.15).play();
+        }
+      } else if (wanted === "idle") {
+        /* The fight-idle loop must always be alive — a rig with no running
+         * action falls back to the bind / T-pose. */
+        const idle = actions.idle;
+        if (idle && (idle.weight < 0.01 || !idle.isRunning())) {
+          idle.reset();
+          idle.setEffectiveWeight(1);
+          idle.fadeIn(0.2).play();
+        }
+      }
+
+      /* a hit is a short flinch — freeze it before it turns into a fall */
+      if (live.state === "hit") {
+        const hitAction = actions.hit;
+        if (hitAction && hitAction.isRunning() && hitAction.time > FLINCH_WINDOW) {
+          hitAction.setEffectiveTimeScale(0);
+        }
       }
     }
 
@@ -461,32 +496,11 @@ function FighterModel({
     wasHit.current = live.state === "hit";
 
     /* Facing is re-asserted LAST — after the mixer update — so the
-     * animation can never rotate a fighter back toward the camera. */
+     * animation can never rotate a fighter back toward the camera, and the
+     * floor lock (position.y = 0, fixed z) is re-applied with it. */
     group.current.rotation.y = yaw;
-
-    /* ---- floor lock ------------------------------------------------
-     * The mixer has already run (drei's useAnimations ticks before this
-     * frame callback). Mixamo clips carry root motion that lifts the rig
-     * off the floor and shoves it along Z. Cancel it: the feet stay on
-     * the floor, the fighter never drifts toward the camera, and only X
-     * is ever used to slide. */
-    const hips = scene.getObjectByName("mixamorig:Hips");
-    const rest = restRoot.current;
-    let dy = 0;
-    let dz = 0;
-    if (hips && rest.hips) {
-      dy += hips.position.y - rest.hips.y;
-      dz += hips.position.z - rest.hips.z;
-    }
-    const arm = scene.children.find(
-      (c) => c.name === "Armature" || c.type === "Group",
-    ) as THREE.Object3D | undefined;
-    if (arm && rest.arm) {
-      dy += arm.position.y - rest.arm.y;
-      dz += arm.position.z - rest.arm.z;
-    }
-    group.current.position.y = -dy * group.current.scale.y;
-    group.current.position.z = -dz * group.current.scale.z;
+    group.current.position.y = 0;
+    group.current.position.z = 0;
 
     void mixer;
     void delta;
