@@ -312,12 +312,12 @@ body {
   transform: scaleX(-1);
 }
 
-/* Static fighter portrait <img> — soft radial fade blends the studio plate
- * into any dark backdrop. Pure CSS, no video/canvas decode. */
+/* Static fighter portrait <img> — the posters are already transparent and
+ * cropped tight, so this only feathers the extreme corners. */
 .fighter-portrait {
   object-fit: contain;
-  -webkit-mask-image: radial-gradient(80% 90% at 50% 50%, #000 62%, transparent 100%);
-  mask-image: radial-gradient(80% 90% at 50% 50%, #000 62%, transparent 100%);
+  -webkit-mask-image: radial-gradient(94% 97% at 50% 50%, #000 80%, transparent 100%);
+  mask-image: radial-gradient(94% 97% at 50% 50%, #000 80%, transparent 100%);
 }
 
 /* Animated fighter GIF — already transparent and cropped tight to the

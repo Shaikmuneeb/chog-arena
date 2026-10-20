@@ -12,7 +12,7 @@ import dynamic from "next/dynamic";
 import { ExternalLink, Loader2, Swords } from "lucide-react";
 import { useFighterProfile } from "@/context/FighterProfileContext";
 import type { FighterClass } from "@/config/fighterClasses";
-import { FIGHTER_CLASS_META, FIGHTER_ROSTER_BY_ID } from "@/config/fighterClasses";
+import { FIGHTER_CLASS_META } from "@/config/fighterClasses";
 import { has3DModel, type Fighter3DState } from "@/config/fighterModels";
 import type { StageFighter3D } from "./Fighter3D";
 
@@ -66,138 +66,6 @@ export type DuelOutcome = {
   resurrectedAddress?: `0x${string}`;
 };
 
-/** One side of the battle: identity + full-body fighter class. */
-export function ChromaFighter({
-  fighterClass,
-  state = "idle",
-  facing = "right",
-  size = 160,
-  animKey,
-  leanDir = null,
-  isBlocking = false,
-  activeMoveName = null,
-  className,
-  moveDir = 0,
-}: {
-  fighterClass: FighterClass;
-  state?: SpriteState;
-  facing?: "left" | "right";
-  size?: number;
-  animKey?: number | string;
-  leanDir?: "forward" | "retreat" | null;
-  isBlocking?: boolean;
-  activeMoveName?: string | null;
-  className?: string;
-  moveDir?: number;
-}) {
-  const theme = FIGHTER_CLASS_META[fighterClass];
-  /* Animated GIF loop for the combat stage — the fighter id resolves to its
-   * own asset, never a neighbour's. */
-  const portraitSrc = FIGHTER_ROSTER_BY_ID[fighterClass].gif;
-  const leanClass =
-    leanDir === "forward"
-      ? "fighter-lean-forward"
-      : leanDir === "retreat"
-        ? "fighter-lean-retreat"
-        : isBlocking
-          ? "assist-block"
-          : "";
-
-  const attacking = state === "attack" || state === "dashIn";
-  const hurt = state === "hit" || state === "stagger";
-  /* Pure CSS keyframes: forward lunge on attacks, red-flash recoil on hits.
-   * The mirrored wrapper flips X for player 2, so the lunge always drives
-   * toward the opponent. */
-  const motionClass = attacking
-    ? activeMoveName
-      ? "fighter-lunge-heavy"
-      : "fighter-lunge"
-    : hurt
-      ? "fighter-hit-flash"
-      : "";
-
-  let transform = "translateY(0px) scale(1)";
-  let transition = "transform 120ms ease-out";
-  let filter = "none";
-  if (isBlocking) {
-    transform = "scaleY(0.92) translateY(8px)";
-    transition = "transform 120ms ease-out";
-  } else if (hurt) {
-    /* keyframes drive the recoil + red flash */
-    transform = "translateX(0px) scale(1)";
-    transition = "transform 150ms ease-out";
-  } else if (state === "dead") {
-    transform = "translateY(30px) rotate(-75deg)";
-    transition = "transform 400ms ease-out";
-    filter = "grayscale(1) brightness(0.7)";
-  } else if (attacking) {
-    /* keyframes drive the forward lunge */
-    transform = "translateX(0px) scale(1)";
-    transition = "transform 90ms ease-out";
-  } else if (state === "dashOut") {
-    transform = "translateX(-12px) scale(1)";
-    transition = "transform 120ms ease-out";
-  } else if (moveDir < 0) {
-    transform = "rotate(-6deg) translateY(-6px)";
-    transition = "transform 120ms ease-out";
-  } else if (moveDir > 0) {
-    transform = "rotate(8deg) scaleX(1.04) translateY(-4px)";
-    transition = "transform 120ms ease-out";
-  } else if (state === "victory") {
-    transform = "translateY(-8px) scale(1.05)";
-    transition = "transform 200ms ease-out";
-  }
-  const motionStyle = {
-    transform,
-    transition,
-    filter,
-    transformOrigin: "bottom center",
-    opacity: state === "dead" ? 0.7 : 1,
-  };
-  return (
-    <div
-      key={animKey ?? "static"}
-      className={cn(
-        "sprite-pixelated relative inline-block select-none opacity-100",
-        facing === "left" && "sprite-mirror",
-        className,
-      )}
-      style={{ height: size, lineHeight: 0 }}
-      aria-hidden
-    >
-      <div
-        className={cn(
-          "relative will-change-transform",
-          leanClass,
-          motionClass,
-          state === "idle" && "procedural-idle-breathe",
-        )}
-        style={motionStyle}
-      >
-        <img
-          src={portraitSrc}
-          alt=""
-          aria-hidden
-          draggable={false}
-          className="fighter-gif select-none"
-          style={{ height: size, width: "auto" }}
-        />
-        {isBlocking && (
-          <div
-            className="pointer-events-none absolute left-1/2 top-1/2 h-24 w-24 -translate-x-1/2 -translate-y-1/2"
-            style={{
-              clipPath:
-                "polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%)",
-              background: "rgba(34,211,238,0.25)",
-              border: "2px solid rgba(34,211,238,0.8)",
-              boxShadow: "0 0 20px rgba(34,211,238,0.6)",
-            }}
-          />
-        )}
-      </div>
-    </div>
-  );
-}
 
 function FistFx({ x }: { x: number }) {
   return (
@@ -266,62 +134,6 @@ type FighterSide = "creator" | "challenger";
 type PlayerSide = "left" | "right";
 type Stage = "faceoff" | "roundintro" | "fight" | "ko" | "verdict";
 type AttackKind = "light" | "heavy" | "special" | "critical";
-
-/** Per-class visual scale — sheet art fills its frame very differently
- * (Chogzilla art is edge-to-edge; Keone/James art sits small in-frame). */
-const CLASS_SIZE_SCALE: Record<FighterClass, number> = {
-  chogzila: 0.72,
-  chog_samurai: 0.92,
-  void_lord_james: 1.1,
-  crimson_lord_benja: 0.85,
-  lady_chog: 0.9,
-  chog_princess: 0.9,
-};
-
-/** Class-specific neon afterimage trail colors (shadow clones). */
-const CLASS_AFTERIMAGE_CONFIG: Record<
-  FighterClass,
-  { name: string; color: string; glow: string }
-> = {
-  chogzila: {
-    name: "Warlord Chogzilla",
-    color: "#f97316",
-    glow: "rgba(249, 115, 22, 0.85)",
-  },
-  chog_samurai: {
-    name: "Chog Samurai",
-    color: "#a855f7",
-    glow: "rgba(168, 85, 247, 0.85)",
-  },
-  void_lord_james: {
-    name: "Void Lord James",
-    color: "#c084fc",
-    glow: "rgba(192, 132, 252, 0.85)",
-  },
-  crimson_lord_benja: {
-    name: "Crimson Lord Benja",
-    color: "#ef4444",
-    glow: "rgba(239, 68, 68, 0.85)",
-  },
-  lady_chog: {
-    name: "Lady Chog",
-    color: "#f472b6",
-    glow: "rgba(244, 114, 182, 0.85)",
-  },
-  chog_princess: {
-    name: "Chog Princess",
-    color: "#c084fc",
-    glow: "rgba(192, 132, 252, 0.85)",
-  },
-};
-
-function stageSize(f: FighterDescriptor, narrow = false): number {
-  /* Narrow viewports (< 640px) scale both fighters down proportionally so
-   * there is room to dash and trade combos cleanly on a phone. */
-  return Math.round(
-    225 * (CLASS_SIZE_SCALE[f.fighterClass] ?? 1) * (narrow ? 0.68 : 1),
-  );
-}
 
 /** Map a 2D fighter pose onto the 3D animation state machine. */
 function toFighter3DState(pose: SpriteState, blocking: boolean): Fighter3DState {
@@ -1367,10 +1179,6 @@ export function BattleArenaModal({
   onClose,
 }: BattleArenaModalProps) {
   const [view, setView] = useState<View>(initialView);
-  const [narrow, setNarrow] = useState(false);
-  /* mirror of `narrow` for the rAF loop (no stale closure) */
-  const narrowRef = useRef(false);
-  narrowRef.current = narrow;
 
   /* Manual best-of-3 round scoreboard. Refs are the authoritative counters
    * (updated synchronously inside the rAF loop); state mirrors them for
@@ -1395,7 +1203,6 @@ export function BattleArenaModal({
       state: "idle",
       x: 68,
       facing: "left",
-      height: 225,
     },
     {
       side: "challenger",
@@ -1403,20 +1210,21 @@ export function BattleArenaModal({
       state: "idle",
       x: 32,
       facing: "right",
-      height: 225,
     },
   ]);
-  /* which side has a live 3D model (falls back to the sprite if it fails) */
-  const [threeReady, setThreeReady] = useState<{
-    creator: boolean;
-    challenger: boolean;
-  }>({ creator: false, challenger: false });
-  const handle3DStatus = useCallback(
-    (side: "creator" | "challenger", ok: boolean) => {
-      setThreeReady((prev) => (prev[side] === ok ? prev : { ...prev, [side]: ok }));
-    },
-    [],
-  );
+  /* True once both rigs are on stage — the face-off holds until then. */
+  const [rigsReady, setRigsReady] = useState(false);
+  const rigsReadyRef = useRef(false);
+  rigsReadyRef.current = rigsReady;
+  const handle3DStatus = useCallback(() => {
+    setRigsReady(true);
+  }, []);
+
+  /* Safety net: never let a slow/failed model stall the face-off. */
+  useEffect(() => {
+    const t = setTimeout(() => setRigsReady(true), 12000);
+    return () => clearTimeout(t);
+  }, []);
 
   const nameOf = (side: FighterSide): string =>
     side === "creator" ? creatorFighter.name : challengerFighter.name;
@@ -1493,6 +1301,10 @@ export function BattleArenaModal({
           scheduleAutoStrike(m, script);
         }
       }
+      /* Hold the face-off until the 3D rigs are on stage. */
+      if (!rigsReadyRef.current && m.stage === "faceoff") {
+        m.stageMs = 0;
+      }
       step(m, dt, script, playerSide, onRoundWin);
       const next = snapshot(m);
       viewRef.current = next;
@@ -1503,36 +1315,7 @@ export function BattleArenaModal({
         const f = next.fighters[entry.side];
         entry.x = f.x;
         entry.facing = f.facing;
-        entry.height = stageSize(
-          entry.side === "creator" ? creatorFighter : challengerFighter,
-          narrowRef.current,
-        );
         entry.state = toFighter3DState(f.pose, f.blockHeld);
-      }
-      /* Combat log / commentary feed — newest first, like a live feed. */
-      const hits = next.hits;
-      if (hits.length) {
-        const newest = hits[hits.length - 1];
-        if (newest.id > lastHitId.current) {
-          lastHitId.current = newest.id;
-          const attackerSide = newest.side;
-          const attackerName =
-            attackerSide === "challenger"
-              ? challengerFighter.name
-              : creatorFighter.name;
-          const attackerClass =
-            attackerSide === "challenger"
-              ? challengerFighter.fighterClass
-              : creatorFighter.fighterClass;
-          const signature = FIGHTER_ROSTER_BY_ID[attackerClass].style;
-          const moveText = newest.name ?? signature;
-          const critText = newest.crit ? " CRITICAL" : "";
-          const multiText = newest.multi && newest.multi > 1 ? ` ×${newest.multi}` : "";
-          const line = `${attackerName} uses ${moveText}${critText} (-${newest.dmg} HP)${multiText}`;
-          latestMoveRef.current = line;
-          combatLogRef.current.unshift({ id: newest.id, text: line });
-          if (combatLogRef.current.length > 5) combatLogRef.current.pop();
-        }
       }
       if (m.stage !== "verdict") raf = requestAnimationFrame(loop);
     };
@@ -1552,10 +1335,6 @@ export function BattleArenaModal({
    * (light/heavy/special/critical) scaled to their meter. Both fighters run
    * through the existing attack/hit/VFX pipeline automatically. */
   const autoTimer = useRef(0);
-  const combatLogRef = useRef<{ id: number; text: string }[]>([]);
-  const lastHitId = useRef(0);
-  const latestMoveRef = useRef<string>("SIMULATING COMBAT…");
-  const logEndRef = useRef<HTMLDivElement>(null);
 
   const scheduleAutoStrike = (m: MatchState, script: MatchScript): void => {
     const p = m.fighters.challenger;
@@ -1579,15 +1358,6 @@ export function BattleArenaModal({
     startStrike(m, side, kind, script);
   };
 
-  /* Narrow-viewport tracking for proportional sprite scaling. */
-  useEffect(() => {
-    const mq = window.matchMedia("(max-width: 639px)");
-    const sync = () => setNarrow(mq.matches);
-    sync();
-    mq.addEventListener("change", sync);
-    return () => mq.removeEventListener("change", sync);
-  }, []);
-
   if (!outcome || !script) return null;
 
   const revivedName = script.revivedSide ? nameOf(script.revivedSide) : null;
@@ -1596,11 +1366,12 @@ export function BattleArenaModal({
   const leftDesc = leftSide === "challenger" ? challengerFighter : creatorFighter;
   const rightDesc = rightSide === "challenger" ? challengerFighter : creatorFighter;
 
-  /* Dynamic Stage Camera & Zoom */
+  /* Dynamic Stage Camera & Zoom — subtle push-in as the fighters close, with
+   * the pivot low enough that the 3D fighters never clip out of frame. */
   const dist = Math.abs(view.fighters.creator.x - view.fighters.challenger.x);
   const closeRatio = Math.max(0, Math.min(1, (65 - dist) / 45));
   const isCriticalArt = view.cinematic?.kind === "critical";
-  const cameraScale = isCriticalArt ? 1.22 : 1.0 + closeRatio * 0.12;
+  const cameraScale = isCriticalArt ? 1.1 : 1.0 + closeRatio * 0.05;
   const midX = (view.fighters.creator.x + view.fighters.challenger.x) / 2;
   const cameraPanX = (50 - midX) * 0.22;
 
@@ -1611,31 +1382,14 @@ export function BattleArenaModal({
   const rightWins = rightSide === "challenger" ? playerWins : opponentWins;
 
   return (
-    <div className="fixed inset-0 z-[95] flex h-[100dvh] items-center justify-center bg-black/90 p-2 backdrop-blur-sm sm:h-[90vh] sm:p-4">
+    <div className="fixed inset-0 z-[95] flex h-[100dvh] items-center justify-center bg-black/90 p-2 backdrop-blur-sm sm:h-[92vh] sm:p-4">
       <div
-        className="relative flex max-h-full w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-red-500/30 bg-zinc-950 shadow-[0_0_70px_-10px_rgba(239,68,68,0.3)]"
+        className="relative flex h-full max-h-full w-full max-w-7xl flex-col overflow-hidden rounded-2xl border border-red-500/30 bg-zinc-950 shadow-[0_0_70px_-10px_rgba(239,68,68,0.3)]"
         role="dialog"
         aria-modal="true"
       >
-        {/* ================= FINAL VERDICT ================= */}
-        {view.stage === "verdict" ? (
-          <VerdictScreen
-            outcome={outcome}
-            manualWon={manualPlayerWon}
-            creatorName={creatorFighter.name}
-            challengerName={challengerFighter.name}
-            creatorFighter={creatorFighter}
-            challengerFighter={challengerFighter}
-            revivedName={revivedName}
-            explorerTxUrl={explorerTxUrl}
-            onPlayAgain={onPlayAgain}
-            onPlayAgainBusy={onPlayAgainBusy}
-            onClose={onClose}
-          />
-        ) : (
-          <>
-            {/* ============ ARCADE HUD ============ */}
-            <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2 border-b border-white/10 bg-black/70 px-3 pb-3 pt-4 sm:gap-4 sm:px-6">
+        {/* ============ ARCADE HUD ============ */}
+        <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2 border-b border-white/10 bg-black/70 px-3 pb-3 pt-4 sm:gap-4 sm:px-6">
               <HudSide
                 fighter={leftDesc}
                 hp={view.fighters[leftSide].hp}
@@ -1662,10 +1416,10 @@ export function BattleArenaModal({
               />
             </div>
 
-            {/* ============ 2D BATTLE STAGE ============ */}
+            {/* ============ 3D BATTLE STAGE ============ */}
             <div
               className={cn(
-                "relative h-[38dvh] min-h-[260px] overflow-hidden sm:h-[470px]",
+                "relative min-h-[380px] flex-1 overflow-hidden sm:min-h-[560px]",
                 view.camShake && "arena-cam-shake",
                 view.hitStop && "arena-hit-stop",
                 view.cinematic && "arena-cinematic-zoom",
@@ -1676,7 +1430,7 @@ export function BattleArenaModal({
                 className="relative h-full w-full will-change-transform transition-transform duration-150 ease-out"
                 style={{
                   transform: `scale(${cameraScale}) translateX(${cameraPanX}%)`,
-                  transformOrigin: "50% 75%",
+                  transformOrigin: "50% 90%",
                 }}
               >
                 {/* Arena background art — heavily dimmed + softened */}
@@ -1694,13 +1448,6 @@ export function BattleArenaModal({
                   className="absolute inset-0 bg-gradient-to-t from-zinc-950 via-zinc-950/80 to-zinc-950/60"
                   aria-hidden
                 />
-
-                {/* Floating move banner — the latest exchange, front and centre */}
-                <div className="pointer-events-none absolute inset-x-0 top-4 z-[33] flex justify-center">
-                  <div className="max-w-[92%] truncate rounded-full border border-yellow-500/30 bg-black/70 px-5 py-1.5 text-center text-[10px] font-bold uppercase tracking-widest text-yellow-400 animate-pulse sm:text-xs">
-                    {latestMoveRef.current}
-                  </div>
-                </div>
 
                 {/* Critical Art Cut-In Dark Vignette */}
                 {isCriticalArt && (
@@ -1792,12 +1539,8 @@ export function BattleArenaModal({
                   );
                 })}
 
-                {/* 3D fighter layer — rigged models are drawn in a transparent
-                    R3F canvas that lines up pixel-for-pixel with the 2D
-                    sprites. Fighters without a model keep the 2D treatment.
-                    The canvas mounts whenever a character SHIPS a model; if
-                    that model fails to load, `threeReady` stays false and the
-                    2D sprite takes over. */}
+                {/* 3D fighter layer — the canvas IS the stage: rigged Mixamo
+                    meshes, lit and animated, filling the whole viewport. */}
                 {(has3DModel(creatorFighter.fighterClass) ||
                   has3DModel(challengerFighter.fighterClass)) && (
                   <FighterStage3D
@@ -1806,95 +1549,24 @@ export function BattleArenaModal({
                   />
                 )}
 
-                {/* Fighters + Motion Afterimages (Shadow Clones) */}
-                {(["creator", "challenger"] as const).map((side) => {
-                  const f = view.fighters[side];
-                  const desc = side === "creator" ? creatorFighter : challengerFighter;
-                  const classCfg = CLASS_AFTERIMAGE_CONFIG[desc.fighterClass];
-                  /* a live 3D model replaces the 2D sprite for that fighter */
-                  const use3D =
-                    has3DModel(desc.fighterClass) && threeReady[side];
-
-                  const isDashing = f.moveDir !== 0;
-                  const isSpecialOrCrit = f.pose === "attack" && Boolean(f.activeMoveName);
-                  const showAfterimages =
-                    !use3D && (isDashing || isSpecialOrCrit);
-
-                  const dirSign = f.moveDir !== 0 ? f.moveDir : (f.facing === "right" ? 1 : -1);
-                  const offsets = [-dirSign * 3.5, -dirSign * 7.5, -dirSign * 11.5];
-                  const opacities = [0.5, 0.25, 0.1];
-
-                  return (
-                    <div key={side}>
-                      {/* 3 fading neon silhouette afterimages */}
-                      {showAfterimages &&
-                        [0, 1, 2].map((idx) => (
-                          <div
-                            key={`afterimage-${side}-${idx}`}
-                            className="sprite-pixelated afterimage-ghost absolute bottom-5"
-                            style={{
-                              left: `${f.x + offsets[idx]}%`,
-                              transform: "translateX(-50%)",
-                              opacity: opacities[idx],
-                              ["--afterimage-glow" as string]: classCfg.color,
-                              zIndex: 10 + idx,
-                            }}
-                            aria-hidden
-                          >
-                             <ChromaFighter
-                               fighterClass={desc.fighterClass}
-                               state={f.pose}
-                               facing={f.facing}
-                               size={stageSize(desc, narrow)}
-                               animKey={`after-${side}-${idx}-${f.pose}`}
-                               leanDir={f.leanDir}
-                             />
-                          </div>
-                        ))}
-
-                       {/* Main Fighter Body */}
-                       <div
-                         className={cn(
-                           "sprite-pixelated absolute bottom-5 z-30",
-                           use3D && "pointer-events-none",
-                         )}
-                         style={{
-                           left: `${f.x}%`,
-                           transform: "translateX(-50%)",
-                           opacity: use3D ? 0 : 1,
-                           visibility: "visible",
-                         }}
-                       >
-                        <div className="assist-stance">
-                          <ChromaFighter
-                            fighterClass={desc.fighterClass}
-                            state={f.pose}
-                            facing={f.facing}
-                            size={stageSize(desc, narrow)}
-                            animKey={`${f.pose}-${f.seq}`}
-                            activeMoveName={f.activeMoveName}
-                            leanDir={f.leanDir}
-                            isBlocking={f.blockHeld}
-                            moveDir={f.moveDir}
-                          />
-                        </div>
-                        {/* Guard aura — shield shimmer while blocking */}
-                        {f.blockHeld && (
-                          <div
-                            className="pointer-events-none absolute bottom-0 left-1/2 z-[25] h-28 w-28 -translate-x-1/2 rounded-full border-2 border-cyan-300/70 bg-cyan-300/10"
-                            style={{ boxShadow: "0 0 20px rgba(34,211,238,0.5)" }}
-                            aria-hidden
-                          />
-                        )}
-                        {view.hits
-                          .filter((h) => h.side === side)
-                          .map((h) => (
-                            <DamageNumber key={h.id} hit={h} />
-                          ))}
-                      </div>
-                    </div>
-                  );
-                })}
+                {/* Floating damage numbers anchored to each 3D fighter */}
+                {(["creator", "challenger"] as const).map((side) => (
+                  <div
+                    key={`dmg-${side}`}
+                    className="pointer-events-none absolute bottom-[46%] z-30"
+                    style={{
+                      left: `${view.fighters[side].x}%`,
+                      transform: "translateX(-50%)",
+                    }}
+                    aria-hidden
+                  >
+                    {view.hits
+                      .filter((h) => h.side === side)
+                      .map((h) => (
+                        <DamageNumber key={h.id} hit={h} />
+                      ))}
+                  </div>
+                ))}
 
                 {/* Dash-in dust/smoke behind the attacker */}
                 {view.dust && <DustFx key={`dust-${view.dust.id}`} x={view.dust.x} />}
@@ -2076,63 +1748,25 @@ export function BattleArenaModal({
               )}
             </div>
 
-            {/* ================= SPECTATOR HUD =================
-                Auto-fighter exchange ticker at top, combat log at bottom,
-                cinematic viewing window in the center. */}
-            <div className="flex flex-col h-full">
-              {/* Exchange ticker — "SIMULATING COMBAT…" progress */}
-              <div className="flex items-center justify-between gap-2 px-3 pt-2 sm:px-6 border-b border-white/10 bg-black/60">
-                <span className="text-[9px] font-black uppercase tracking-widest text-amber-300 animate-pulse">
-                  SIMULATING COMBAT…
-                </span>
-                <div className="flex-1 h-1 overflow-hidden rounded-full bg-white/10">
-                  <div
-                    className="h-full rounded-full bg-gradient-to-r from-amber-500 to-orange-400 transition-[width] duration-1000"
-                    style={{ width: `${Math.round(((99 - Math.max(0, view.timer)) / 99) * 100)}%` }}
-                  />
-                </div>
-                <span className="w-12 text-right font-mono text-[10px] text-zinc-400">
-                  {String(view.timer).padStart(2, "0")}
-                </span>
-              </div>
-
-              {/* Combat log / commentary feed — newest first, newest highlighted */}
-              <div className="flex-1 overflow-hidden flex flex-col min-h-0">
-                <div
-                  className="border-t border-white/10 bg-black/80 p-2 sm:p-3 overflow-y-auto"
-                >
-                  <p className="text-[9px] font-bold uppercase tracking-widest text-amber-400/90 mb-1">
-                    Automated Match Feed
-                  </p>
-                  <div
-                    className="space-y-0.5 text-[10px] font-mono leading-relaxed"
-                    ref={logEndRef}
-                  >
-                    {combatLogRef.current.length === 0 && (
-                      <div className="text-zinc-500/60 italic">
-                        Match started! Auto-battle simulation underway…
-                      </div>
-                    )}
-                    {combatLogRef.current.map((e, i) => (
-                      <div
-                        key={e.id}
-                        className={cn(
-                          "transition-opacity drop-shadow-[0_0_6px_rgba(0,0,0,0.6)]",
-                          i === 0
-                            ? "font-bold text-white"
-                            : "text-zinc-300 opacity-50",
-                        )}
-                      >
-                        ⚔️ {e.text}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            </div>
-          </>
-        )}
-      </div>
+            {/* ================= FINAL VERDICT =================
+                Overlays the live 3D stage, so the K.O. / victory animation
+                keeps playing behind the payout panel. */}
+            {view.stage === "verdict" && (
+              <VerdictScreen
+                outcome={outcome}
+                manualWon={manualPlayerWon}
+                creatorName={creatorFighter.name}
+                challengerName={challengerFighter.name}
+                creatorFighter={creatorFighter}
+                challengerFighter={challengerFighter}
+                revivedName={revivedName}
+                explorerTxUrl={explorerTxUrl}
+                onPlayAgain={onPlayAgain}
+                onPlayAgainBusy={onPlayAgainBusy}
+                onClose={onClose}
+              />
+            )}
+        </div>
     </div>
   );
 }
@@ -2718,51 +2352,18 @@ function VerdictScreen({
 }) {
   const won = manualWon;
   const clutch = won && outcome.userResurrected;
-  const winnerDescriptor = won ? challengerFighter : creatorFighter;
-  const loserDescriptor = won ? creatorFighter : challengerFighter;
 
   return (
     <div
       className={cn(
-        "relative overflow-hidden px-6 py-10 text-center sm:px-10 sm:py-12",
-        won ? "bg-emerald-950" : "bg-zinc-950",
+        "absolute inset-0 z-40 flex flex-col items-center justify-center overflow-y-auto px-6 py-8 text-center backdrop-blur-[3px]",
+        won
+          ? "bg-gradient-to-b from-emerald-950/45 via-zinc-950/35 to-zinc-950/60"
+          : "bg-gradient-to-b from-rose-950/45 via-zinc-950/35 to-zinc-950/60",
       )}
+      aria-live="assertive"
     >
-      {/* Arena backdrop art */}
-      <div
-        className="absolute inset-0 bg-cover bg-center opacity-40"
-        style={{ backgroundImage: "url(/assets/arena-background.jpg)" }}
-        aria-hidden
-      />
-      {/* Tinted dark overlay — verdict text stays crisp */}
-      <div
-        className={cn(
-          "absolute inset-0",
-          won
-            ? "bg-gradient-to-b from-emerald-950/85 via-zinc-950/80 to-zinc-950/95"
-            : "bg-gradient-to-b from-rose-950/80 via-zinc-950/80 to-zinc-950/95",
-        )}
-        aria-hidden
-      />
-
       <div className="relative z-10">
-        {/* Winner / loser sprites flanking the verdict */}
-        <div className="mb-2 flex items-end justify-center gap-8">
-          <ChromaFighter
-            fighterClass={loserDescriptor.fighterClass}
-            state="dead"
-            facing="right"
-            size={140}
-          />
-          <ChromaFighter
-            fighterClass={winnerDescriptor.fighterClass}
-            state="victory"
-            facing="left"
-            size={185}
-            animKey="verdict"
-          />
-        </div>
-
         {/* Trophy / Skull Championship Emblem */}
         {won ? (
           <div className="mx-auto mb-2 flex h-14 w-14 items-center justify-center rounded-full border border-amber-400/40 bg-amber-500/20 text-3xl shadow-[0_0_24px_rgba(251,191,36,0.6)] animate-pop-in">
@@ -2785,8 +2386,12 @@ function VerdictScreen({
           {won ? "VICTORY" : "DEFEATED"}
         </h3>
 
+        <p className="mt-1 text-sm font-black uppercase tracking-[0.25em] text-white/80">
+          {(won ? challengerName : creatorName)}
+        </p>
+
         {won ? (
-          <p className="mt-3 text-sm text-zinc-300">
+          <p className="mt-3 text-sm font-semibold text-zinc-100 drop-shadow-[0_2px_10px_rgba(0,0,0,0.9)]">
             {challengerName} claimed{" "}
             <span className="font-bold text-emerald-300">
               +{formatMon(outcome.payout > 0n ? outcome.payout : outcome.pot)} MON
@@ -2794,7 +2399,7 @@ function VerdictScreen({
             in Duel #{outcome.duelId} (2 Rounds Won)
           </p>
         ) : (
-          <p className="mt-3 text-sm text-zinc-300">
+          <p className="mt-3 text-sm font-semibold text-zinc-100 drop-shadow-[0_2px_10px_rgba(0,0,0,0.9)]">
             {challengerName} lost{" "}
             <span className="font-semibold text-zinc-200">
               {formatMon(outcome.wager)} MON

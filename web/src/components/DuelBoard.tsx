@@ -30,10 +30,11 @@ import {
 } from "@/config/arenaNpcs";
 import {
   FIGHTER_CLASS_META,
-  FIGHTER_ROSTER,
+  FIGHTER_ROSTER_BY_ID,
   type FighterClass,
   type FighterRosterEntry,
 } from "@/config/fighterClasses";
+import { BATTLE_ROSTER } from "@/config/fighterModels";
 import { cn, formatMon, truncateAddress } from "@/lib/utils";
 import { pushToast } from "./Toast";
 import { AcceptDuelModal } from "./AcceptDuelModal";
@@ -67,11 +68,10 @@ type DuelBoardProps = {
   onDuelSettled: (duelId: number) => void;
   onCreateDuel?: () => void;
   /**
-   * The static roster array. Each entry carries its own character id, its own
-   * designated asset and its own price — the grid renders these objects
-   * directly, so an image can never shift onto another fighter.
+   * The character ids that make up the arena roster. Each id resolves to its
+   * own challenger, asset and price — the grid never reuses a card.
    */
-  roster?: readonly FighterRosterEntry[];
+  roster?: readonly FighterClass[];
 };
 
 /**
@@ -84,7 +84,7 @@ export function DuelBoard({
   duels,
   onDuelSettled,
   onCreateDuel,
-  roster = FIGHTER_ROSTER,
+  roster = BATTLE_ROSTER,
 }: DuelBoardProps) {
   const config = useConfig();
   const { address, chainId: walletChainId } = useAccount();
@@ -173,11 +173,12 @@ export function DuelBoard({
   // Arena NPC challengers + local optimistic entries + live on-chain
   // duels (deduped by id). NPCs and player duels render in SEPARATE
   // sections — never mixed into one list.
-  // Each roster entry resolves to its challenger BY CHARACTER ID, so the
-  // card always shows the asset + price bound to that exact fighter.
-  const npcDuels: ArenaDuel[] = roster.flatMap((entry): ArenaDuel[] => {
-    const npc = ARENA_NPCS.find((n) => n.fighterClass === entry.id);
+  // Each roster id resolves to its challenger BY CHARACTER ID, so a card
+  // always shows the asset + price bound to that exact fighter.
+  const npcDuels: ArenaDuel[] = roster.flatMap((id): ArenaDuel[] => {
+    const npc = ARENA_NPCS.find((n) => n.fighterClass === id);
     if (!npc) return [];
+    const entry: FighterRosterEntry = FIGHTER_ROSTER_BY_ID[id];
     return [
       {
         /* Duel id derives from the fighter's own on-chain npcId, never from

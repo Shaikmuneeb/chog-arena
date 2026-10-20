@@ -10,8 +10,9 @@ import {
 } from "@/context/FighterProfileContext";
 import {
   FIGHTER_CLASS_META,
-  FIGHTER_ROSTER,
+  FIGHTER_ROSTER_BY_ID,
 } from "@/config/fighterClasses";
+import { BATTLE_ROSTER } from "@/config/fighterModels";
 
 import { cn, truncateAddress } from "@/lib/utils";
 import { pushToast } from "./Toast";
@@ -283,18 +284,18 @@ export function ProfileModal({ open, onClose }: ProfileModalProps) {
               </div>
             </div>
 
-            {/* Fighter class */}
+            {/* Fighter class — the two characters that enter the 3D arena */}
             <p className="mt-5 text-xs font-semibold uppercase tracking-wider text-zinc-500">
               Fighter Class
             </p>
-            <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
-              {FIGHTER_ROSTER.map((entry) => {
-                const cls = entry.id;
+            <div className="mt-2 grid grid-cols-2 gap-2">
+              {BATTLE_ROSTER.map((cls) => {
                 const meta = FIGHTER_CLASS_META[cls];
+                const entry = FIGHTER_ROSTER_BY_ID[cls];
                 const selected = fighterClass === cls;
                 return (
                   <button
-                    key={entry.id}
+                    key={cls}
                     type="button"
                     onClick={() => setFighterClass(cls)}
                     className={cn(

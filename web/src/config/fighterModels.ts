@@ -68,3 +68,13 @@ export function fighter3DConfig(id: FighterClass): Fighter3DConfig | null {
 export function has3DModel(id: FighterClass): boolean {
   return Boolean(FIGHTER_3D[id]);
 }
+
+/**
+ * The active roster — the only two characters that ship a rigged model, so
+ * every duel in the arena is a full 3D Mixamo fight. Void Lord James takes
+ * the left, Chog Princess the right.
+ */
+export const BATTLE_ROSTER: readonly FighterClass[] = [
+  "void_lord_james",
+  "chog_princess",
+];

@@ -12,26 +12,11 @@ export type ArenaNpc = {
   wager: bigint;
 };
 
-/** Distinct arena NPC challengers available in the demo lobby. */
+/**
+ * Arena NPC challengers. Only the two characters that ship a rigged 3D
+ * Mixamo model enter the arena, so every duel is a full 3D fight.
+ */
 export const ARENA_NPCS: ArenaNpc[] = [
-  {
-    key: "crimson-benja",
-    npcId: 1,
-    address: "0x1111111111111111111111111111111111110001",
-    name: "Crimson Lord Benja",
-    title: "Crimson Lord",
-    fighterClass: "crimson_lord_benja",
-    wager: parseEther("0.1"),
-  },
-  {
-    key: "chog-samurai",
-    npcId: 2,
-    address: "0x1111111111111111111111111111111111110002",
-    name: "Chog Samurai",
-    title: "10,000 TPS Blade",
-    fighterClass: "chog_samurai",
-    wager: parseEther("0.5"),
-  },
   {
     key: "void-lord-james",
     npcId: 3,
@@ -40,24 +25,6 @@ export const ARENA_NPCS: ArenaNpc[] = [
     title: "Abyssal Claw Executioner",
     fighterClass: "void_lord_james",
     wager: parseEther("1"),
-  },
-  {
-    key: "warlord-chogzilla",
-    npcId: 4,
-    address: "0x1111111111111111111111111111111111110004",
-    name: "Warlord Chogzilla",
-    title: "Arena Grand Champion",
-    fighterClass: "chogzila",
-    wager: parseEther("2.5"),
-  },
-  {
-    key: "lady-chog",
-    npcId: 5,
-    address: "0x1111111111111111111111111111111111110005",
-    name: "Lady Chog",
-    title: "Royal Chog",
-    fighterClass: "lady_chog",
-    wager: parseEther("1.5"),
   },
   {
     key: "chog-princess",

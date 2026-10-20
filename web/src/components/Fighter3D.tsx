@@ -26,8 +26,6 @@ export type StageFighter3D = {
   /** Stage position as a percentage of the stage width. */
   x: number;
   facing: "left" | "right";
-  /** Target sprite height in pixels (matches the 2D fighters). */
-  height: number;
 };
 
 /* ------------------------------------------------------------------ loading */
@@ -87,8 +85,7 @@ function FighterModel({
   spec: StageFighter3D;
   fightersRef: MutableRefObject<StageFighter3D[]>;
   onStatus?: (side: "creator" | "challenger", ok: boolean) => void;
-}) {
-  const cfg = fighter3DConfig(spec.fighterClass) as Fighter3DConfig;
+}) {  const cfg = fighter3DConfig(spec.fighterClass) as Fighter3DConfig;
   const root = useRef<THREE.Group>(null);
   const mixer = useRef<THREE.AnimationMixer | null>(null);
   const actions = useRef<Record<string, THREE.AnimationAction>>({});
@@ -217,7 +214,9 @@ function FighterModel({
       | { sizeY: number; centerX: number; minY: number }
       | undefined;
     if (bbox && bbox.sizeY > 0) {
-      const scale = live.height / bbox.sizeY;
+      /* the fighters scale with the stage so the viewport feels immersive */
+      const targetHeight = size.height * 0.46;
+      const scale = targetHeight / bbox.sizeY;
       root.current.scale.setScalar(scale);
       /* forward lunge on attacks, mirroring the 2D sprite punch */
       const foe = fightersRef.current.find((f) => f.side !== spec.side);
@@ -231,10 +230,10 @@ function FighterModel({
        * flips with the facing direction. */
       root.current.position.x =
         worldX + lunge + (facingLeft ? bbox.centerX : -bbox.centerX) * scale;
-      root.current.position.y = -size.height / 2 + 20 - bbox.minY * scale;
+      root.current.position.y = -size.height / 2 + 70 - bbox.minY * scale;
     } else {
       root.current.position.x = worldX;
-      root.current.position.y = -size.height / 2 + 20;
+      root.current.position.y = -size.height / 2 + 70;
     }
 
     /* animation state machine */
@@ -273,7 +272,7 @@ function FighterModel({
 
     /* red damage flash on hit (the 2D fighters get this from CSS) */
     if (model && live.state === "hit") {
-      const pulse = Math.sin(performance.now() / 55) * 0.5 + 0.5;
+      const pulse = Math.sin(performance.now() / 40) * 0.5 + 0.5;
       model.traverse((node) => {
         const mesh = node as THREE.Mesh;
         if (!mesh.isMesh) return;
@@ -282,7 +281,7 @@ function FighterModel({
           : [mesh.material];
         for (const material of materials) {
           const mat = material as THREE.MeshPhongMaterial;
-          if (mat.emissive) mat.emissive.setRGB(pulse * 0.55, 0, 0);
+          if (mat.emissive) mat.emissive.setRGB(pulse * 0.22, 0, 0);
         }
       });
     }
@@ -389,7 +388,7 @@ export function FighterStage3D({
         orthographic
         camera={{ position: [0, 0, 400], zoom: 1, near: 0.1, far: 2000 }}
         gl={{ alpha: true, antialias: true }}
-        dpr={[1, 1.5]}
+        dpr={[1, 1.75]}
         style={{ background: "transparent" }}
       >
         <Suspense fallback={null}>

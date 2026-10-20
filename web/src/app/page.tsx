@@ -7,15 +7,14 @@ import { Swords } from "lucide-react";
 import { ArenaHeader } from "@/components/ArenaHeader";
 import { CreateDuelModal } from "@/components/CreateDuelModal";
 import { DuelBoard, type ArenaDuel } from "@/components/DuelBoard";
-import { FIGHTER_ROSTER } from "@/config/fighterClasses";
+import { BATTLE_ROSTER } from "@/config/fighterModels";
 import { CHOG_ARENA_ADDRESS, chogArenaAbi } from "@/contracts";
 
 /**
- * The roster grid renders the static FIGHTER_ROSTER array — an explicit
- * object list where every entry is bound to its own character id, its own
- * designated asset and its own price. Nothing is resolved by index.
+ * The arena roster — the two characters that ship a rigged 3D Mixamo model.
+ * Every card maps 1:1 to its own character id and asset.
  */
-const ROSTER = FIGHTER_ROSTER;
+const ROSTER = BATTLE_ROSTER;
 
 export default function Home() {
   const [duels, setDuels] = useState<ArenaDuel[]>([]);
