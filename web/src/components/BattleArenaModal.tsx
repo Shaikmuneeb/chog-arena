@@ -11,9 +11,8 @@ import {
 import dynamic from "next/dynamic";
 import { ExternalLink, Loader2, Swords } from "lucide-react";
 import { useFighterProfile } from "@/context/FighterProfileContext";
-import type { FighterClass } from "@/config/fighterClasses";
-import { FIGHTER_CLASS_META } from "@/config/fighterClasses";
-import { has3DModel, type Fighter3DState } from "@/config/fighterModels";
+import { FIGHTER_CLASS_META, type FighterClass } from "@/config/fighterClasses";
+import { has3DModel, type FighterActionState } from "@/config/fighterModels";
 import type { StageFighter3D } from "./Fighter3D";
 
 /* three.js + R3F are heavy — load the 3D layer only when a duel starts. */
@@ -21,6 +20,11 @@ const FighterStage3D = dynamic(
   () => import("./Fighter3D").then((m) => m.FighterStage3D),
   { ssr: false },
 );
+const FighterPreview3D = dynamic(
+  () => import("./Fighter3D").then((m) => m.FighterPreview3D),
+  { ssr: false },
+);
+
 export type SpriteState =
   | "idle"
   | "dashIn"
@@ -135,13 +139,24 @@ type PlayerSide = "left" | "right";
 type Stage = "faceoff" | "roundintro" | "fight" | "ko" | "verdict";
 type AttackKind = "light" | "heavy" | "special" | "critical";
 
-/** Map a 2D fighter pose onto the 3D animation state machine. */
-function toFighter3DState(pose: SpriteState, blocking: boolean): Fighter3DState {
+/**
+ * Map the simulation onto the 3D animation states — every strike kind gets
+ * its own Mixamo clip (light / heavy / special / critical).
+ */
+function toFighter3DState(
+  pose: SpriteState,
+  blocking: boolean,
+  attackKind: AttackKind | null,
+): FighterActionState {
   if (blocking) return "block";
   switch (pose) {
     case "attack":
     case "dashIn":
-      return "attack";
+      if (attackKind === "light") return "lightAttack";
+      if (attackKind === "heavy") return "heavyAttack";
+      if (attackKind === "special") return "special";
+      if (attackKind === "critical") return "critical";
+      return "lightAttack";
     case "hit":
     case "stagger":
       return "hit";
@@ -441,6 +456,8 @@ type FighterView = {
   toward: boolean;
   leanDir: "forward" | "retreat" | null;
   activeMoveName: string | null;
+  /** Kind of the strike currently being thrown (drives the 3D clip). */
+  attackKind: AttackKind | null;
 };
 
 type View = {
@@ -487,6 +504,7 @@ function fighterView(f: FighterRT): FighterView {
     toward: f.toward,
     leanDir: f.leanDir,
     activeMoveName: f.activeMoveName,
+    attackKind: f.attack?.kind ?? null,
   };
 }
 
@@ -1134,6 +1152,7 @@ const emptyFighterView: FighterView = {
   toward: false,
   leanDir: null,
   activeMoveName: null,
+  attackKind: null,
 };
 
 const initialView: View = {
@@ -1315,7 +1334,7 @@ export function BattleArenaModal({
         const f = next.fighters[entry.side];
         entry.x = f.x;
         entry.facing = f.facing;
-        entry.state = toFighter3DState(f.pose, f.blockHeld);
+        entry.state = toFighter3DState(f.pose, f.blockHeld, f.attackKind);
       }
       if (m.stage !== "verdict") raf = requestAnimationFrame(loop);
     };
@@ -1816,17 +1835,12 @@ function HudPortrait({ fighter }: { fighter: FighterDescriptor }) {
           onError={() => setImgFailed(true)}
         />
       ) : (
-        /* Class sprite headshot — top crop of the idle fighter canvas */
-         <span className="sprite-pixelated -mt-0.5 flex items-start justify-center">
-           <img
-            src={FIGHTER_CLASS_META[fighter.fighterClass].portrait}
-            alt=""
-            aria-hidden
-            draggable={false}
-            className="fighter-portrait"
-            style={{ height: 42, width: "auto" }}
-          />
-         </span>
+        /* live 3D headshot of the fighter */
+        <FighterPreview3D
+          fighterClass={fighter.fighterClass}
+          size={46}
+          className="absolute inset-0 h-full w-full"
+        />
       )}
     </span>
   );

@@ -35,6 +35,12 @@ import {
   type FighterRosterEntry,
 } from "@/config/fighterClasses";
 import { BATTLE_ROSTER } from "@/config/fighterModels";
+import dynamic from "next/dynamic";
+
+const FighterPreview3D = dynamic(
+  () => import("./Fighter3D").then((m) => m.FighterPreview3D),
+  { ssr: false },
+);
 import { cn, formatMon, truncateAddress } from "@/lib/utils";
 import { pushToast } from "./Toast";
 import { AcceptDuelModal } from "./AcceptDuelModal";
@@ -293,7 +299,6 @@ function NpcFighterCard({
   /* The roster entry owns this card's identity: its own asset, its own
    * name and its own hardcoded price. Never derived from a neighbour. */
   const entry = duel.rosterEntry;
-  const portraitSrc = entry?.image ?? classMeta.portrait;
   const displayName = entry?.name ?? npc.name;
   const priceLabel = entry?.price ?? `${formatMon(duel.betAmount)} MON`;
   return (
@@ -306,18 +311,13 @@ function NpcFighterCard({
         }}
         aria-hidden
       />
-  {/* Portrait — transparent, no panel behind the character */}
-  <div className="relative aspect-[4/5] overflow-hidden">
-        <div className="absolute inset-0 flex items-center justify-center transition-transform duration-300 group-hover:scale-125">
-          <img
-           src={portraitSrc}
-           alt=""
-           aria-hidden
-           draggable={false}
-           className="fighter-portrait scale-110"
-           style={{ height: 190, width: "auto" }}
-         />
-        </div>
+  {/* Character — a live 3D preview render, no 2D sprite */}
+  <div className="relative flex h-[220px] items-center justify-center overflow-hidden">
+        <FighterPreview3D
+          fighterClass={npc.fighterClass}
+          size={220}
+          className="w-full"
+        />
       </div>
       <div className="absolute inset-x-0 bottom-0 z-20 bg-gradient-to-t from-black/80 via-black/40 to-transparent p-4">
         <p className="text-xl font-black uppercase tracking-wider text-white">

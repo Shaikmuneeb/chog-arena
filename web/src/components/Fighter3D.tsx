@@ -1,12 +1,14 @@
 "use client";
 
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import { AdaptiveDpr, Preload } from "@react-three/drei";
+import { AdaptiveDpr, Preload, useAnimations, useFBX } from "@react-three/drei";
 import * as THREE from "three";
 import { FBXLoader } from "three/examples/jsm/loaders/FBXLoader.js";
+import * as SkeletonUtils from "three/examples/jsm/utils/SkeletonUtils.js";
 import {
   Suspense,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type MutableRefObject,
@@ -14,7 +16,7 @@ import {
 import {
   fighter3DConfig,
   type Fighter3DConfig,
-  type Fighter3DState,
+  type FighterActionState,
 } from "@/config/fighterModels";
 import type { FighterClass } from "@/config/fighterClasses";
 
@@ -22,7 +24,7 @@ export type StageFighter3D = {
   side: "creator" | "challenger";
   fighterClass: FighterClass;
   /** Current animation state. */
-  state: Fighter3DState;
+  state: FighterActionState;
   /** Stage position as a percentage of the stage width. */
   x: number;
   facing: "left" | "right";
@@ -30,6 +32,7 @@ export type StageFighter3D = {
 
 /* ------------------------------------------------------------------ loading */
 
+/** One fetch per clip file — many consumers share it. */
 const fbxCache = new Map<string, Promise<THREE.Group>>();
 
 function loadFbx(url: string): Promise<THREE.Group> {
@@ -42,8 +45,25 @@ function loadFbx(url: string): Promise<THREE.Group> {
   return promise;
 }
 
-function assetUrl(path: string): string {
-  return `/models/${path.split("/").map(encodeURIComponent).join("/")}`;
+const textureCache = new Map<string, Promise<THREE.Texture>>();
+
+function loadSkinTexture(url: string): Promise<THREE.Texture> {
+  const hit = textureCache.get(url);
+  if (hit) return hit;
+  const promise = new Promise<THREE.Texture>((resolve, reject) => {
+    new THREE.TextureLoader().load(url, resolve, undefined, reject);
+  });
+  textureCache.set(url, promise);
+  return promise;
+}
+
+/** Asset URLs live under /new fighters design/<character>/. */
+export function clipUrl(cfg: Fighter3DConfig, file: string): string {
+  return `/new fighters design/${encodeURIComponent(cfg.dir)}/${encodeURIComponent(file)}`;
+}
+
+export function textureUrl(cfg: Fighter3DConfig): string {
+  return `/new fighters design/${encodeURIComponent(cfg.dir)}/${encodeURIComponent(cfg.texture)}`;
 }
 
 /**
@@ -75,7 +95,94 @@ function applySkinTexture(object: THREE.Object3D, texture: THREE.Texture) {
   });
 }
 
-/* --------------------------------------------------------------- the fighter */
+/**
+ * Measure a rig in its BIND pose.
+ *
+ * `Box3.setFromObject` uses the CURRENT animated pose, so the box would
+ * change as the clip plays and the model would drift out of frame. The
+ * geometry's bounding box is the rest pose, so the fit stays stable.
+ */
+function measureBindBox(object: THREE.Object3D): THREE.Box3 {
+  const box = new THREE.Box3();
+  const local = new THREE.Box3();
+  object.updateWorldMatrix(true, true);
+  object.traverse((node) => {
+    const mesh = node as THREE.Mesh;
+    if (!mesh.isMesh || !mesh.geometry) return;
+    if (!mesh.geometry.boundingBox) mesh.geometry.computeBoundingBox();
+    if (!mesh.geometry.boundingBox) return;
+    local.copy(mesh.geometry.boundingBox).applyMatrix4(mesh.matrixWorld);
+    box.union(local);
+  });
+  return box;
+}
+
+/* ---------------------------------------------------------------- the mixer */
+
+/**
+ * Collects the fighter's clips and hands them to drei's `useAnimations`.
+ *
+ * Every Mixamo export names its clip "mixamo.com", so the clips are RENAMED
+ * after their action state — that is what makes `actions[state]` resolve.
+ *
+ * The clip load is ASYNC (each FBX is ~10-20MB), so a clip may not exist
+ * yet when an action fires. Two things make that safe:
+ *   1. every clip is pre-fetched as soon as the rig lands;
+ *   2. when a clip arrives, the action map is rebuilt and the currently
+ *      playing action is re-applied (see `useEffect` on `actions`).
+ */
+function useFighterActions(
+  cfg: Fighter3DConfig,
+  group: React.RefObject<THREE.Group | null>,
+  wanted: FighterActionState[],
+) {
+  const [clips, setClips] = useState<THREE.AnimationClip[]>([]);
+  const [loaded, setLoaded] = useState(false);
+  const key = wanted.join(",");
+
+  /* fetch the clips this consumer needs, renaming as we go */
+  useEffect(() => {
+    let cancelled = false;
+    const states = (key ? key.split(",") : []) as FighterActionState[];
+    Promise.all(
+      states.map(async (state) => {
+        const group = await loadFbx(clipUrl(cfg, cfg.clips[state]));
+        const clip = group.animations?.[0];
+        if (!clip) return null;
+        const copy = clip.clone();
+        copy.name = state;
+        return copy;
+      }),
+    )
+      .then((list) => {
+        if (cancelled) return;
+        /* de-duplicate: several states can share one clip file */
+        const seen = new Set<string>();
+        const unique = list.filter((clip): clip is THREE.AnimationClip => {
+          if (!clip) return false;
+          if (seen.has(clip.name)) return false;
+          seen.add(clip.name);
+          return true;
+        });
+        setClips(unique);
+        setLoaded(true);
+      })
+      .catch(() => {
+        if (!cancelled) setLoaded(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [cfg, key]);
+
+  const api = useAnimations(
+    clips,
+    group as unknown as React.RefObject<THREE.Object3D>,
+  );
+  return { ...api, loaded, clips };
+}
+
+/* ------------------------------------------------------------- stage fighter */
 
 function FighterModel({
   spec,
@@ -85,200 +192,131 @@ function FighterModel({
   spec: StageFighter3D;
   fightersRef: MutableRefObject<StageFighter3D[]>;
   onStatus?: (side: "creator" | "challenger", ok: boolean) => void;
-}) {  const cfg = fighter3DConfig(spec.fighterClass) as Fighter3DConfig;
-  const root = useRef<THREE.Group>(null);
-  const mixer = useRef<THREE.AnimationMixer | null>(null);
-  const actions = useRef<Record<string, THREE.AnimationAction>>({});
-  const pending = useRef<Set<Fighter3DState>>(new Set());
-  const activeState = useRef<Fighter3DState | null>(null);
-  /** the state the simulation is asking for right now */
-  const desiredState = useRef<Fighter3DState>("idle");
-  const [model, setModel] = useState<THREE.Group | null>(null);
-  const [texture, setTexture] = useState<THREE.Texture | null>(null);
-  const [failed, setFailed] = useState(false);
+}) {
+  const cfg = fighter3DConfig(spec.fighterClass) as Fighter3DConfig;
+  const group = useRef<THREE.Group>(null);
+  const desired = useRef<FighterActionState>("idle");
   /* the ortho camera is 1 world unit = 1 px, so the canvas size IS the stage
-   * size in pixels and the DOM fighters line up exactly. */
+   * size in pixels and the 3D fighters line up with the stage. */
   const { size } = useThree();
 
-  /* ---- load the base rig (idle export doubles as the visible mesh) ---- */
+  /* the rig: the idle export doubles as the visible mesh */
+  const source = useFBX(clipUrl(cfg, cfg.clips.idle));
+  const scene = useMemo(() => SkeletonUtils.clone(source), [source]);
+
+  useEffect(() => {
+    onStatus?.(spec.side, true);
+  }, [spec.side, onStatus]);
+
+  /* the skin texture (the FBX's own path is broken) */
+  const [texture, setTexture] = useState<THREE.Texture | null>(null);
   useEffect(() => {
     let cancelled = false;
-    const url = assetUrl(`${cfg.dir}/${cfg.clips.idle}`);
-    loadFbx(url)
-      .then((group) => {
-        if (cancelled) return;
-        setModel(group);
-        onStatus?.(spec.side, true);
+    loadSkinTexture(textureUrl(cfg))
+      .then((tex) => {
+        if (!cancelled) setTexture(tex);
       })
       .catch(() => {
-        if (cancelled) return;
-        setFailed(true);
-        onStatus?.(spec.side, false);
-      });
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cfg.dir, cfg.clips.idle, spec.side]);
-
-  /* ---- load the skin texture (the FBX's own path is broken) ---- */
-  useEffect(() => {
-    let cancelled = false;
-    const loader = new THREE.TextureLoader();
-    loader.load(
-      assetUrl(`${cfg.dir}/${cfg.texture}`),
-      (tex) => {
-        if (cancelled) return;
-        setTexture(tex);
-      },
-      undefined,
-      () => {
         /* texture missing — the mesh still renders, just untextured */
-      },
-    );
+      });
     return () => {
       cancelled = true;
     };
-  }, [cfg.dir, cfg.texture]);
+  }, [cfg]);
 
-  /* ---- apply the texture + build the mixer once the mesh is ready ---- */
   useEffect(() => {
-    if (!model) return;
-    if (texture) applySkinTexture(model, texture);
-    const m = new THREE.AnimationMixer(model);
-    mixer.current = m;
-    const idleClip = model.animations?.[0];
-    if (idleClip) {
-      const action = m.clipAction(idleClip);
-      action.setLoop(THREE.LoopRepeat, Infinity);
-      action.play();
-      actions.current.idle = action;
-    }
-    /* One-shot clips (attack / hit) settle back to idle. The simulation owns
-     * the state, so we only blend to idle when the sim has already moved on
-     * — otherwise the next frame would re-fire the finished clip. */
-    const onFinished = (event: { action: THREE.AnimationAction }) => {
-      const key = Object.keys(actions.current).find(
-        (k) => actions.current[k] === event.action,
-      );
-      if (!key || key === "ko" || key === "victory" || key === "idle") return;
-      if (desiredState.current === key) return;
-      const idle = actions.current.idle;
-      if (idle) {
-        idle.reset();
-        idle.setLoop(THREE.LoopRepeat, Infinity);
-        idle.fadeIn(0.2).play();
-      }
-    };
-    m.addEventListener("finished", onFinished);
-    return () => {
-      m.removeEventListener("finished", onFinished);
-      m.stopAllAction();
-      mixer.current = null;
-      actions.current = {};
-    };
-  }, [model, texture]);
+    if (texture) applySkinTexture(scene, texture);
+  }, [scene, texture]);
 
-  /* ---- fetch a clip and wire it to a mixer action --------------------
-   * Every Mixamo export names its clip "mixamo.com", so drei's useAnimations
-   * can't tell them apart — we drive the AnimationMixer directly instead.
-   *
-   * The load is ASYNC (each FBX is ~11MB), so the action may not exist yet
-   * when a state fires. Two things make that safe:
-   *   1. all clips are pre-fetched in the background as soon as the rig
-   *      lands, so they are ready long before the first exchange;
-   *   2. if a clip arrives while its state is still the active one, it is
-   *      played immediately instead of being dropped. */
-  const requestClip = (state: Fighter3DState) => {
-    const m = mixer.current;
-    if (!m || actions.current[state] || pending.current.has(state)) return;
-    const file = cfg.clips[state];
-    if (!file) return;
-    pending.current.add(state);
-    loadFbx(assetUrl(`${cfg.dir}/${file}`))
-      .then((group) => {
-        pending.current.delete(state);
-        const clip = group.animations?.[0];
-        if (!clip || !mixer.current) return;
-        /* name the clip after its state so the action map stays readable */
-        clip.name = state;
-        const action = mixer.current.clipAction(clip);
-        action.enabled = true;
-        action.setEffectiveWeight(0);
-        actions.current[state] = action;
-        /* the state may already be live — play it now */
-        if (activeState.current === state) playState(state);
-      })
-      .catch(() => {
-        pending.current.delete(state);
-        /* clip unavailable — the fighter stays on the last animation */
-      });
-  };
+  /* the stage needs every clip — the fight can throw any of them */
+  const ALL_STATES = Object.keys(cfg.clips) as FighterActionState[];
+  const { actions, mixer, loaded } = useFighterActions(
+    cfg,
+    group,
+    ALL_STATES,
+  );
 
-  /* ---- play the action for a state (cross-fading the others out) ---- */
-  const playState = (state: Fighter3DState) => {
-    const m = mixer.current;
-    if (!m) return;
-    const action = actions.current[state];
-    if (!action) {
-      /* not fetched yet — fetch it and play on arrival */
-      requestClip(state);
-      return;
+  /* ---- play the action for the current state ---- */
+  useEffect(() => {
+    if (!loaded) return;
+    const current = actions[desired.current] ?? actions.idle;
+    if (!current) return;
+    for (const key of Object.keys(actions)) {
+      const action = actions[key];
+      if (action && action !== current) action.fadeOut(0.15);
     }
-    action.reset();
-    action.enabled = true;
-    action.setEffectiveTimeScale(1);
-    action.setLoop(
-      state === "idle" || state === "block" || state === "victory"
+    current.reset();
+    current.setEffectiveTimeScale(1);
+    current.setLoop(
+      desired.current === "idle" ||
+        desired.current === "block" ||
+        desired.current === "victory"
         ? THREE.LoopRepeat
         : THREE.LoopOnce,
       Infinity,
     );
-    action.clampWhenFinished = state === "ko";
-    action.setEffectiveWeight(1);
-    action.fadeIn(0.18).fadeOut(0.18);
-    action.play();
-    for (const [key, other] of Object.entries(actions.current)) {
-      if (key !== state) other.fadeOut(0.18);
-    }
-  };
+    current.clampWhenFinished = desired.current === "ko";
+    current.fadeIn(0.15).play();
+  }, [actions, loaded, desired]);
 
-  /* ---- pre-fetch every clip once the rig + mixer are ready, so the first
-   *     attack/hit/block/KO plays instantly instead of waiting on a
-   *     ~11MB download mid-exchange. */
+  /* ---- compute the fit once the mesh is in ---- */
   useEffect(() => {
-    if (!model || !mixer.current) return;
-    (Object.keys(cfg.clips) as Fighter3DState[]).forEach((state) => {
-      if (state === "idle") return; // the rig's own clip is the idle action
-      requestClip(state);
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [model, texture]);
+    if (!group.current) return;
+    const g = group.current;
+    /* Measure the model in its FACING orientation: the quarter turn swaps
+     * its width and depth, so a rest-pose box would mis-centre it. */
+    const prevScale = g.scale.clone();
+    const prevPos = g.position.clone();
+    const prevRot = g.rotation.clone();
+    const prevSceneRot = scene.rotation.clone();
+    g.scale.setScalar(1);
+    g.position.set(0, 0, 0);
+    g.rotation.set(0, 0, 0);
+    scene.rotation.set(
+      0,
+      spec.facing === "left" ? -Math.PI / 2 + 0.42 : Math.PI / 2 - 0.42,
+      0,
+    );
+    g.updateMatrixWorld(true);
 
-  /* ---- per-frame: transform + animation state machine ---- */
+    const box = measureBindBox(scene);
+    const sizeV = new THREE.Vector3();
+    box.getSize(sizeV);
+    const center = new THREE.Vector3();
+    box.getCenter(center);
+
+    g.scale.copy(prevScale);
+    g.position.copy(prevPos);
+    g.rotation.copy(prevRot);
+    scene.rotation.copy(prevSceneRot);
+    /* Normalise the rig so its feet sit on y = 0 — the FBX origin is not at
+     * the feet, which would otherwise float the model off the ground. */
+    scene.position.y = -box.min.y;
+    g.updateMatrixWorld(true);
+
+    g.userData.bbox = {
+      sizeY: sizeV.y || 1,
+      centerX: center.x,
+      minY: 0,
+    };
+  }, [scene, spec.facing]);
+
+  /* ---- per-frame: transform + action state machine ---- */
   useFrame((_, delta) => {
     const live = fightersRef.current.find((f) => f.side === spec.side);
-    if (!live || !root.current) return;
+    if (!live || !group.current) return;
 
-    /* position: stage % -> world px (the ortho camera is 1 unit = 1 px) */
     const worldX = (live.x / 100) * size.width - size.width / 2;
     const facingLeft = live.facing === "left";
-    /* the models are authored facing +Z (towards the camera) — a quarter turn
-     * points their front at the opponent, and a touch less than 90° keeps a
-     * cinematic 3/4 view instead of a flat profile. */
-    root.current.rotation.y = facingLeft
-      ? -Math.PI / 2 + 0.42
-      : Math.PI / 2 - 0.42;
 
-    /* scale to the requested sprite height */
-    const bbox = root.current.userData.bbox as
+    const bbox = group.current.userData.bbox as
       | { sizeY: number; centerX: number; minY: number }
       | undefined;
     if (bbox && bbox.sizeY > 0) {
       /* the fighters scale with the stage so the viewport feels immersive */
       const targetHeight = size.height * 0.46;
       const scale = targetHeight / bbox.sizeY;
-      root.current.scale.setScalar(scale);
+      group.current.scale.setScalar(scale);
       /* forward lunge on attacks, mirroring the 2D sprite punch */
       const foe = fightersRef.current.find((f) => f.side !== spec.side);
       const toward = foe
@@ -286,30 +324,45 @@ function FighterModel({
         : facingLeft
           ? -1
           : 1;
-      const lunge = live.state === "attack" ? toward * 48 : 0;
-      /* the PI rotation mirrors the model's local X, so the centring offset
+      const lunge = live.state.endsWith("Attack") || live.state === "special" || live.state === "critical" ? toward * 48 : 0;
+      /* the rotation mirrors the model's local X, so the centring offset
        * flips with the facing direction. */
-      root.current.position.x =
+      group.current.position.x =
         worldX + lunge + (facingLeft ? bbox.centerX : -bbox.centerX) * scale;
-      root.current.position.y = -size.height / 2 + 70 - bbox.minY * scale;
+      group.current.position.y = -size.height / 2 + 70 - bbox.minY * scale;
     } else {
-      root.current.position.x = worldX;
-      root.current.position.y = -size.height / 2 + 70;
+      group.current.position.x = worldX;
+      group.current.position.y = -size.height / 2 + 70;
     }
 
-    /* animation state machine */
-    desiredState.current = live.state;
-    if (live.state !== activeState.current) {
-      activeState.current = live.state;
-      playState(live.state);
+    /* action state machine */
+    if (live.state !== desired.current) {
+      desired.current = live.state;
+      const action = actions[live.state] ?? actions.idle;
+      if (action) {
+        for (const key of Object.keys(actions)) {
+          const other = actions[key];
+          if (other && other !== action) other.fadeOut(0.15);
+        }
+        action.reset();
+        action.setEffectiveTimeScale(1);
+        action.setLoop(
+          live.state === "idle" ||
+            live.state === "block" ||
+            live.state === "victory"
+            ? THREE.LoopRepeat
+            : THREE.LoopOnce,
+          Infinity,
+        );
+        action.clampWhenFinished = live.state === "ko";
+        action.fadeIn(0.15).play();
+      }
     }
 
-    /* one-shot clips fall back to idle when they finish (mixer event) */
-
-    /* red damage flash on hit (the 2D fighters get this from CSS) */
-    if (model && live.state === "hit") {
+    /* red damage flash on hit */
+    if (live.state === "hit") {
       const pulse = Math.sin(performance.now() / 40) * 0.5 + 0.5;
-      model.traverse((node) => {
+      scene.traverse((node) => {
         const mesh = node as THREE.Mesh;
         if (!mesh.isMesh) return;
         const materials = Array.isArray(mesh.material)
@@ -322,46 +375,13 @@ function FighterModel({
       });
     }
 
-    mixer.current?.update(Math.min(delta, 0.05));
+    void mixer;
+    void delta;
   });
 
-  /* ---- compute the fit once the mesh is in ---- */
-  useEffect(() => {
-    if (!model || !root.current) return;
-    const g = root.current;
-    /* Measure in the model's LOCAL space: the group may already carry the
-     * stage offset + scale, which would otherwise poison the bounds. */
-    const prevScale = g.scale.clone();
-    const prevPos = g.position.clone();
-    const prevRot = g.rotation.clone();
-    g.scale.setScalar(1);
-    g.position.set(0, 0, 0);
-    g.rotation.set(0, 0, 0);
-    g.updateMatrixWorld(true);
-
-    const box = new THREE.Box3().setFromObject(model);
-    const size = new THREE.Vector3();
-    box.getSize(size);
-    const center = new THREE.Vector3();
-    box.getCenter(center);
-
-    g.scale.copy(prevScale);
-    g.position.copy(prevPos);
-    g.rotation.copy(prevRot);
-    g.updateMatrixWorld(true);
-
-    g.userData.bbox = {
-      sizeY: size.y || 1,
-      centerX: center.x,
-      minY: box.min.y,
-    };
-  }, [model]);
-
-  if (failed || !model) return null;
-
   return (
-    <group ref={root}>
-      <primitive object={model} />
+    <group ref={group}>
+      <primitive object={scene} />
     </group>
   );
 }
@@ -375,9 +395,6 @@ function StageScene({
   fightersRef: MutableRefObject<StageFighter3D[]>;
   onStatus?: (side: "creator" | "challenger", ok: boolean) => void;
 }) {
-  const { size } = useThree();
-  void size;
-
   const three = fightersRef.current.filter((f) => fighter3DConfig(f.fighterClass));
 
   return (
@@ -407,9 +424,8 @@ function StageScene({
 }
 
 /**
- * Cinematic 3D layer for the battle stage. Transparent canvas that sits
- * behind the 2D fighters, so characters that ship a rigged model are drawn
- * in 3D while the rest keep their sprite treatment.
+ * Cinematic 3D layer for the battle stage. The canvas is fully transparent
+ * so the arena shows straight through — no flat panels behind the models.
  */
 export function FighterStage3D({
   fightersRef,
@@ -436,6 +452,179 @@ export function FighterStage3D({
         <Suspense fallback={null}>
           <StageScene fightersRef={fightersRef} onStatus={onStatus} />
           <Preload all />
+        </Suspense>
+        <AdaptiveDpr pixelated />
+      </Canvas>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------ 3D preview card */
+
+/** A single fighter idling in its own transparent canvas. */
+function PreviewRig({
+  fighterClass,
+  state,
+  facing,
+}: {
+  fighterClass: FighterClass;
+  state: FighterActionState;
+  facing: "left" | "right";
+}) {
+  const cfg = fighter3DConfig(fighterClass) as Fighter3DConfig;
+  const group = useRef<THREE.Group>(null);
+  const desired = useRef<FighterActionState>(state);
+  const { size: previewSize } = useThree();
+  const source = useFBX(clipUrl(cfg, cfg.clips.idle));
+  const scene = useMemo(() => SkeletonUtils.clone(source), [source]);
+
+  const [texture, setTexture] = useState<THREE.Texture | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    loadSkinTexture(textureUrl(cfg))
+      .then((tex) => {
+        if (!cancelled) setTexture(tex);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [cfg]);
+
+  useEffect(() => {
+    if (texture) applySkinTexture(scene, texture);
+  }, [scene, texture]);
+
+  /* a preview only needs the clip it is showing */
+  const { actions, loaded } = useFighterActions(cfg, group, [state]);
+
+  useEffect(() => {
+    if (!loaded) return;
+    const current = actions[desired.current] ?? actions.idle;
+    if (!current) return;
+    for (const key of Object.keys(actions)) {
+      const action = actions[key];
+      if (action && action !== current) action.fadeOut(0.15);
+    }
+    current.reset();
+    current.setLoop(
+      desired.current === "idle" ? THREE.LoopRepeat : THREE.LoopOnce,
+      Infinity,
+    );
+    current.fadeIn(0.15).play();
+  }, [actions, loaded, desired]);
+
+  useEffect(() => {
+    if (!group.current) return;
+    const g = group.current;
+    /* Measure the model in its FACING orientation so it is centred. */
+    const prevScale = g.scale.clone();
+    const prevPos = g.position.clone();
+    const prevRot = g.rotation.clone();
+    const prevSceneRot = scene.rotation.clone();
+    g.scale.setScalar(1);
+    g.position.set(0, 0, 0);
+    g.rotation.set(0, 0, 0);
+    scene.rotation.set(
+      0,
+      facing === "left" ? -Math.PI / 2 + 0.42 : Math.PI / 2 - 0.42,
+      0,
+    );
+    g.updateMatrixWorld(true);
+    const box = measureBindBox(scene);
+    const sizeV = new THREE.Vector3();
+    box.getSize(sizeV);
+    const center = new THREE.Vector3();
+    box.getCenter(center);
+    g.scale.copy(prevScale);
+    g.position.copy(prevPos);
+    g.rotation.copy(prevRot);
+    scene.rotation.copy(prevSceneRot);
+    /* Normalise the rig so its feet sit on y = 0. */
+    scene.position.y = -box.min.y;
+    g.updateMatrixWorld(true);
+    g.userData.bbox = {
+      sizeY: sizeV.y || 1,
+      centerX: center.x,
+      minY: 0,
+    };
+  }, [scene, facing]);
+
+  useFrame(() => {
+    if (!group.current) return;
+    const { width, height } = previewSize;
+    void width;
+    const facingLeft = facing === "left";
+    const bbox = group.current.userData.bbox as
+      | { sizeY: number; centerX: number; minY: number }
+      | undefined;
+    if (bbox && bbox.sizeY > 0) {
+      const targetHeight = height * 0.84;
+      const scale = targetHeight / bbox.sizeY;
+      group.current.scale.setScalar(scale);
+      group.current.position.x =
+        (facingLeft ? bbox.centerX : -bbox.centerX) * scale;
+      group.current.position.y = -height / 2 + 6 - bbox.minY * scale;
+    }
+    desired.current = state;
+  });
+
+  return (
+    <group ref={group}>
+      <primitive object={scene} />
+    </group>
+  );
+}
+
+/**
+ * A clean 3D preview of a single fighter — the only character imagery the
+ * app uses now. No 2D sprite sheets, no GIF loops.
+ */
+export function FighterPreview3D({
+  fighterClass,
+  state = "idle",
+  facing = "right",
+  size = 180,
+  className,
+}: {
+  fighterClass: FighterClass;
+  state?: FighterActionState;
+  facing?: "left" | "right";
+  size?: number;
+  className?: string;
+}) {
+  if (!fighter3DConfig(fighterClass)) return null;
+  return (
+    <div
+      className={className}
+      style={{ height: size, width: "100%", overflow: "hidden" }}
+      aria-hidden
+    >
+      <Canvas
+        orthographic
+        camera={{ position: [0, 0, 400], zoom: 1, near: 0.1, far: 2000 }}
+        gl={{ alpha: true, antialias: true }}
+        dpr={[1, 1.5]}
+        style={{ background: "transparent" }}
+        onCreated={({ gl }) => {
+          gl.setClearColor(0x000000, 0);
+          gl.domElement.style.background = "transparent";
+        }}
+      >
+        <Suspense fallback={null}>
+          <ambientLight intensity={0.9} />
+          <hemisphereLight args={["#e9d5ff", "#1a1030", 0.8]} />
+          <directionalLight
+            position={[-40, 60, 90]}
+            intensity={1.6}
+            color="#fff4e6"
+          />
+          <directionalLight
+            position={[50, 30, -60]}
+            intensity={0.9}
+            color="#a855f7"
+          />
+          <PreviewRig fighterClass={fighterClass} state={state} facing={facing} />
         </Suspense>
         <AdaptiveDpr pixelated />
       </Canvas>

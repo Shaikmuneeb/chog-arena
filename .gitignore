@@ -28,5 +28,5 @@ docs/
 !.env.example
 
 
-# 3D animation clips (241MB) - kept on disk, not tracked in git
-web/public/models/**/*.fbx
+# 3D model rigs under public/new fighters design ARE tracked - the app
+# renders its characters from these Mixamo rigs.

@@ -27,11 +27,13 @@ import {
   FighterAvatarBadge,
   useFighterProfile,
 } from "@/context/FighterProfileContext";
-import {
-  FIGHTER_CLASS_META,
-  FIGHTER_ROSTER_BY_ID,
-  type FighterClass,
-} from "@/config/fighterClasses";
+import { FIGHTER_CLASS_META, type FighterClass } from "@/config/fighterClasses";
+import dynamic from "next/dynamic";
+
+const FighterPreview3D = dynamic(
+  () => import("./Fighter3D").then((m) => m.FighterPreview3D),
+  { ssr: false },
+);
 import type { ArenaNpc } from "@/config/arenaNpcs";
 import { pushToast, updateToast } from "./Toast";
 import {
@@ -559,17 +561,15 @@ export function AcceptDuelModal({ duel, onClose, onSettled }: AcceptDuelModalPro
                 </button>
               </div>
 
-              {/* VS screen */}
+              {/* VS screen — both fighters as live 3D previews, facing off */}
               <div className="flex flex-col items-center gap-6">
                 <div className="flex items-center justify-center gap-8">
                   <div className="flex flex-col items-center">
-                    <img
-                      src={FIGHTER_ROSTER_BY_ID[creatorFighter.fighterClass].gif}
-                      alt=""
-                      aria-hidden
-                      draggable={false}
-                      className="fighter-gif"
-                      style={{ height: 180, width: "auto" }}
+                    <FighterPreview3D
+                      fighterClass={creatorFighter.fighterClass}
+                      facing="right"
+                      size={190}
+                      className="w-40"
                     />
                     <p className="mt-2 text-lg font-black uppercase tracking-wider text-white">
                       {creatorFighter.name}
@@ -579,16 +579,12 @@ export function AcceptDuelModal({ duel, onClose, onSettled }: AcceptDuelModalPro
                     VS
                   </div>
                   <div className="flex flex-col items-center">
-                    <div className="scale-x-[-1]">
-                      <img
-                        src={FIGHTER_ROSTER_BY_ID[challengerFighter.fighterClass].gif}
-                        alt=""
-                        aria-hidden
-                        draggable={false}
-                        className="fighter-gif"
-                        style={{ height: 180, width: "auto" }}
-                      />
-                    </div>
+                    <FighterPreview3D
+                      fighterClass={challengerFighter.fighterClass}
+                      facing="left"
+                      size={190}
+                      className="w-40"
+                    />
                     <p className="mt-2 text-lg font-black uppercase tracking-wider text-white">
                       {challengerFighter.name}
                     </p>
@@ -788,15 +784,12 @@ function FighterCard({
         <div className="h-16 w-16 animate-pulse rounded-xl bg-white/5" />
       ) : (
         <>
-           {/* Full-body fighter preview */}
+           {/* Full-body fighter preview — live 3D render */}
            <div className="flex justify-center">
-              <img
-                src={FIGHTER_ROSTER_BY_ID[fighterClass].gif}
-                alt=""
-                aria-hidden
-                draggable={false}
-                className="fighter-gif"
-                style={{ height: 110, width: "auto" }}
+              <FighterPreview3D
+                fighterClass={fighterClass}
+                size={120}
+                className="w-28"
               />
            </div>
           <div className="-mt-2 flex items-center gap-2">

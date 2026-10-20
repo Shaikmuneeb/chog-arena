@@ -8,11 +8,14 @@ import {
   useFighterProfile,
   type FighterClass,
 } from "@/context/FighterProfileContext";
-import {
-  FIGHTER_CLASS_META,
-  FIGHTER_ROSTER_BY_ID,
-} from "@/config/fighterClasses";
+import { FIGHTER_CLASS_META } from "@/config/fighterClasses";
 import { BATTLE_ROSTER } from "@/config/fighterModels";
+import dynamic from "next/dynamic";
+
+const FighterPreview3D = dynamic(
+  () => import("./Fighter3D").then((m) => m.FighterPreview3D),
+  { ssr: false },
+);
 
 import { cn, truncateAddress } from "@/lib/utils";
 import { pushToast } from "./Toast";
@@ -291,7 +294,6 @@ export function ProfileModal({ open, onClose }: ProfileModalProps) {
             <div className="mt-2 grid grid-cols-2 gap-2">
               {BATTLE_ROSTER.map((cls) => {
                 const meta = FIGHTER_CLASS_META[cls];
-                const entry = FIGHTER_ROSTER_BY_ID[cls];
                 const selected = fighterClass === cls;
                 return (
                   <button
@@ -305,13 +307,10 @@ export function ProfileModal({ open, onClose }: ProfileModalProps) {
                         : "border-white/10 bg-black/40 hover:border-white/25",
                     )}
                   >
-                     <img
-                       src={entry.image}
-                       alt=""
-                       aria-hidden
-                       draggable={false}
-                       className="fighter-portrait"
-                       style={{ height: 88, width: "auto" }}
+                     <FighterPreview3D
+                       fighterClass={cls}
+                       size={96}
+                       className="w-full"
                      />
                     <span
                       className="text-[10px] font-extrabold uppercase tracking-wider"
