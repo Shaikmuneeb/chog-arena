@@ -10,7 +10,6 @@ import {
 } from "react";
 import dynamic from "next/dynamic";
 import { ExternalLink, Loader2, Swords } from "lucide-react";
-import { useFighterProfile } from "@/context/FighterProfileContext";
 import { FIGHTER_CLASS_META, type FighterClass } from "@/config/fighterClasses";
 import { has3DModel, type FighterActionState } from "@/config/fighterModels";
 import type { StageFighter3D } from "./Fighter3D";
@@ -18,10 +17,6 @@ import type { StageFighter3D } from "./Fighter3D";
 /* three.js + R3F are heavy — load the 3D layer only when a duel starts. */
 const FighterStage3D = dynamic(
   () => import("./Fighter3D").then((m) => m.FighterStage3D),
-  { ssr: false },
-);
-const FighterPreview3D = dynamic(
-  () => import("./Fighter3D").then((m) => m.FighterPreview3D),
   { ssr: false },
 );
 
@@ -378,6 +373,24 @@ type MatchScript = {
   challengerClass: FighterClass;
 };
 
+/**
+ * Where a fighter actually stands on screen. The 3D rigs are locked to
+ * fixed slots; the sim's `x` still wanders inside a track, and painting
+ * damage on that wandering x stuck the numbers on the wrong body.
+ */
+function anchorX(side: FighterSide, script: MatchScript): number {
+  const cls = side === "creator" ? script.creatorClass : script.challengerClass;
+  if (cls === "chog_princess") return 28;
+  if (cls === "void_lord_james") return 73;
+  return side === "creator" ? 70 : 30;
+}
+
+function fighterLabel(name: string, fighterClass: FighterClass): string {
+  const trimmed = name.trim();
+  if (trimmed) return trimmed;
+  return FIGHTER_CLASS_META[fighterClass].label;
+}
+
 function createMatch(script: MatchScript, playerSide: PlayerSide): MatchState {
   const playerX = playerSide === "left" ? 32 : 68;
   const oppX = playerSide === "left" ? 68 : 32;
@@ -411,7 +424,7 @@ function createMatch(script: MatchScript, playerSide: PlayerSide): MatchState {
   return {
     stage: "faceoff",
     stageMs: 0,
-    stageDur: 1000,
+    stageDur: 800,
     round: 1,
     timer: 99,
     orbs: { creator: 0, challenger: 0 },
@@ -868,14 +881,16 @@ function applyHit(
   if (blocked) defender.meter = Math.min(100, defender.meter + 10);
 
   // FX + AUDIO: ONLY play strike/impact SFX when attack actually connects
-  m.impact = { id: ++m.fxId, x: defender.x };
+  const defenderX = anchorX(defender.side, script);
+  const attackerX = anchorX(attacker.side, script);
+  m.impact = { id: ++m.fxId, x: defenderX };
   m.impactMs = 380;
-  m.hurtFx = { id: ++m.fxId, x: defender.x, bright: true };
+  m.hurtFx = { id: ++m.fxId, x: defenderX, bright: true };
   m.hurtFxMs = 430;
-  m.dust = { id: ++m.fxId, x: attacker.x };
+  m.dust = { id: ++m.fxId, x: attackerX };
   m.dustMs = 500;
   if (blocked) {
-    m.guard = { id: ++m.fxId, x: defender.x };
+    m.guard = { id: ++m.fxId, x: defenderX };
     m.guardMs = 300;
   }
   const multi = a.move && a.move.hitCount > 1 ? a.move.hitCount : undefined;
@@ -929,7 +944,7 @@ function applyHit(
     m.cinematicMs = a.kind === "critical" ? 1100 : 900;
     m.moveFx = {
       id: ++m.fxId,
-      x: defender.x,
+      x: defenderX,
       vfx: a.move!.vfxType,
       kind: a.kind === "critical" ? "critical" : "special",
     };
@@ -1336,7 +1351,7 @@ export function BattleArenaModal({
 
   /* Safety net: never let a slow/failed model stall the face-off. */
   useEffect(() => {
-    const t = setTimeout(() => setRigsReady(true), 12000);
+    const t = setTimeout(() => setRigsReady(true), 2200);
     return () => clearTimeout(t);
   }, []);
 
@@ -1389,6 +1404,7 @@ export function BattleArenaModal({
 
     let raf = 0;
     let last = performance.now();
+    let lastPaint = 0;
     /* Award a round win the moment a K.O. resolves. Refs are bumped first
      * (no stale-closure risk), then mirrored into state for the HUD. */
     const onRoundWin = (winner: FighterSide) => {
@@ -1408,16 +1424,25 @@ export function BattleArenaModal({
         m.stageMs = 0;
       }
       step(m, dt, script, playerSide, onRoundWin);
-      const next = snapshot(m);
-      viewRef.current = next;
-      setView(next);
 
-      /* Mirror the fight state into the 3D layer (mutated in place). */
+      /* Mirror the fight state into the 3D layer every frame (mutated in
+       * place — the canvas does not re-render). React only paints when the
+       * HUD actually changes, otherwise setState-every-frame stalls the
+       * overlay several seconds behind the audio and the hit markers. */
       for (const entry of fighters3DRef.current) {
-        const f = next.fighters[entry.side];
+        const f = m.fighters[entry.side];
         entry.x = f.x;
         entry.facing = f.facing;
-        entry.state = next.fighters[entry.side].action;
+        entry.state = fighterActionState(f);
+      }
+
+      const stageChanged = m.stage !== viewRef.current.stage;
+      const hudDue = now - lastPaint > 90;
+      if (stageChanged || hudDue) {
+        lastPaint = now;
+        const next = snapshot(m);
+        viewRef.current = next;
+        setView(next);
       }
       if (m.stage !== "verdict") raf = requestAnimationFrame(loop);
     };
@@ -1462,7 +1487,7 @@ export function BattleArenaModal({
         aria-modal="true"
       >
         {/* ============ ARCADE HUD ============ */}
-        <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2 border-b border-white/10 bg-black/70 px-3 pb-3 pt-4 sm:gap-4 sm:px-6">
+        <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-end gap-3 border-b border-white/10 bg-black/80 px-4 pb-2.5 pt-3 sm:px-5">
               <HudSide
                 fighter={leftDesc}
                 hp={view.fighters[leftSide].hp}
@@ -1613,12 +1638,23 @@ export function BattleArenaModal({
                 )}
 
                 {/* Floating damage numbers anchored to each 3D fighter */}
-                {(["creator", "challenger"] as const).map((side) => (
+                {(["creator", "challenger"] as const).map((side) => {
+                  const cls =
+                    side === "creator"
+                      ? creatorFighter.fighterClass
+                      : challengerFighter.fighterClass;
+                  const x =
+                    cls === "chog_princess"
+                      ? 28
+                      : cls === "void_lord_james"
+                        ? 73
+                        : view.fighters[side].x;
+                  return (
                   <div
                     key={`dmg-${side}`}
-                    className="pointer-events-none absolute bottom-[46%] z-30"
+                    className="pointer-events-none absolute bottom-[58%] z-[40]"
                     style={{
-                      left: `${view.fighters[side].x}%`,
+                      left: `${x}%`,
                       transform: "translateX(-50%)",
                     }}
                     aria-hidden
@@ -1629,7 +1665,8 @@ export function BattleArenaModal({
                         <DamageNumber key={h.id} hit={h} />
                       ))}
                   </div>
-                ))}
+                  );
+                })}
 
                 {/* Dash-in dust/smoke behind the attacker */}
                 {view.dust && <DustFx key={`dust-${view.dust.id}`} x={view.dust.x} />}
@@ -1800,7 +1837,7 @@ export function BattleArenaModal({
 
               {/* Face-off intro */}
               {view.stage === "faceoff" && (
-                <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+                <div className="pointer-events-none absolute inset-0 z-[34] flex items-center justify-center">
                   <div className="flex flex-col items-center gap-1">
                     <p className="animate-pop-in whitespace-nowrap bg-gradient-to-r from-red-300 via-amber-200 to-orange-300 bg-clip-text text-4xl font-black tracking-widest text-transparent drop-shadow-[0_0_22px_rgba(239,68,68,0.9)] sm:text-5xl">
                       ⚔️ READY?
@@ -1865,51 +1902,6 @@ export function BattleArenaModal({
 
 /* ------------------------------------------------------------- arcade HUD */
 
-/**
- * Circular HUD portrait: custom profile picture when set, otherwise a
- * clean class-tinted sprite headshot (no initials, no clutter).
- */
-function HudPortrait({ fighter }: { fighter: FighterDescriptor }) {
-  const { getProfile } = useFighterProfile();
-  const profile = getProfile(fighter.address);
-  const theme = FIGHTER_CLASS_META[fighter.fighterClass];
-  const [imgFailed, setImgFailed] = useState(false);
-
-  useEffect(() => {
-    setImgFailed(false);
-  }, [profile?.avatarUrl]);
-
-  const avatarUrl = profile?.avatarUrl && !imgFailed ? profile.avatarUrl : null;
-
-  return (
-    <span
-      className="relative flex h-8 w-8 shrink-0 items-start justify-center overflow-hidden rounded-full border"
-      style={{
-        borderColor: `${theme.secondary}88`,
-        background: "#09090b",
-        boxShadow: `0 0 10px ${theme.primary}55`,
-      }}
-      aria-hidden
-    >
-      {avatarUrl ? (
-        <img
-          src={avatarUrl}
-          alt=""
-          className="h-full w-full object-cover"
-          onError={() => setImgFailed(true)}
-        />
-      ) : (
-        /* live 3D headshot of the fighter */
-        <FighterPreview3D
-          fighterClass={fighter.fighterClass}
-          size={46}
-          className="absolute inset-0 h-full w-full"
-        />
-      )}
-    </span>
-  );
-}
-
 function HudSide({
   fighter,
   hp,
@@ -1919,6 +1911,8 @@ function HudSide({
   hp: number;
   align: "left" | "right";
 }) {
+  const theme = FIGHTER_CLASS_META[fighter.fighterClass];
+  const label = fighterLabel(fighter.name, fighter.fighterClass);
   /* P1 keeps the red -> purple brand gradient, P2 the blue -> indigo one;
    * both fall back to amber then red as their HP drops. */
   const barColor =
@@ -1934,60 +1928,62 @@ function HudSide({
           ? "from-amber-500 to-blue-700"
           : "from-rose-600 to-red-700";
 
-  const identity = (
-    <div
-      className={cn(
-        "flex min-w-0 items-center gap-2",
-        align === "right" && "flex-row-reverse",
-      )}
-    >
-      <HudPortrait fighter={fighter} />
-      <div className={cn("min-w-0", align === "right" && "text-right")}>
-        <p className="truncate text-xs font-extrabold text-zinc-100">
-          {fighter.name}
-        </p>
-      </div>
-    </div>
-  );
-
-  const bar = (
-    <div
-      className="mt-1.5 h-4 w-full overflow-hidden border border-white/15 bg-black/70"
-      style={{
-        clipPath:
-          align === "left"
-            ? "polygon(0 0, 100% 0, calc(100% - 12px) 100%, 0 100%)"
-            : "polygon(12px 0, 100% 0, 100% 100%, 0 100%)",
-      }}
-    >
+  return (
+    <div className="min-w-0 w-full">
       <div
         className={cn(
-          "h-full bg-gradient-to-r transition-[width] duration-500 ease-out",
-          barColor,
-          align === "right" && "ml-auto bg-gradient-to-l",
-        )}
-        style={{ width: `${hp}%` }}
-      />
-    </div>
-  );
-
-  return (
-    <div className={cn("min-w-0", align === "right" && "text-right")}>
-      {identity}
-      {bar}
-      <p
-        className={cn(
-          "mt-0.5 font-mono text-[10px] font-bold",
-          align === "right" && "text-right",
-          hp > 50
-            ? "text-emerald-300"
-            : hp > 25
-              ? "text-amber-300"
-              : "text-red-300",
+          "mb-1 flex min-w-0 items-center gap-2",
+          align === "right" && "flex-row-reverse",
         )}
       >
-        {hp} / 100 HP
-      </p>
+        <span
+          className="h-2.5 w-2.5 shrink-0 rounded-full"
+          style={{
+            background: theme.secondary,
+            boxShadow: `0 0 8px ${theme.primary}`,
+          }}
+          aria-hidden
+        />
+        <p
+          className={cn(
+            "min-w-0 flex-1 truncate text-xs font-extrabold text-zinc-100",
+            align === "right" && "text-right",
+          )}
+        >
+          {label}
+        </p>
+        <p
+          className={cn(
+            "shrink-0 font-mono text-[11px] font-bold tabular-nums",
+            hp > 50
+              ? "text-emerald-300"
+              : hp > 25
+                ? "text-amber-300"
+                : "text-red-300",
+          )}
+        >
+          {hp}
+          <span className="text-zinc-500">/100</span>
+        </p>
+      </div>
+      <div
+        className="h-3 w-full overflow-hidden border border-white/15 bg-black/70"
+        style={{
+          clipPath:
+            align === "left"
+              ? "polygon(0 0, 100% 0, calc(100% - 12px) 100%, 0 100%)"
+              : "polygon(12px 0, 100% 0, 100% 100%, 0 100%)",
+        }}
+      >
+        <div
+          className={cn(
+            "h-full bg-gradient-to-r transition-[width] duration-500 ease-out",
+            barColor,
+            align === "right" && "ml-auto bg-gradient-to-l",
+          )}
+          style={{ width: `${hp}%` }}
+        />
+      </div>
     </div>
   );
 }
@@ -2003,14 +1999,11 @@ function DamageNumber({ hit }: { hit: HitRT }) {
       )}
     >
       -{hit.dmg} HP
-      {hit.multi && hit.multi > 1 ? ` ×${hit.multi}` : ""}
       {hit.crit ? (
         <span className="ml-1 text-[11px] font-bold tracking-[0.2em] text-amber-200">
           //CRIT
         </span>
-      ) : (
-        ""
-      )}
+      ) : null}
       {hit.name && (
         <span className="mt-0.5 block text-center text-[10px] font-bold uppercase tracking-[0.25em] text-fuchsia-200 drop-shadow-[0_0_8px_rgba(232,121,249,0.85)]">
           {hit.name}

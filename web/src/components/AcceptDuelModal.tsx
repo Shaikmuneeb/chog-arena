@@ -44,6 +44,15 @@ import {
 
 import type { ArenaDuel } from "./DuelBoard";
 
+function visibleFighterName(
+  username: string | null | undefined,
+  fighterClass: FighterClass,
+): string {
+  const trimmed = username?.trim();
+  if (trimmed) return trimmed;
+  return FIGHTER_CLASS_META[fighterClass].label;
+}
+
 const ZERO = zeroAddress;
 
 type AcceptDuelModalProps = {
@@ -508,18 +517,19 @@ export function AcceptDuelModal({ duel, onClose, onSettled }: AcceptDuelModalPro
       }
     : {
         address: duel.creator,
-        name:
-          getProfile(duel.creator)?.username ?? truncateAddress(duel.creator),
+        name: visibleFighterName(
+          getProfile(duel.creator)?.username,
+          getProfile(duel.creator)?.fighterClass ?? "chogzila",
+        ),
         title: getProfile(duel.creator)?.title,
         fighterClass: getProfile(duel.creator)?.fighterClass ?? "chogzila",
       };
+  const challengerClass = getProfile(address)?.fighterClass ?? "chogzila";
   const challengerFighter: FighterDescriptor = {
     address: address ?? ZERO,
-    name: address
-      ? (getProfile(address)?.username ?? truncateAddress(address))
-      : "Challenger",
+    name: visibleFighterName(getProfile(address)?.username, challengerClass),
     title: getProfile(address)?.title,
-    fighterClass: getProfile(address)?.fighterClass ?? "chogzila",
+    fighterClass: challengerClass,
   };
 
   return (
@@ -571,7 +581,7 @@ export function AcceptDuelModal({ duel, onClose, onSettled }: AcceptDuelModalPro
                       size={190}
                       className="w-40"
                     />
-                    <p className="mt-2 text-lg font-black uppercase tracking-wider text-white">
+                    <p className="mt-2 w-40 text-center text-sm font-black uppercase tracking-wider text-white">
                       {creatorFighter.name}
                     </p>
                   </div>
@@ -585,7 +595,7 @@ export function AcceptDuelModal({ duel, onClose, onSettled }: AcceptDuelModalPro
                       size={190}
                       className="w-40"
                     />
-                    <p className="mt-2 text-lg font-black uppercase tracking-wider text-white">
+                    <p className="mt-2 w-40 text-center text-sm font-black uppercase tracking-wider text-white">
                       {challengerFighter.name}
                     </p>
                   </div>
@@ -688,7 +698,9 @@ export function AcceptDuelModal({ duel, onClose, onSettled }: AcceptDuelModalPro
                 FIGHTERS CLASHING
               </h2>
               <p className="mt-2 text-sm text-zinc-400">
-                Duel #{duel.id} · {formatMon(pot)} MON pot · settling on Monad…
+                {duel.npc
+                  ? `${formatMon(pot)} MON pot · settling on Monad…`
+                  : `Duel #${duel.id} · ${formatMon(pot)} MON pot · settling on Monad…`}
               </p>
               <div className="mx-auto mt-6 h-1 w-56 overflow-hidden rounded-full bg-black/50">
                 <div className="h-full w-full bg-gradient-to-r from-red-500 via-orange-400 to-amber-300 animate-shimmer" />

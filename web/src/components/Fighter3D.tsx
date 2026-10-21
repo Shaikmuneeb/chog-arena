@@ -58,10 +58,35 @@ function stripRootMotion(clip: THREE.AnimationClip): THREE.AnimationClip {
 /**
  * Fixed stage slots. The fighters stand on a fixed line either side of the
  * CWO lettering and never cross it — no stage-% mapping, no drifting.
+ * Screen anchors match these slots so damage numbers stay on the body that
+ * was actually hit (the fight sim's x drifts; the models do not).
  */
 const CHARACTER_SLOT: Partial<Record<FighterClass, number>> = {
-  chog_princess: -2.2,
-  void_lord_james: 2.2,
+  chog_princess: -2.35,
+  void_lord_james: 2.35,
+};
+
+/** Stage-% that lines up with CHARACTER_SLOT under the arena camera. */
+export const VISUAL_ANCHOR_X: Partial<Record<FighterClass, number>> = {
+  chog_princess: 28,
+  void_lord_james: 73,
+};
+
+export function visualAnchorX(
+  fighterClass: FighterClass,
+  fallback = 50,
+): number {
+  return VISUAL_ANCHOR_X[fighterClass] ?? fallback;
+}
+
+/**
+ * Preview cards were fitting the raw bind box, which made Chog Princess a
+ * tiny figure in the top of the VS card while James filled his. Bias the
+ * fit so both read as the same size.
+ */
+const PREVIEW_ZOOM: Partial<Record<FighterClass, number>> = {
+  chog_princess: 1.85,
+  void_lord_james: 1.05,
 };
 
 /** How far a fighter lunges on an attack (world units). */
@@ -530,42 +555,40 @@ const STAGE_WIDTH = 12;
 const FACE_OFFSET = 0.42;
 
 /**
- * The arena backdrop: large extruded neon "CWO" lettering glowing behind the
- * fighters, a dark reflective floor with a cyberpunk grid, and accent
- * lighting. Everything is real 3D geometry — no flat background images.
+ * The arena backdrop: a small CWO mark behind the fighters, a dark
+ * reflective floor with a cyberpunk grid, and accent lighting. The mark
+ * stays small so it never covers a body or a damage number.
  */
 function ArenaBackdrop() {
   return (
     <group>
-      {/* ---- extruded neon CWO sign, deep behind and above the fighters ---- */}
-      <group position={[0, 4.3, -8]}>
+      {/* Brand mark sits BEHIND the fighters, small enough that it never
+          covers a body, a damage number, or the round callout. */}
+      <group position={[0, 3.15, -12]}>
         <Center>
           <Text3D
             font="/fonts/helvetiker_bold.typeface.json"
-            size={2}
-            height={0.5}
-            curveSegments={10}
+            size={0.72}
+            height={0.16}
+            curveSegments={8}
             bevelEnabled
-            bevelThickness={0.05}
-            bevelSize={0.05}
+            bevelThickness={0.02}
+            bevelSize={0.015}
             bevelOffset={0}
-            bevelSegments={4}
-            letterSpacing={0.04}
+            bevelSegments={2}
+            letterSpacing={0.06}
           >
             CWO
             <meshStandardMaterial
-              color="#0b0616"
-              emissive="#c026d3"
-              emissiveIntensity={2.2}
-              metalness={0.9}
-              roughness={0.18}
+              color="#14081c"
+              emissive="#86198f"
+              emissiveIntensity={0.55}
+              metalness={0.85}
+              roughness={0.35}
             />
           </Text3D>
         </Center>
-        {/* soft magenta / cyan bloom behind the letters */}
-        <pointLight position={[0, 0, 2.2]} intensity={22} distance={16} color="#e879f9" />
-        <pointLight position={[-3, 0, 1.6]} intensity={12} distance={12} color="#22d3ee" />
-        <pointLight position={[3, 0, 1.6]} intensity={12} distance={12} color="#6366f1" />
+        <pointLight position={[0, 0, 2]} intensity={4} distance={10} color="#c026d3" />
       </group>
 
       {/* ---- dark reflective floor ---- */}
@@ -807,12 +830,13 @@ function PreviewRig({
       | undefined;
     if (bbox && bbox.sizeY > 0) {
       /* the idle clips raise the arms above the bind pose — leave headroom */
-      const targetHeight = height * 0.6;
+      const zoom = PREVIEW_ZOOM[fighterClass] ?? 1;
+      const targetHeight = height * 0.72 * zoom;
       const scale = targetHeight / bbox.sizeY;
       group.current.scale.setScalar(scale);
       group.current.position.x =
-        (facingLeft ? bbox.centerX : -bbox.centerX) * scale;
-      group.current.position.y = -height / 2 + 14 - bbox.minY * scale;
+        (facingLeft ? bbox.centerX : -bbox.centerX) * scale * 0.15;
+      group.current.position.y = -height * 0.42 - bbox.minY * scale;
     }
     desired.current = state;
   });
