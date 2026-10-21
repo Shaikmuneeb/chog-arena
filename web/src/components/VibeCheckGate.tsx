@@ -34,7 +34,7 @@ const QUESTIONS: Question[] = [
   {
     prompt: "Why did Benja touch Toad?",
     options: [
-      "Cause he cant mamio",
+      "Cause he cant touch mamio",
       "Benja need a gay builder thats why",
       "But toad liks chog princesss",
     ],
