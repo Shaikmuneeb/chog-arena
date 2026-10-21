@@ -178,6 +178,21 @@ body::after {
       transparent 4px
     );
   }
+
+  /* The chrome ramp sweeps across the CWO letterforms while they lock in. */
+  .cwo-metal {
+    background-size: 240% 100%;
+    animation: cwo-sheen 2.8s linear infinite;
+  }
+}
+
+@keyframes cwo-sheen {
+  0% {
+    background-position: 150% 0;
+  }
+  100% {
+    background-position: -50% 0;
+  }
 }
 
 @keyframes second-wind-glow {

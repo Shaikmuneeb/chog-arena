@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Check, ChevronRight, Sparkles } from "lucide-react";
 import { pushToast } from "./Toast";
+import { CwoCinematicIntro } from "./CwoCinematicIntro";
 
 /** sessionStorage key — the gate only has to be passed once per session. */
 export const VIBE_CHECK_KEY = "cwo-vibe-check";
@@ -65,6 +66,8 @@ export function VibeCheckGate({ onPass }: { onPass: () => void }) {
   const [meter, setMeter] = useState(5);
   const [questionIndex, setQuestionIndex] = useState(0);
   const [answers, setAnswers] = useState<string[]>([]);
+  /* the CWO cinematic takeover — plays over the certificate */
+  const [showIntro, setShowIntro] = useState(false);
 
   /* Keep the callback in a ref: the parent re-renders often, and a changing
    * `onPass` identity would keep resetting the certificate timer. */
@@ -81,12 +84,14 @@ export function VibeCheckGate({ onPass }: { onPass: () => void }) {
   }, []);
 
   /* The certificate holds for a few seconds so the "admire Chog Princess"
-   * button can actually be clicked — the button proceeds immediately. */
+   * button can actually be clicked — the button proceeds immediately.
+   * The cinematic takes over that hold, so the timer stands down while
+   * it plays. */
   useEffect(() => {
-    if (stage !== "passed") return;
+    if (stage !== "passed" || showIntro) return;
     const t = setTimeout(() => onPassRef.current(), 8000);
     return () => clearTimeout(t);
-  }, [stage]);
+  }, [stage, showIntro]);
 
   const onBenjaToggle = () => {
     setMeter(10);
@@ -252,7 +257,7 @@ export function VibeCheckGate({ onPass }: { onPass: () => void }) {
             </p>
             <button
               type="button"
-              onClick={() => onPassRef.current()}
+              onClick={() => setShowIntro(true)}
               className="btn-neon mt-6 w-full !py-4 !text-xs"
             >
               Click here to admire Chog Princess
@@ -260,6 +265,17 @@ export function VibeCheckGate({ onPass }: { onPass: () => void }) {
           </div>
         )}
       </div>
+
+      {/* ---- the CWO cinematic takeover ----
+          The overlay plays on top of the certificate; the route change is
+          fired when the final flash starts, so the arena dashboard is
+          already mounted underneath it by the time the flash clears. */}
+      {showIntro && (
+        <CwoCinematicIntro
+          onComplete={() => onPassRef.current()}
+          onFinished={() => setShowIntro(false)}
+        />
+      )}
     </div>
   );
 }
