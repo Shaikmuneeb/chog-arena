@@ -52,10 +52,13 @@ export function vibeCheckPassed(): boolean {
 }
 
 /**
- * The CWO Vibe Check — the entry gate in front of the arena.
+ * The CWO Vibe Check — a full-screen entry gate in front of the arena.
  *
  * Step 0 is a calibration meter, then three questions, then a very short
  * IQ certificate. The answers are not graded; the point is the bit.
+ *
+ * Rendered on its own route (`/vibe-check`) so visitors never see the
+ * arena before clearing the screening.
  */
 export function VibeCheckGate({ onPass }: { onPass: () => void }) {
   const [stage, setStage] = useState<Stage>("calibration");
@@ -68,11 +71,6 @@ export function VibeCheckGate({ onPass }: { onPass: () => void }) {
   const onPassRef = useRef(onPass);
   onPassRef.current = onPass;
 
-  /* auto-pass if this session already cleared the gate */
-  useEffect(() => {
-    if (vibeCheckPassed()) onPassRef.current();
-  }, []);
-
   const finish = useCallback(() => {
     try {
       window.sessionStorage.setItem(VIBE_CHECK_KEY, "passed");
@@ -82,7 +80,7 @@ export function VibeCheckGate({ onPass }: { onPass: () => void }) {
     setStage("passed");
   }, []);
 
-  /* the certificate flashes for 1.5s, then the lobby is revealed */
+  /* the certificate flashes for 1.5s, then the arena is revealed */
   useEffect(() => {
     if (stage !== "passed") return;
     const t = setTimeout(() => onPassRef.current(), 1500);
@@ -98,18 +96,18 @@ export function VibeCheckGate({ onPass }: { onPass: () => void }) {
   };
 
   return (
-    <div className="relative mx-auto w-full max-w-3xl overflow-hidden rounded-3xl border border-fuchsia-500/30 bg-zinc-950 p-6 shadow-[0_0_80px_-20px_rgba(217,70,239,0.45)] sm:p-10">
-      {/* neon backdrop */}
+    <div className="relative flex min-h-[100dvh] w-full items-center justify-center overflow-hidden bg-zinc-950 p-4 sm:p-8">
+      {/* full-screen neon backdrop */}
       <div
-        className="pointer-events-none absolute inset-0 opacity-70"
+        className="pointer-events-none absolute inset-0"
         style={{
           background:
-            "radial-gradient(ellipse at 20% 0%, rgba(217,70,239,0.28), transparent 55%), radial-gradient(ellipse at 85% 100%, rgba(34,211,238,0.22), transparent 55%)",
+            "radial-gradient(ellipse at 15% 0%, rgba(217,70,239,0.30), transparent 55%), radial-gradient(ellipse at 90% 100%, rgba(34,211,238,0.24), transparent 55%), linear-gradient(180deg, #0b0616 0%, #12081f 55%, #05030c 100%)",
         }}
         aria-hidden
       />
       <div
-        className="pointer-events-none absolute inset-0 opacity-[0.12]"
+        className="pointer-events-none absolute inset-0 opacity-[0.14]"
         style={{
           backgroundImage:
             "linear-gradient(rgba(192,132,252,0.7) 1px, transparent 1px), linear-gradient(90deg, rgba(192,132,252,0.7) 1px, transparent 1px)",
@@ -118,11 +116,11 @@ export function VibeCheckGate({ onPass }: { onPass: () => void }) {
         aria-hidden
       />
 
-      <div className="relative">
+      <div className="relative w-full max-w-3xl overflow-hidden rounded-3xl border border-fuchsia-500/30 bg-zinc-950/80 p-6 shadow-[0_0_80px_-20px_rgba(217,70,239,0.45)] backdrop-blur-sm sm:p-10">
         {stage === "calibration" && (
           <>
             <p className="text-[10px] font-black uppercase tracking-[0.4em] text-fuchsia-300/80">
-              CWO Arena // Entry Gate
+              CWO Arena // Entry Screening
             </p>
             <h2 className="mt-2 bg-gradient-to-r from-fuchsia-300 via-pink-300 to-cyan-300 bg-clip-text text-3xl font-black uppercase tracking-tight text-transparent drop-shadow-[0_0_24px_rgba(217,70,239,0.5)] sm:text-4xl">
               Vibe Check
@@ -238,6 +236,9 @@ export function VibeCheckGate({ onPass }: { onPass: () => void }) {
             </p>
             <p className="mt-4 text-xs text-zinc-500">
               Calibration {meter}/10 · {answers.length}/3 answered
+            </p>
+            <p className="mt-1 text-[10px] font-bold uppercase tracking-widest text-zinc-600">
+              Redirecting to the arena…
             </p>
           </div>
         )}
