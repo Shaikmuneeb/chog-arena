@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start -p 3000 -H 0.0.0.0",
     "generate:abis": "node scripts/generate-abis.mjs",
-    "generate:cwo-frames": "node scripts/gen-cwo-intro.mjs",
+    "generate:cwo-frames": "node scripts/sync-cwo-frames.mjs",
     "generate:cwo-lockup": "node scripts/gen-cwo-lockup.mjs"
   },
   "dependencies": {

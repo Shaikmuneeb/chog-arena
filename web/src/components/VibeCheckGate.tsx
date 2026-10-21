@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Check, ChevronRight, Sparkles } from "lucide-react";
 import { pushToast } from "./Toast";
-import { CwoCinematicIntro } from "./CwoCinematicIntro";
+import { CwoCinematicIntro, preloadCwoFrames } from "./CwoCinematicIntro";
 
 /** sessionStorage key — the gate only has to be passed once per session. */
 export const VIBE_CHECK_KEY = "cwo-vibe-check";
@@ -81,6 +81,13 @@ export function VibeCheckGate({ onPass }: { onPass: () => void }) {
       /* private mode — the gate just reappears next reload */
     }
     setStage("passed");
+  }, []);
+
+  /* Pull the cinematic frames down while the visitor is still reading the
+   * gate — by the time they hit the button they are already cached, so the
+   * final flash never waits on a 4.5MB download. */
+  useEffect(() => {
+    preloadCwoFrames();
   }, []);
 
   /* The certificate holds for a few seconds so the "admire Chog Princess"

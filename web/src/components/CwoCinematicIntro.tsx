@@ -22,7 +22,7 @@ import {
  *   phase 1  0 - 800ms    dark fade in with a low ambient glow
  *   phase 2  800 - 3500ms the letters lock centre-screen: sharp scale-down
  *                          with a lens flare sweeping across
- *   phase 3  3500ms +     the 15 plates cycle inside the letterforms on a
+ *   phase 3  3500ms +     the 19 plates cycle inside the letterforms on a
  *                          high-speed flip/slide
  *   phase 4  last 400ms   a flash and a zoom straight into the lobby
  *
@@ -31,11 +31,40 @@ import {
  * leave a stray timeout behind on a slow device.
  */
 
-/** The 15 plates that ride inside the letterforms. */
+/**
+ * The plates that ride inside the letterforms.
+ *
+ * These are the real CWO intro frames, served straight out of the app's
+ * public root — "cwo intro 1.jpeg" through "cwo intro 19.jpeg". Keep the
+ * names in step with `scripts/sync-cwo-frames.mjs`, which copies them in
+ * from the workspace and normalises the few that carry a stray space
+ * before the extension.
+ */
 const FRAMES: readonly string[] = Array.from(
-  { length: 15 },
-  (_, i) => `/cwo-intro/cwo-intro-${i + 1}.png`,
+  { length: 19 },
+  (_, i) => `/cwo intro ${i + 1}.jpeg`,
 );
+
+/**
+ * Warm the frames in the HTTP cache.
+ *
+ * The set is ~4.5MB, so pulling it down while the visitor is still reading
+ * the vibe check keeps it off the critical path — otherwise the frames
+ * compete with the route change for bandwidth and the final flash stalls
+ * waiting for the arena to mount. Low priority so it never fights a page
+ * the visitor actually asked for.
+ */
+let framesWarmed = false;
+export function preloadCwoFrames(): void {
+  if (framesWarmed) return;
+  framesWarmed = true;
+  for (const src of FRAMES) {
+    const img = new Image();
+    img.decoding = "async";
+    img.fetchPriority = "low";
+    img.src = src;
+  }
+}
 
 /* ---------------- the timeline (ms) ---------------- */
 
@@ -89,12 +118,8 @@ export function CwoCinematicIntro({
   finishedRef.current = onFinished;
 
   useEffect(() => {
-    /* Warm every plate up front: the cycle must never flash a blank. */
-    for (const src of FRAMES) {
-      const img = new Image();
-      img.decoding = "async";
-      img.src = src;
-    }
+    /* the frames are usually already warm from the gate */
+    preloadCwoFrames();
 
     let raf = 0;
     let start = 0;
@@ -284,14 +309,15 @@ export function CwoCinematicIntro({
               className="cwo-metal absolute inset-0"
               style={{ background: METAL_FILL }}
             />
-            {/* the cycling plates */}
+            {/* the cycling plates — the artwork is portrait, so the lockup
+                crops a band around the subject's face */}
             <img
               ref={layerARef}
               alt=""
               className="absolute inset-0 h-full w-full object-cover"
               style={{
                 willChange: "transform, opacity",
-                filter: "saturate(1.35) brightness(1.45) contrast(1.08)",
+                objectPosition: "center 38%",
               }}
             />
             <img
@@ -300,7 +326,7 @@ export function CwoCinematicIntro({
               className="absolute inset-0 h-full w-full object-cover"
               style={{
                 willChange: "transform, opacity",
-                filter: "saturate(1.35) brightness(1.45) contrast(1.08)",
+                objectPosition: "center 38%",
               }}
             />
           </div>

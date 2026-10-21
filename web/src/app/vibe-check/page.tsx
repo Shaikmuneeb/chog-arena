@@ -19,6 +19,12 @@ export default function VibeCheckPage() {
     if (vibeCheckPassed()) router.replace("/");
   }, [router]);
 
+  /* Warm the arena route now so the cinematic's final flash can hand the
+   * visitor straight over to a lobby that is already in memory. */
+  useEffect(() => {
+    router.prefetch("/");
+  }, [router]);
+
   return (
     <VibeCheckGate
       onPass={() => router.replace("/")}
