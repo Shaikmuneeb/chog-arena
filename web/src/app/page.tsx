@@ -1,12 +1,16 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useAccount, useConfig } from "wagmi";
 import { readContract } from "wagmi/actions";
 import { Swords } from "lucide-react";
 import { ArenaHeader } from "@/components/ArenaHeader";
 import { CreateDuelModal } from "@/components/CreateDuelModal";
 import { DuelBoard, type ArenaDuel } from "@/components/DuelBoard";
+import {
+  VibeCheckGate,
+  vibeCheckPassed,
+} from "@/components/VibeCheckGate";
 import { BATTLE_ROSTER } from "@/config/fighterModels";
 import { CHOG_ARENA_ADDRESS, chogArenaAbi } from "@/contracts";
 
@@ -19,8 +23,18 @@ const ROSTER = BATTLE_ROSTER;
 export default function Home() {
   const [duels, setDuels] = useState<ArenaDuel[]>([]);
   const [createOpen, setCreateOpen] = useState(false);
+  /* the CWO Vibe Check gates the lobby for the rest of the session */
+  const [vibeUnlocked, setVibeUnlocked] = useState(false);
+  const [vibeChecked, setVibeChecked] = useState(false);
   const { address } = useAccount();
   const config = useConfig();
+
+  useEffect(() => {
+    setVibeUnlocked(vibeCheckPassed());
+    setVibeChecked(true);
+  }, []);
+
+  const handleVibePass = useCallback(() => setVibeUnlocked(true), []);
 
   const handleCreated = useCallback(
     async (betAmount: bigint) => {
@@ -57,8 +71,14 @@ export default function Home() {
     <>
       <ArenaHeader />
       <main className="mx-auto max-w-6xl space-y-8 px-4 py-8">
-        {/* Create Duel CTA — pure CSS arena glow, no flat background images */}
-        <section className="relative overflow-hidden rounded-3xl border border-white/10 bg-zinc-900 p-8 text-center shadow-[0_0_60px_rgba(244,63,94,0.08)]">
+        {/* ---- CWO Vibe Check entry gate ---- */}
+        {vibeChecked && !vibeUnlocked && (
+          <VibeCheckGate onPass={handleVibePass} />
+        )}
+
+        {vibeUnlocked && (
+        <>
+        {/* Create Duel CTA — pure CSS arena glow, no flat background images */}        <section className="relative overflow-hidden rounded-3xl border border-white/10 bg-zinc-900 p-8 text-center shadow-[0_0_60px_rgba(244,63,94,0.08)]">
           <div
             className="absolute inset-0"
             style={{
@@ -99,6 +119,8 @@ export default function Home() {
           onCreateDuel={() => setCreateOpen(true)}
           roster={ROSTER}
         />
+        </>
+        )}
       </main>
 
       <CreateDuelModal
