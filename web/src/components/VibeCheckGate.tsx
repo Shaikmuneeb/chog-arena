@@ -80,10 +80,11 @@ export function VibeCheckGate({ onPass }: { onPass: () => void }) {
     setStage("passed");
   }, []);
 
-  /* the certificate flashes for 1.5s, then the arena is revealed */
+  /* The certificate holds for a few seconds so the "admire Chog Princess"
+   * button can actually be clicked — the button proceeds immediately. */
   useEffect(() => {
     if (stage !== "passed") return;
-    const t = setTimeout(() => onPassRef.current(), 1500);
+    const t = setTimeout(() => onPassRef.current(), 8000);
     return () => clearTimeout(t);
   }, [stage]);
 
@@ -226,20 +227,24 @@ export function VibeCheckGate({ onPass }: { onPass: () => void }) {
         )}
 
         {stage === "passed" && (
-          <div className="flex flex-col items-center py-10 text-center">
+          <div className="flex flex-col items-center py-6 text-center">
             <Sparkles className="h-10 w-10 animate-pulse text-cyan-300 drop-shadow-[0_0_20px_rgba(34,211,238,0.8)]" aria-hidden />
-            <h2 className="mt-4 bg-gradient-to-r from-cyan-300 via-fuchsia-300 to-pink-300 bg-clip-text text-3xl font-black uppercase tracking-tight text-transparent drop-shadow-[0_0_28px_rgba(217,70,239,0.6)] sm:text-4xl">
-              Vibe Check Passed
+            <h2 className="mt-4 max-w-xl bg-gradient-to-r from-cyan-300 via-fuchsia-300 to-pink-300 bg-clip-text text-2xl font-black uppercase leading-tight tracking-tight text-transparent drop-shadow-[0_0_28px_rgba(217,70,239,0.6)] sm:text-4xl">
+              You will be chugged by Benja
             </h2>
-            <p className="mt-2 font-mono text-sm font-black uppercase tracking-[0.3em] text-fuchsia-200">
+            <p className="mt-3 font-mono text-sm font-black uppercase tracking-[0.3em] text-fuchsia-200">
               IQ Verified: 12
             </p>
-            <p className="mt-4 text-xs text-zinc-500">
+            <p className="mt-3 text-xs text-zinc-500">
               Calibration {meter}/10 · {answers.length}/3 answered
             </p>
-            <p className="mt-1 text-[10px] font-bold uppercase tracking-widest text-zinc-600">
-              Redirecting to the arena…
-            </p>
+            <button
+              type="button"
+              onClick={() => onPassRef.current()}
+              className="mt-6 w-full rounded-2xl bg-gradient-to-r from-fuchsia-600 via-pink-600 to-rose-600 px-6 py-4 text-sm font-black uppercase tracking-[0.15em] text-white shadow-[0_0_36px_-6px_rgba(217,70,239,0.9)] transition hover:from-fuchsia-500 hover:via-pink-500 hover:to-rose-500"
+            >
+              Click here to admire Chog Princess
+            </button>
           </div>
         )}
       </div>
