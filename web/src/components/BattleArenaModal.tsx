@@ -162,6 +162,12 @@ const ACTION_HOLD: Record<AttackKind, number> = {
 const HIT_HOLD = 640;
 
 /**
+ * The pre-match "READY?" intro. The face-off also waits for the 3D rigs to
+ * stream in, but never longer than this — the match always starts promptly.
+ */
+const FACE_OFF_MS = 2500;
+
+/**
  * The fighting gap, in stage percent of CENTRE distance. The 3D stage is 12
  * world units wide and each fighter is ~1.2 units across, so a 23% centre
  * distance leaves about 1.6 units of clear air between the two bodies. The
@@ -424,7 +430,7 @@ function createMatch(script: MatchScript, playerSide: PlayerSide): MatchState {
   return {
     stage: "faceoff",
     stageMs: 0,
-    stageDur: 800,
+    stageDur: FACE_OFF_MS,
     round: 1,
     timer: 99,
     orbs: { creator: 0, challenger: 0 },
@@ -1405,6 +1411,8 @@ export function BattleArenaModal({
     let raf = 0;
     let last = performance.now();
     let lastPaint = 0;
+    /** wall-clock time the face-off has been on screen */
+    let faceoffElapsed = 0;
     /* Award a round win the moment a K.O. resolves. Refs are bumped first
      * (no stale-closure risk), then mirrored into state for the HUD. */
     const onRoundWin = (winner: FighterSide) => {
@@ -1419,9 +1427,16 @@ export function BattleArenaModal({
     const loop = (now: number) => {
       const dt = Math.min(now - last, 50);
       last = now;
-      /* Hold the face-off until the 3D rigs are on stage. */
-      if (!rigsReadyRef.current && m.stage === "faceoff") {
-        m.stageMs = 0;
+      /* Keep the READY? banner up while the 3D rigs stream in, but the whole
+       * pre-match never lasts longer than FACE_OFF_MS — the round starts
+       * promptly whether or not the rigs have landed. */
+      if (m.stage === "faceoff") {
+        faceoffElapsed += dt;
+        if (!rigsReadyRef.current && faceoffElapsed < FACE_OFF_MS) {
+          m.stageMs = 0;
+        } else {
+          m.stageMs = faceoffElapsed;
+        }
       }
       step(m, dt, script, playerSide, onRoundWin);
 

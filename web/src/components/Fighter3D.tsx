@@ -89,8 +89,13 @@ const PREVIEW_ZOOM: Partial<Record<FighterClass, number>> = {
   void_lord_james: 1.05,
 };
 
-/** How far a fighter lunges on an attack (world units). */
-const ATTACK_LUNGE = 0.3;
+/**
+ * How far a fighter steps in toward the centre on an attack (world units).
+ * The slots sit 4.4 units apart and the bodies are ~1.2 wide, so a punch or
+ * kick needs this step to make contact instead of hitting thin air. It eases
+ * back to the base stance as soon as the attack is over.
+ */
+const ATTACK_LUNGE = 1.8;
 
 /**
  * How long a hit flinch is held before it freezes (seconds). The Mixamo hit
@@ -434,15 +439,18 @@ function FighterModel({
           ? Math.PI / 2 - FACE_OFFSET
           : -Math.PI / 2 + FACE_OFFSET;
 
-    /* ---- attack lunge: at most ATTACK_LUNGE on X, then it returns -- */
+    /* ---- attack lunge: step in toward the centre, then return ------- */
     const attacking =
       live.state.endsWith("Attack") ||
       live.state === "special" ||
       live.state === "critical";
     const toward = dx >= 0 ? 1 : -1;
     const lungeTarget = attacking ? toward * ATTACK_LUNGE : 0;
+    /* quick in (the strike lands ~200ms after the animation starts), softer
+     * back out to the base stance. */
+    const rate = attacking ? 11 : 6;
     lungeRef.current +=
-      (lungeTarget - lungeRef.current) * Math.min(1, delta * 0.012);
+      (lungeTarget - lungeRef.current) * (1 - Math.exp(-delta * rate));
 
     /* ---- the floor lock ---------------------------------------------
      * Feet on the floor, fixed z line, X only for sliding. */
