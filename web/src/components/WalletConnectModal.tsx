@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { useBalance } from "wagmi";
 import { useWalletConnection } from "@/hooks/useWalletConnection";
+import { WalletIcon, type WalletBrand } from "@/components/WalletIcons";
 import { monad, monadTestnet } from "@/config/monadChain";
 import { cn, truncateAddress } from "@/lib/utils";
 
@@ -204,8 +205,8 @@ function WalletRow({
   wallet: {
     id: string;
     name: string;
+    brand?: WalletBrand;
     monogram: string;
-    gradient: string;
     status: string;
     message?: string;
     installed: boolean;
@@ -236,14 +237,19 @@ function WalletRow({
           connecting && "cursor-wait border-pink-400/40 bg-pink-500/[0.08]",
         )}
       >
-        {/* the wallet tile */}
+        {/* the wallet tile - a glass plate holding the brand's own mark */}
         <span
           className={cn(
-            "relative flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br text-[11px] font-black tracking-tight text-white shadow-lg",
-            wallet.gradient,
+            "relative flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-white/[0.05]",
+            "shadow-[inset_0_1px_0_rgba(255,255,255,0.07)] backdrop-blur-sm",
+            connected && "border-emerald-400/40 bg-emerald-500/10",
+            failed && "border-rose-400/40 bg-rose-500/10",
+            connecting && "border-pink-400/40 bg-pink-500/10",
           )}
         >
-          {wallet.monogram}
+          <span className="flex h-8 w-8 items-center justify-center">
+            <WalletIcon brand={wallet.brand} monogram={wallet.monogram} />
+          </span>
           {connected && (
             <span className="absolute -bottom-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-emerald-400 text-black ring-2 ring-black">
               <Check className="h-2.5 w-2.5" aria-hidden />

@@ -12,6 +12,7 @@ import {
 } from "wagmi";
 import { UserRejectedRequestError } from "viem";
 import { monad, monadTestnet } from "@/config/monadChain";
+import type { WalletBrand } from "@/components/WalletIcons";
 
 /**
  * Wallet connection state machine.
@@ -46,10 +47,10 @@ export type WalletOption = {
   /** the connector uid */
   id: string;
   name: string;
-  /** the two letters drawn in the tile */
+  /** which official brand mark to draw */
+  brand?: WalletBrand;
+  /** the two letters drawn when we have no vector for this wallet */
   monogram: string;
-  /** tailwind gradient for the tile */
-  gradient: string;
   status: WalletStatus;
   /** the human readable status / error line */
   message?: string;
@@ -60,63 +61,41 @@ export type WalletOption = {
 /** Known wallets, keyed by their EIP-6963 rdns. */
 const KNOWN_WALLETS: Record<
   string,
-  { name: string; monogram: string; gradient: string }
+  { name: string; brand?: WalletBrand; monogram: string }
 > = {
-  "io.metamask": {
-    name: "MetaMask",
-    monogram: "MM",
-    gradient: "from-orange-400 to-rose-600",
-  },
-  "io.rabby": {
-    name: "Rabby",
-    monogram: "R",
-    gradient: "from-blue-500 to-emerald-400",
-  },
-  "com.backpack": {
-    name: "Backpack",
-    monogram: "B",
-    gradient: "from-slate-300 to-blue-500",
-  },
+  "io.metamask": { name: "MetaMask", brand: "metamask", monogram: "MM" },
+  "io.rabby": { name: "Rabby", brand: "rabby", monogram: "R" },
+  "io.rabbywallet": { name: "Rabby", brand: "rabby", monogram: "R" },
+  "com.backpack": { name: "Backpack", brand: "backpack", monogram: "B" },
   "com.coinbase.wallet": {
     name: "Coinbase Wallet",
+    brand: "coinbase",
     monogram: "CB",
-    gradient: "from-blue-400 to-blue-700",
   },
-  "app.phantom": {
-    name: "Phantom",
-    monogram: "P",
-    gradient: "from-violet-500 to-fuchsia-600",
-  },
-  "com.brave.wallet": {
-    name: "Brave Wallet",
-    monogram: "BR",
-    gradient: "from-amber-500 to-orange-700",
-  },
+  "app.phantom": { name: "Phantom", brand: "phantom", monogram: "P" },
+  "com.brave.wallet": { name: "Brave Wallet", brand: "brave", monogram: "BR" },
   "com.trustwallet.app": {
     name: "Trust Wallet",
+    brand: "trust",
     monogram: "T",
-    gradient: "from-sky-400 to-blue-600",
   },
   "com.walletconnect": {
     name: "WalletConnect",
+    brand: "walletconnect",
     monogram: "W",
-    gradient: "from-blue-500 to-indigo-600",
   },
-  "com.okex.wallet": {
-    name: "OKX Wallet",
-    monogram: "OK",
-    gradient: "from-zinc-200 to-zinc-500",
-  },
+  "com.okex.wallet": { name: "OKX Wallet", brand: "okx", monogram: "OK" },
   "com.tokenpocket.pro": {
     name: "TokenPocket",
+    brand: "tokenpocket",
     monogram: "TP",
-    gradient: "from-emerald-400 to-teal-600",
   },
-  "io.rabbywallet": {
-    name: "Rabby",
-    monogram: "R",
-    gradient: "from-blue-500 to-emerald-400",
-  },
+  "com.bitget.web3": { name: "Bitget Wallet", brand: "bitget", monogram: "BG" },
+  "com.bitget.wallet": { name: "Bitget Wallet", brand: "bitget", monogram: "BG" },
+  "com.bitkeep.app": { name: "Bitget Wallet", brand: "bitget", monogram: "BG" },
+  "org.hot.wallet": { name: "HOT Wallet", brand: "hot", monogram: "HOT" },
+  "app.hot.wallet": { name: "HOT Wallet", brand: "hot", monogram: "HOT" },
+  "com.hotwallet": { name: "HOT Wallet", brand: "hot", monogram: "HOT" },
 };
 
 /** Fallback identity for a wallet we do not have a brand for. */
@@ -125,7 +104,6 @@ function genericWallet(name: string) {
   return {
     name: clean,
     monogram: clean.slice(0, 2).toUpperCase(),
-    gradient: "from-zinc-500 to-zinc-700",
   };
 }
 
@@ -139,18 +117,22 @@ function rdnsList(connector: {
 }
 
 /** Resolve a connector to a known wallet. */
+type WalletIdentity = { name: string; brand?: WalletBrand; monogram: string };
+
 function identify(connector: {
   name: string;
   rdns?: string | readonly string[];
-}): { name: string; monogram: string; gradient: string } {
+}): WalletIdentity {
   for (const id of rdnsList(connector)) {
     const hit = KNOWN_WALLETS[id.toLowerCase()];
     if (hit) return hit;
   }
   const name = connector.name.toLowerCase();
-  for (const [id, wallet] of Object.entries(KNOWN_WALLETS)) {
-    if (name.includes(wallet.name.toLowerCase())) return wallet;
-    if (id.includes(name)) return wallet;
+  if (name) {
+    for (const [id, wallet] of Object.entries(KNOWN_WALLETS)) {
+      if (name.includes(wallet.name.toLowerCase())) return wallet;
+      if (id.includes(name)) return wallet;
+    }
   }
   return genericWallet(connector.name);
 }
@@ -262,29 +244,45 @@ export function useWalletConnection() {
     };
   }, [mounted, isConnected, connectors, reconnectAsync]);
 
-  /* ---- the wallet list --------------------------------------------- */
+  /* ---- the wallet list ---------------------------------------------
+   * The same wallet can show up twice: once as a wagmi target connector
+   * and once as an EIP-6963 announcement. They are collapsed on the
+   * resolved brand name, and the announced provider wins because it is
+   * the one the extension actually owns. */
   const options = useMemo<WalletOption[]>(() => {
     if (!mounted) return [];
-    const seen = new Set<string>();
-    const list: WalletOption[] = [];
+    const picked = new Map<
+      string,
+      { connector: (typeof connectors)[number]; identity: WalletIdentity }
+    >();
     for (const connector of connectors) {
-      const rdns = rdnsList(connector);
-      const key = (rdns[0] ?? connector.name).toLowerCase();
-      if (seen.has(key)) continue;
-      seen.add(key);
       const identity = identify(connector);
-      const installed = walletInstalled(connector);
+      const rdns = rdnsList(connector);
+      const key = identity.brand
+        ? identity.name.toLowerCase()
+        : (rdns[0] ?? connector.name).toLowerCase();
+      const prev = picked.get(key);
+      if (!prev) {
+        picked.set(key, { connector, identity });
+      } else if (!rdnsList(prev.connector).length && rdns.length > 0) {
+        picked.set(key, { connector, identity });
+      }
+    }
+    const list: WalletOption[] = [];
+    for (const { connector, identity } of picked.values()) {
       list.push({
         id: connector.uid,
         name: identity.name,
+        brand: identity.brand,
         monogram: identity.monogram,
-        gradient: identity.gradient,
-        installed,
+        installed: walletInstalled(connector),
         status: "idle",
       });
     }
     /* the generic "Injected" connector is the same provider as whichever
-     * wallet announced itself - drop it so the list has no duplicates */
+     * wallet announced itself - drop it so the list has no duplicates, but
+     * keep it when it is all we have so a wallet that predates EIP-6963
+     * can still connect */
     const named = list.filter((w) => w.name !== "Browser Wallet");
     return named.length ? named : list;
   }, [connectors, mounted]);
