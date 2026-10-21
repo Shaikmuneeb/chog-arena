@@ -18,13 +18,12 @@ import {
  * the arena's helvetiker typeface, converted to vector paths so the intro
  * plates can be masked INSIDE the letters.
  *
- * The sequence:
- *   phase 1  0 - 800ms    dark fade in with a low ambient glow
- *   phase 2  800 - 3500ms the letters lock centre-screen: sharp scale-down
- *                          with a lens flare sweeping across
- *   phase 3  3500ms +     the 19 plates cycle inside the letterforms on a
- *                          high-speed flip/slide
- *   phase 4  last 400ms   a flash and a zoom straight into the lobby
+ * The sequence — a five second movie intro:
+ *   0 - 3500ms     the 19 plates flip through the letterforms on an even
+ *                  184ms cadence, the logo locked dead-centre
+ *   2000 - 5000ms  the MARVEL ZOOM: the logo accelerates straight at the
+ *                  viewer, lens flares sweeping across it
+ *   4600 - 5000ms  the flash peaks and cuts into the arena lobby
  *
  * Everything runs off ONE requestAnimationFrame loop — no timers to leak,
  * nothing to clean up but the frame itself, so it can never lock up or
@@ -68,18 +67,22 @@ export function preloadCwoFrames(): void {
 
 /* ---------------- the timeline (ms) ---------------- */
 
-/** Phase 1 — the dark fade-in. */
-const T_FADE = 800;
-/** Phase 2 — the letters lock in. */
-const T_LOCK_IN = 800;
-const T_LOCK_SET = 1500;
-/** Phase 3 — the plates start cycling inside the letters. */
-const T_CYCLE = 3500;
-/** Phase 4 — the flash + zoom. */
-const T_FLASH = 6700;
-const T_END = 7100;
-/** How long a plate holds before it flips to the next. */
-const FRAME_MS = 175;
+/** The whole sequence, cut to the arena lobby at the end. */
+const T_TOTAL = 5000;
+/** The plates take over the chrome fill. */
+const T_MONTAGE_START = 150;
+/** The last plate has landed — the montage is done. */
+const T_MONTAGE_END = 3500;
+/** The zoom takes over the final three seconds. */
+const T_ZOOM_START = 2000;
+/** The flash begins to bloom. */
+const T_FLASH = 4600;
+/**
+ * One plate per flip. The set is spread evenly across the montage window:
+ * 18 flips of 194ms puts the last plate at 3492ms, so all 19 are on screen
+ * before the zoom takes over.
+ */
+const FRAME_MS = Math.round(T_MONTAGE_END / (FRAMES.length - 1));
 
 /** The chrome ramp used for the metallic letterform fill. */
 const METAL_FILL =
@@ -107,6 +110,7 @@ export function CwoCinematicIntro({
   const layerARef = useRef<HTMLImageElement>(null);
   const layerBRef = useRef<HTMLImageElement>(null);
   const flareRef = useRef<HTMLDivElement>(null);
+  const bloomRef = useRef<HTMLDivElement>(null);
   const flashRef = useRef<HTMLDivElement>(null);
   const veilRef = useRef<HTMLDivElement>(null);
 
@@ -124,7 +128,11 @@ export function CwoCinematicIntro({
     let raf = 0;
     let start = 0;
     let frameIndex = 0;
-    let nextFrameAt = T_CYCLE;
+    /* the flip grid starts on the first beat: 18 flips of FRAME_MS put the
+     * last plate at 3492ms, inside the montage window */
+    let nextFrameAt = FRAME_MS;
+    /** how many plates have been flipped in */
+    let flips = 0;
     let frontIdx = 0;
     let animFrom: HTMLImageElement | null = null;
     let animTo: HTMLImageElement | null = null;
@@ -150,42 +158,32 @@ export function CwoCinematicIntro({
       if (!start) start = now;
       const t = now - start;
 
-      /* ---------- phase 1: dark fade-in + ambient glow ---------- */
-      const fade = Math.min(1, t / T_FADE);
+      /* ---------- the fade-in: a low ambient glow under the logo ---------- */
+      const fade = Math.min(1, t / 420);
       if (glowRef.current) {
         glowRef.current.style.opacity = String(0.18 + 0.82 * fade * fade);
       }
 
-      /* ---------- phase 2: the letters lock centre-screen ---------- */
-      if (t >= T_LOCK_IN) {
-        const p = Math.min(1, (t - T_LOCK_IN) / (T_LOCK_SET - T_LOCK_IN));
+      /* ---------- the logo locks dead-centre ---------- */
+      if (t < T_ZOOM_START && lockRef.current) {
+        const p = Math.min(1, t / 240);
         const e = easeOutQuart(p);
-        if (lockRef.current) {
-          lockRef.current.style.opacity = String(Math.min(1, e * 1.7));
-          lockRef.current.style.transform = `scale(${(1.55 - 0.55 * e).toFixed(4)})`;
-        }
-        /* the lens flare sweeps across as the letters settle */
-        if (flareRef.current) {
-          const f = Math.min(1, (t - T_LOCK_IN) / 760);
-          const flare = Math.sin(f * Math.PI);
-          flareRef.current.style.opacity = String(flare * 0.9);
-          flareRef.current.style.transform =
-            `translate3d(${(-50 + 100 * f).toFixed(1)}%, -50%, 0) ` +
-            `scaleX(${(0.35 + 1.9 * flare).toFixed(3)})`;
-        }
+        lockRef.current.style.opacity = String(Math.min(1, e * 1.7));
+        lockRef.current.style.transform = `scale(${(1.16 - 0.16 * e).toFixed(4)})`;
       }
 
-      /* ---------- phase 3: the plates cycle inside the letters ---------- */
+      /* ---------- the plates flip through the letterforms ---------- */
       /* the chrome fill hands over to the plates */
-      const plateAlpha = Math.min(1, Math.max(0, (t - (T_CYCLE - 240)) / 300));
+      const plateAlpha = Math.min(1, Math.max(0, (t - T_MONTAGE_START) / 200));
       if (metalRef.current) {
         metalRef.current.style.opacity = String(1 - plateAlpha);
       }
-      if (t >= nextFrameAt) {
+      if (t >= nextFrameAt && flips < FRAMES.length - 1) {
         const outEl = layers[frontIdx].current;
         const inEl = layers[1 - frontIdx].current;
         if (outEl && inEl) {
           frameIndex = (frameIndex + 1) % FRAMES.length;
+          flips += 1;
           inEl.src = FRAMES[frameIndex];
           inEl.style.opacity = "0";
           inEl.style.transform = "translate3d(9%,0,0) scale(1.07)";
@@ -196,7 +194,10 @@ export function CwoCinematicIntro({
           animT0 = t;
           frontIdx = 1 - frontIdx;
         }
-        nextFrameAt = t + FRAME_MS;
+        /* a fixed grid, so a late frame does not push the whole montage
+         * later — it catches up instead */
+        nextFrameAt += FRAME_MS;
+        if (nextFrameAt < t) nextFrameAt = t + FRAME_MS;
       }
       if (animFrom && animTo) {
         const p = Math.min(1, (t - animT0) / FRAME_MS);
@@ -219,22 +220,46 @@ export function CwoCinematicIntro({
         if (frontEl) frontEl.style.opacity = String(plateAlpha);
       }
 
-      /* ---------- phase 4: flash + zoom into the lobby ---------- */
-      if (t >= T_FLASH) {
-        const p = Math.min(1, (t - T_FLASH) / (T_END - T_FLASH));
-        const e = easeOutQuad(p);
+      /* ---------- the MARVEL ZOOM: the final three seconds ----------
+       * The logo stays locked dead-centre and accelerates straight at the
+       * viewer. The curve is a power ramp, so it drifts for a beat and
+       * then rushes — the classic movie-intro push. */
+      if (t >= T_ZOOM_START) {
+        const p = Math.min(1, (t - T_ZOOM_START) / (T_TOTAL - T_ZOOM_START));
+        /* accelerating: p^2.6 barely moves at first, then explodes */
+        const e = Math.pow(p, 2.6);
         if (lockRef.current) {
-          lockRef.current.style.transform = `scale(${(1 + 2.6 * e).toFixed(4)})`;
-          lockRef.current.style.opacity = String(1 - e * 0.5);
+          lockRef.current.style.transform = `scale(${(1 + 7.5 * e).toFixed(4)})`;
         }
+        /* the anamorphic streak sweeps across the logo as it rushes */
+        if (flareRef.current) {
+          const sweep = p;
+          const flare = Math.sin(Math.min(1, sweep * 1.15) * Math.PI);
+          flareRef.current.style.opacity = String(0.35 + 0.65 * flare);
+          flareRef.current.style.transform =
+            `translate3d(${(-60 + 120 * sweep).toFixed(1)}%, -50%, 0) ` +
+            `scaleX(${(0.5 + 3.2 * flare).toFixed(3)})`;
+        }
+        /* the core bloom behind the letters swells with the push */
+        if (bloomRef.current) {
+          bloomRef.current.style.opacity = String(0.2 + 0.8 * e);
+          bloomRef.current.style.transform =
+            `translate(-50%,-50%) scale(${(0.5 + 2.6 * e).toFixed(4)})`;
+        }
+      }
+
+      /* ---------- the flash, then the cut into the lobby ---------- */
+      if (t >= T_FLASH) {
+        const p = Math.min(1, (t - T_FLASH) / (T_TOTAL - T_FLASH));
+        const e = easeOutQuad(p);
         if (flashRef.current) {
           flashRef.current.style.opacity = String(Math.min(1, e * 2.2));
           flashRef.current.style.transform = `scale(${(0.15 + 1.45 * e).toFixed(4)})`;
         }
         if (veilRef.current) {
-          veilRef.current.style.opacity = String(Math.min(0.42, e * 0.6));
+          veilRef.current.style.opacity = String(Math.min(0.5, e * 0.7));
         }
-        if (!completed && t >= T_FLASH + 200) {
+        if (!completed && t >= T_FLASH + 120) {
           completed = true;
           /* the lobby is mounted underneath the flash from here on */
           completeRef.current?.();
@@ -243,9 +268,9 @@ export function CwoCinematicIntro({
 
       /* Safety net: if the route change never lands, the white veil fades
        * out so the visitor is never stranded on a white screen. */
-      if (t >= T_END + 2000 && veilRef.current) {
-        const p = Math.min(1, (t - (T_END + 2000)) / 320);
-        veilRef.current.style.opacity = String(0.94 * (1 - p));
+      if (t >= T_TOTAL + 2000 && veilRef.current) {
+        const p = Math.min(1, (t - (T_TOTAL + 2000)) / 320);
+        veilRef.current.style.opacity = String(0.5 * (1 - p));
         if (p >= 1) {
           finishedRef.current?.();
           return; /* the sequence is over */
@@ -368,7 +393,20 @@ export function CwoCinematicIntro({
         </div>
       </div>
 
-      {/* ---- phase 2: the lens flare ---- */}
+      {/* ---- the lens flare: the anamorphic streak + the core bloom ---- */}
+      <div
+        ref={bloomRef}
+        className="pointer-events-none absolute left-1/2 top-1/2 h-[70vmin] w-[70vmin] -translate-x-1/2 -translate-y-1/2"
+        style={{
+          opacity: 0,
+          transform: "translate(-50%,-50%) scale(0.5)",
+          background:
+            "radial-gradient(circle at 50% 50%, rgba(255,255,255,0.55) 0%, " +
+            "rgba(255,47,185,0.34) 26%, rgba(168,85,247,0.18) 46%, rgba(5,3,12,0) 70%)",
+          filter: "blur(10px)",
+          willChange: "transform, opacity",
+        }}
+      />
       <div
         ref={flareRef}
         className="pointer-events-none absolute left-0 top-1/2 h-[3px] w-[130vw] origin-center"
@@ -383,7 +421,7 @@ export function CwoCinematicIntro({
         }}
       />
 
-      {/* ---- phase 4: the flash ---- */}
+      {/* ---- the flash, then the cut into the lobby ---- */}
       <div
         ref={flashRef}
         className="pointer-events-none absolute inset-0"
