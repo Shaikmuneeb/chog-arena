@@ -8,6 +8,11 @@ import {
   CWO_MASK_URL,
   CWO_VIEWBOX,
 } from "@/config/cwoLockup";
+import {
+  AMBIENT_VOLUME,
+  playChogTheme,
+  rampChogThemeTo,
+} from "@/lib/chogTheme";
 
 /**
  * The CWO cinematic intro.
@@ -78,6 +83,15 @@ const T_ZOOM_START = 2000;
 /** The flash begins to bloom. */
 const T_FLASH = 4600;
 /**
+ * The visual transition out of the intro: the flash swells to full white
+ * and the overlay drops away into the lobby.
+ *
+ * The theme track rides the exact same span - it ramps from full energy
+ * down to its ambient lobby level while the flash covers the cut, so the
+ * music never jumps.
+ */
+const T_TRANSITION = T_TOTAL - T_FLASH;
+/**
  * One plate per flip. The set is spread evenly across the montage window:
  * 18 flips of 194ms puts the last plate at 3492ms, so all 19 are on screen
  * before the zoom takes over.
@@ -125,9 +139,20 @@ export function CwoCinematicIntro({
     /* the frames are usually already warm from the gate */
     preloadCwoFrames();
 
+    /* The theme track: "we believe in chog" at full energy for the
+     * sequence. The element is owned by the module, not by this component,
+     * so it survives the route change into the lobby. */
+    playChogTheme();
+
     let raf = 0;
     let start = 0;
     let frameIndex = 0;
+    /* has the music been handed over to its ambient level yet */
+    let fading = false;
+    /* has the sequence actually started running? React mounts an effect
+     * twice in development, so the cleanup below runs once before the
+     * first frame - that is not a teardown and must not touch the music */
+    let running = false;
     /* the flip grid starts on the first beat: 18 flips of FRAME_MS put the
      * last plate at 3492ms, inside the montage window */
     let nextFrameAt = FRAME_MS;
@@ -155,7 +180,10 @@ export function CwoCinematicIntro({
     }
 
     const tick = (now: number) => {
-      if (!start) start = now;
+      if (!start) {
+        start = now;
+        running = true;
+      }
       const t = now - start;
 
       /* ---------- the fade-in: a low ambient glow under the logo ---------- */
@@ -250,6 +278,12 @@ export function CwoCinematicIntro({
 
       /* ---------- the flash, then the cut into the lobby ---------- */
       if (t >= T_FLASH) {
+        /* The music hands over to its ambient level over exactly the
+         * length of the flash - the same transition the visitor sees. */
+        if (!fading) {
+          fading = true;
+          rampChogThemeTo(AMBIENT_VOLUME, T_TRANSITION);
+        }
         const p = Math.min(1, (t - T_FLASH) / (T_TOTAL - T_FLASH));
         const e = easeOutQuad(p);
         if (flashRef.current) {
@@ -281,7 +315,20 @@ export function CwoCinematicIntro({
     };
 
     raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
+    return () => {
+      cancelAnimationFrame(raf);
+      /* If the sequence was torn down before the flash, do not leave the
+       * track blaring at full energy in the lobby - hand it over anyway.
+       * The ramp lives in the theme module, so it finishes even though
+       * this component is gone.
+       *
+       * `running` keeps this away from the development-only double mount,
+       * where the cleanup fires before the sequence has begun. */
+      if (!fading && running) {
+        fading = true;
+        rampChogThemeTo(AMBIENT_VOLUME, T_TRANSITION);
+      }
+    };
   }, []);
 
   return (

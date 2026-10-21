@@ -4,6 +4,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Check, ChevronRight, Sparkles } from "lucide-react";
 import { pushToast } from "./Toast";
 import { CwoCinematicIntro, preloadCwoFrames } from "./CwoCinematicIntro";
+import { ThemeMuteButton } from "./ThemeMuteButton";
+import { preloadChogTheme } from "@/lib/chogTheme";
 
 /** sessionStorage key — the gate only has to be passed once per session. */
 export const VIBE_CHECK_KEY = "cwo-vibe-check";
@@ -85,9 +87,11 @@ export function VibeCheckGate({ onPass }: { onPass: () => void }) {
 
   /* Pull the cinematic frames down while the visitor is still reading the
    * gate — by the time they hit the button they are already cached, so the
-   * final flash never waits on a 4.5MB download. */
+   * final flash never waits on a 4.5MB download. The theme track comes
+   * down with them. */
   useEffect(() => {
     preloadCwoFrames();
+    preloadChogTheme();
   }, []);
 
   /* The certificate holds for a few seconds so the "admire Chog Princess"
@@ -110,6 +114,12 @@ export function VibeCheckGate({ onPass }: { onPass: () => void }) {
 
   return (
     <div className="relative flex min-h-[100dvh] w-full items-center justify-center overflow-hidden bg-black p-4 sm:p-8">
+      {/* the theme toggle — the track starts with the cinematic, so the
+          visitor gets a say before it does */}
+      <div className="absolute right-4 top-4 z-10">
+        <ThemeMuteButton />
+      </div>
+
       {/* ambient bloom */}
       <div
         className="pointer-events-none absolute inset-0"

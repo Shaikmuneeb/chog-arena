@@ -19,6 +19,7 @@ import {
   useFighterProfile,
 } from "@/context/FighterProfileContext";
 import { ProfileModal } from "./ProfileModal";
+import { ThemeMuteButton } from "./ThemeMuteButton";
 import { WalletConnectModal } from "./WalletConnectModal";
 import { monad, monadTestnet } from "@/config/monadChain";
 import { cn, truncateAddress } from "@/lib/utils";
@@ -160,6 +161,10 @@ export function ArenaHeader() {
                 {network.label}
               </span>
             )}
+
+            {/* the theme track keeps looping in the lobby - let the
+                visitor turn it down or off */}
+            <ThemeMuteButton />
 
             {!mounted ? (
               /* SSR-safe skeleton until client hydration completes */
