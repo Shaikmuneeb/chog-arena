@@ -100,7 +100,7 @@ export function VibeCheckGate({ onPass }: { onPass: () => void }) {
     return () => clearTimeout(t);
   }, [stage, showIntro]);
 
-  const onBenjaToggle = () => {
+  const onMaxToggle = () => {
     setMeter(10);
     pushToast({
       kind: "success",
@@ -158,7 +158,7 @@ export function VibeCheckGate({ onPass }: { onPass: () => void }) {
                 htmlFor="cwo-gay-meter"
                 className="stat-label !text-fuchsia-200/90"
               >
-                How gay are you? (1 = Corporate Normie, 10 = Max Liquid Degen)
+                How gay are you?
               </label>
               <div className="mt-4 flex items-center gap-4">
                 <span className="stat-value w-8 text-right text-2xl font-bold text-cyan-300 drop-shadow-[0_0_14px_rgba(34,211,238,0.6)]">
@@ -178,23 +178,19 @@ export function VibeCheckGate({ onPass }: { onPass: () => void }) {
                   10
                 </span>
               </div>
-              <div className="mt-2 flex justify-between font-display text-[10px] font-bold uppercase tracking-[0.18em] text-zinc-500">
-                <span>Corporate Normie</span>
-                <span>Max Liquid Degen</span>
-              </div>
             </div>
 
-            {/* ---- the Benja toggle ---- */}
+            {/* ---- the max-out toggle ---- */}
             <button
               type="button"
-              onClick={onBenjaToggle}
+              onClick={onMaxToggle}
               className="mt-4 flex w-full items-center gap-3 rounded-2xl border border-pink-500/30 bg-pink-500/5 px-5 py-4 text-left backdrop-blur-md transition hover:border-pink-400/70 hover:bg-pink-500/10 hover:shadow-glow-pink"
             >
               <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md border-2 border-pink-400/70 text-pink-300">
                 {meter === 10 && <Check className="h-4 w-4" aria-hidden />}
               </span>
               <span className="font-display text-sm font-bold text-pink-100">
-                Benja is a lesbian
+                bigchog is a lesbian
               </span>
               <span className="ml-auto font-display text-[10px] font-bold uppercase tracking-[0.18em] text-pink-300/70">
                 {meter === 10 ? "BASED" : "CLICK ME"}
