@@ -102,15 +102,20 @@ export function ArenaHeader() {
 
   return (
     <>
-      <header className="sticky top-0 z-50 border-b border-white/5 bg-zinc-950/80 backdrop-blur-md">
+      <header className="sticky top-0 z-50 border-b border-white/10 bg-black/70 backdrop-blur-xl">
+        {/* neon hairline under the bar */}
+        <div
+          className="pointer-events-none absolute inset-x-0 bottom-0 h-px bg-gradient-to-r from-transparent via-fuchsia-500/70 to-transparent"
+          aria-hidden
+        />
         <div className="mx-auto flex h-16 max-w-6xl items-center justify-between gap-4 px-4">
           <div className="flex items-center gap-2.5">
-            <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-rose-600 to-orange-500 text-lg shadow-lg shadow-rose-600/25">
+            <span className="flex h-9 w-9 items-center justify-center rounded-xl border border-white/15 bg-gradient-to-br from-fuchsia-600 to-pink-600 text-base shadow-glow-purple">
               ⚔️
             </span>
-            <span className="text-lg font-extrabold tracking-tight text-zinc-50">
-              CHOG ARENA{" "}
-              <span className="bg-gradient-to-r from-rose-400 to-orange-300 bg-clip-text text-transparent">
+            <span className="font-display text-base font-bold uppercase tracking-[0.18em] text-white">
+              CHOG ARENA
+              <span className="ml-2 hidden font-mono text-[10px] font-medium tracking-[0.3em] text-fuchsia-300/80 sm:inline">
                 // 1V1 DEATHMATCH
               </span>
             </span>
@@ -120,8 +125,8 @@ export function ArenaHeader() {
                 className={cn(
                   "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 font-mono text-[10px] font-semibold tracking-wide",
                   arenaOnline
-                    ? "border-emerald-400/40 bg-emerald-500/10 text-emerald-300"
-                    : "border-zinc-700 bg-zinc-900 text-zinc-500",
+                    ? "border-emerald-400/40 bg-emerald-500/10 text-emerald-300 shadow-glow-cyan"
+                    : "border-white/10 bg-white/5 text-zinc-500",
                 )}
                 title={`ChogArena @ ${CHOG_ARENA_ADDRESS} (Monad Mainnet)`}
               >
@@ -133,9 +138,15 @@ export function ArenaHeader() {
                       : "bg-zinc-600",
                   )}
                 />
-                {arenaOnline
-                  ? `ARENA ONLINE · ${truncateAddress(CHOG_ARENA_ADDRESS)}`
-                  : "ARENA OFFLINE"}
+                {arenaOnline ? (
+                  <>
+                    <span className="uppercase tracking-wider">Arena Online</span>
+                    <span className="text-emerald-300/40">·</span>
+                    <span>{truncateAddress(CHOG_ARENA_ADDRESS)}</span>
+                  </>
+                ) : (
+                  <span className="uppercase tracking-wider">Arena Offline</span>
+                )}
               </span>
             )}
           </div>
@@ -145,9 +156,9 @@ export function ArenaHeader() {
             {mounted && (
               <span
                 className={cn(
-                  "hidden items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold sm:inline-flex",
+                  "hidden items-center gap-1.5 rounded-full border px-3 py-1 font-display text-[11px] font-semibold uppercase tracking-[0.14em] sm:inline-flex",
                   secondWind
-                    ? "border-rose-400/40 bg-rose-500/10 text-rose-200"
+                    ? "border-pink-400/40 bg-pink-500/10 text-pink-200 shadow-glow-pink"
                     : "border-white/10 bg-white/5 text-zinc-300",
                 )}
               >
@@ -156,7 +167,7 @@ export function ArenaHeader() {
             )}
             {/* Network indicator — gated on mount to stay hydration-safe */}
             {mounted && (
-              <span className="hidden items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-medium text-zinc-300 sm:inline-flex">
+              <span className="hidden items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 font-mono text-[11px] font-medium text-zinc-300 backdrop-blur-md sm:inline-flex">
                 <span className={cn("h-1.5 w-1.5 rounded-full", network.dot)} />
                 {network.label}
               </span>
@@ -174,7 +185,7 @@ export function ArenaHeader() {
                 <button
                   type="button"
                   onClick={() => setMenuOpen((v) => !v)}
-                  className="inline-flex items-center gap-2 rounded-full bg-rose-600 px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-rose-600/25 transition hover:bg-rose-500"
+                  className="inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-fuchsia-600 to-pink-600 px-4 py-2 font-display text-xs font-bold uppercase tracking-[0.16em] text-white shadow-neon-edge transition-all hover:from-fuchsia-500 hover:to-pink-500"
                 >
                   <Wallet className="h-4 w-4" aria-hidden />
                   Connect
@@ -182,8 +193,8 @@ export function ArenaHeader() {
                 </button>
 
                 {menuOpen && (
-                  <div className="absolute right-0 mt-2 w-56 overflow-hidden rounded-xl border border-white/10 bg-zinc-900 shadow-2xl shadow-black/50">
-                    <p className="border-b border-white/5 px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+                  <div className="glass-deep absolute right-0 mt-2 w-56 overflow-hidden rounded-xl shadow-2xl shadow-black/60">
+                    <p className="stat-label border-b border-white/5 px-4 py-2.5">
                       Choose a wallet
                     </p>
                     {connectors.length === 0 ? (
@@ -201,12 +212,12 @@ export function ArenaHeader() {
                             connect({ connector });
                             setMenuOpen(false);
                           }}
-                          className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-sm text-zinc-200 transition hover:bg-white/5 disabled:opacity-50"
+                          className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left font-display text-sm text-zinc-200 transition hover:bg-fuchsia-500/10 hover:text-white disabled:opacity-50"
                         >
                           <Wallet className="h-4 w-4 text-zinc-400" aria-hidden />
                           <span className="flex-1">{connector.name}</span>
                           {isPending && (
-                            <span className="text-[10px] text-zinc-500">
+                            <span className="font-mono text-[10px] text-zinc-500">
                               connecting…
                             </span>
                           )}
@@ -223,10 +234,10 @@ export function ArenaHeader() {
                   type="button"
                   onClick={() => setProfileOpen(true)}
                   title="Edit Fighter Name / Profile"
-                  className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 py-1 pl-1 pr-3 transition hover:bg-white/10"
+                  className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 py-1 pl-1 pr-3 backdrop-blur-md transition hover:border-fuchsia-400/50 hover:bg-fuchsia-500/10"
                 >
                   <FighterAvatarBadge address={address} size="sm" />
-                  <span className="max-w-28 truncate text-xs font-bold text-zinc-100">
+                  <span className="max-w-28 truncate font-display text-xs font-bold text-zinc-100">
                     {getProfile(address)?.username ?? "Set Name"}
                   </span>
                 </button>
@@ -235,31 +246,31 @@ export function ArenaHeader() {
                 <button
                   type="button"
                   onClick={() => setMenuOpen((v) => !v)}
-                  className="inline-flex items-center gap-2.5 rounded-full border border-white/10 bg-white/5 px-3 py-1.5 transition hover:bg-white/10"
+                  className="inline-flex items-center gap-2.5 rounded-full border border-white/10 bg-white/5 px-3 py-1.5 backdrop-blur-md transition hover:border-fuchsia-400/50 hover:bg-fuchsia-500/10"
                 >
                   <span className={cn("h-1.5 w-1.5 rounded-full", network.dot)} />
                   <span className="font-mono text-xs font-semibold text-zinc-100">
                     {address ? truncateAddress(address) : ""}
                   </span>
-                  <span className="hidden text-xs font-medium text-amber-200 sm:inline">
+                  <span className="hidden font-mono text-xs font-medium text-amber-300 sm:inline">
                     {monBalance}
                   </span>
                   <ChevronDown className="h-3.5 w-3.5 text-zinc-500" aria-hidden />
                 </button>
 
                 {menuOpen && (
-                  <div className="absolute right-0 mt-2 w-60 overflow-hidden rounded-xl border border-white/10 bg-zinc-900 shadow-2xl shadow-black/50">
+                  <div className="glass-deep absolute right-0 mt-2 w-60 overflow-hidden rounded-xl shadow-2xl shadow-black/60">
                     <div className="border-b border-white/5 px-4 py-3">
                       <p className="font-mono text-xs font-semibold text-zinc-100">
                         {address ? truncateAddress(address) : ""}
                       </p>
                       <p className="mt-1 text-xs text-zinc-500">
                         Balance:{" "}
-                        <span className="font-semibold text-amber-200">
+                        <span className="font-mono font-semibold text-amber-300">
                           {monBalance}
                         </span>
                       </p>
-                      <p className="mt-0.5 flex items-center gap-1.5 text-xs text-zinc-500">
+                      <p className="mt-0.5 flex items-center gap-1.5 font-mono text-xs text-zinc-500">
                         <span
                           className={cn("h-1.5 w-1.5 rounded-full", network.dot)}
                         />
@@ -272,7 +283,7 @@ export function ArenaHeader() {
                         disconnect();
                         setMenuOpen(false);
                       }}
-                      className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-sm text-zinc-200 transition hover:bg-white/5"
+                      className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left font-display text-sm text-zinc-200 transition hover:bg-rose-500/10 hover:text-rose-200"
                     >
                       <LogOut className="h-4 w-4 text-zinc-400" aria-hidden />
                       Disconnect

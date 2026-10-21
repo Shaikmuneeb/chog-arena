@@ -6,10 +6,178 @@
   color-scheme: dark;
 }
 
+html {
+  background-color: #000;
+}
+
 body {
-  background-color: #09090b; /* zinc-950 */
+  /* Transparent so the fixed ambient layers below paint from the root
+   * canvas up — deep OLED black with no banding. */
+  background-color: transparent;
   color: #f4f4f5; /* zinc-100 */
   -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Ambient arena bloom: fixed, non-scrolling, sits behind everything. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -2;
+  pointer-events: none;
+  background:
+    radial-gradient(
+      ellipse 70% 45% at 12% -5%,
+      rgba(168, 85, 247, 0.16),
+      transparent 60%
+    ),
+    radial-gradient(
+      ellipse 60% 40% at 92% 8%,
+      rgba(255, 47, 185, 0.12),
+      transparent 60%
+    ),
+    radial-gradient(
+      ellipse 80% 50% at 50% 108%,
+      rgba(124, 58, 237, 0.14),
+      transparent 62%
+    );
+}
+
+/* Faint technical grid — the floor of the whole product. */
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  opacity: 0.55;
+  background-image:
+    linear-gradient(rgba(192, 132, 252, 0.09) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(192, 132, 252, 0.09) 1px, transparent 1px);
+  background-size: 44px 44px;
+  -webkit-mask-image: radial-gradient(
+    ellipse 100% 80% at 50% 25%,
+    #000 25%,
+    transparent 100%
+  );
+  mask-image: radial-gradient(
+    ellipse 100% 80% at 50% 25%,
+    #000 25%,
+    transparent 100%
+  );
+}
+
+/* ================================================================
+   Cyberpunk Web3 design system
+   Every card, button and stat on the dashboard is built from these.
+   ================================================================ */
+
+@layer components {
+  /* ---- surfaces ---- */
+
+  /* Standard glass panel: translucent, blurred, hairline border. */
+  .glass {
+    @apply border border-white/10 bg-white/5 backdrop-blur-md;
+  }
+
+  /* Deeper glass for modals — near-opaque so text stays crisp. */
+  .glass-deep {
+    @apply border border-white/10 bg-zinc-950/85 backdrop-blur-xl;
+  }
+
+  /* Panel with a soft purple/pink bloom behind it. */
+  .glass-panel {
+    @apply relative overflow-hidden rounded-2xl border border-white/10 bg-white/5 backdrop-blur-md shadow-glass;
+  }
+
+  /* Panel whose rim glows purple and intensifies on hover. */
+  .glass-panel-glow {
+    @apply glass-panel transition-all duration-300 hover:border-fuchsia-400/50 hover:shadow-[0_0_36px_-10px_rgba(217,70,239,0.7)];
+  }
+
+  /* Corner-bracket frame for hero panels. Inset so the brackets survive
+   * the panel's rounded corners, and bright enough to read on OLED black. */
+  .bracket-frame {
+    @apply pointer-events-none absolute inset-3;
+    background:
+      linear-gradient(to right, rgba(236, 72, 153, 0.95), transparent 62%)
+        top left / 58px 2px no-repeat,
+      linear-gradient(to bottom, rgba(236, 72, 153, 0.95), transparent 62%)
+        top left / 2px 58px no-repeat,
+      linear-gradient(to left, rgba(217, 70, 239, 0.95), transparent 62%)
+        top right / 58px 2px no-repeat,
+      linear-gradient(to bottom, rgba(217, 70, 239, 0.95), transparent 62%)
+        top right / 2px 58px no-repeat,
+      linear-gradient(to right, rgba(217, 70, 239, 0.95), transparent 62%)
+        bottom left / 58px 2px no-repeat,
+      linear-gradient(to top, rgba(236, 72, 153, 0.95), transparent 62%)
+        bottom left / 2px 58px no-repeat,
+      linear-gradient(to left, rgba(236, 72, 153, 0.95), transparent 62%)
+        bottom right / 58px 2px no-repeat,
+      linear-gradient(to top, rgba(217, 70, 239, 0.95), transparent 62%)
+        bottom right / 2px 58px no-repeat;
+    filter: drop-shadow(0 0 7px rgba(217, 70, 239, 0.8));
+  }
+
+  /* ---- typography ---- */
+
+  /* Micro label above every stat / section. */
+  .stat-label {
+    @apply font-display text-[10px] font-semibold uppercase tracking-[0.28em] text-zinc-500;
+  }
+
+  /* Readout value — monospaced, tabular, never reflows. */
+  .stat-value {
+    @apply font-mono tabular-nums;
+  }
+
+  /* Neon gradient headline. */
+  .neon-title {
+    @apply bg-gradient-to-r from-fuchsia-300 via-pink-300 to-cyan-300 bg-clip-text font-display font-bold uppercase tracking-tight text-transparent;
+  }
+
+  /* Section heading used across modals. */
+  .panel-heading {
+    @apply font-display text-xl font-bold uppercase tracking-[0.14em] text-white;
+  }
+
+  /* ---- buttons ---- */
+
+  /* Primary CTA — purple→pink gradient with a neon rim. */
+  .btn-neon {
+    @apply relative inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-fuchsia-600 via-purple-600 to-pink-600 px-6 py-3 font-display text-sm font-bold uppercase tracking-[0.16em] text-white shadow-neon-edge transition-all duration-300 hover:from-fuchsia-500 hover:via-purple-500 hover:to-pink-500 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  /* Secondary CTA — glass with a neon border on hover. */
+  .btn-ghost {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/5 px-6 py-3 font-display text-sm font-semibold uppercase tracking-[0.16em] text-zinc-200 backdrop-blur-md transition-all duration-300 hover:border-fuchsia-400/60 hover:bg-fuchsia-500/10 hover:text-white hover:shadow-glow-purple active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  /* Small pill button. */
+  .btn-chip {
+    @apply rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 font-display text-xs font-semibold uppercase tracking-wider text-zinc-300 transition-all hover:border-fuchsia-400/50 hover:bg-fuchsia-500/10 hover:text-white;
+  }
+
+  /* ---- data rows ---- */
+
+  /* A single stat row inside a panel. */
+  .data-row {
+    @apply flex items-center justify-between gap-3 border-b border-white/5 px-4 py-3 last:border-b-0;
+  }
+
+  /* ---- ambience ---- */
+
+  /* Diagonal scanline texture for hero panels. */
+  .scanlines {
+    background-image: repeating-linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.035) 0px,
+      rgba(255, 255, 255, 0.035) 1px,
+      transparent 1px,
+      transparent 4px
+    );
+  }
 }
 
 @keyframes second-wind-glow {

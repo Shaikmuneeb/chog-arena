@@ -9,7 +9,6 @@ import {
 } from "wagmi";
 import { readContract, waitForTransactionReceipt } from "wagmi/actions";
 import { zeroAddress } from "viem";
-import { Swords } from "lucide-react";
 import {
   CHOG_ARENA_ADDRESS,
   chogArenaAbi,
@@ -34,7 +33,7 @@ import {
   type FighterClass,
   type FighterRosterEntry,
 } from "@/config/fighterClasses";
-import { BATTLE_ROSTER } from "@/config/fighterModels";
+import { BATTLE_ROSTER, DEFAULT_FIGHTER_CLASS } from "@/config/fighterModels";
 import dynamic from "next/dynamic";
 
 const FighterPreview3D = dynamic(
@@ -205,24 +204,31 @@ export function DuelBoard({
   const totalChallengers = playerDuels.length + npcDuels.length;
 
   return (
-    <section className="space-y-6">
+    <section className="space-y-5">
       {/* Compact Live PvP strip */}
-      <div className="flex items-center justify-between rounded-xl border border-white/10 bg-zinc-900/60 px-4 py-2.5">
+      <div className="glass-panel relative flex items-center justify-between gap-4 px-4 py-3">
+        {/* neon left edge */}
+        <div
+          className="pointer-events-none absolute inset-y-3 left-0 w-px bg-gradient-to-b from-transparent via-fuchsia-500/80 to-transparent"
+          aria-hidden
+        />
         <div className="flex items-center gap-3">
-          <span className="text-xs font-bold uppercase tracking-[0.18em] text-zinc-400">
+          <span className="stat-label text-zinc-300">
             Open PVP Challenges
           </span>
-          <span className="rounded-full border border-cyan-400/25 bg-cyan-400/10 px-2 py-0.5 text-[10px] font-bold text-cyan-300">
+          <span className="rounded-full border border-cyan-400/30 bg-cyan-400/10 px-2.5 py-0.5 font-mono text-[10px] font-bold text-cyan-300">
             {playerDuels.length}
           </span>
           {!liveDuels && (
-            <span className="text-[10px] text-zinc-500">· arena offline</span>
+            <span className="font-mono text-[10px] text-zinc-500">
+              · arena offline
+            </span>
           )}
         </div>
         <button
           type="button"
           onClick={() => onCreateDuel?.()}
-          className="rounded-lg bg-rose-600 px-3 py-1.5 text-xs font-bold text-white shadow-lg shadow-rose-600/25 transition hover:bg-rose-500"
+          className="rounded-lg border border-fuchsia-400/30 bg-fuchsia-500/10 px-3 py-1.5 font-display text-xs font-bold uppercase tracking-[0.14em] text-fuchsia-200 transition-all hover:border-fuchsia-400/70 hover:bg-fuchsia-500/20 hover:shadow-glow-purple"
         >
           + Create Open Duel
         </button>
@@ -238,7 +244,7 @@ export function DuelBoard({
               profileUsername={getProfile(duel.creator)?.username}
               profileTitle={getProfile(duel.creator)?.title}
               profileClass={
-                getProfile(duel.creator)?.fighterClass ?? "chogzila"
+                getProfile(duel.creator)?.fighterClass ?? DEFAULT_FIGHTER_CLASS
               }
               canceling={cancelingId === duel.id}
               onCancel={() => void cancelDuel(duel)}
@@ -301,38 +307,59 @@ function NpcFighterCard({
   const entry = duel.rosterEntry;
   const displayName = entry?.name ?? npc.name;
   const priceLabel = entry?.price ?? `${formatMon(duel.betAmount)} MON`;
+  /* The roster price already carries its unit ("1.2 MON") — split it so the
+   * unit can be typeset smaller without printing "1.2 MON MON". */
+  const [priceValue, priceUnit] = /MON$/i.test(priceLabel.trim())
+    ? [priceLabel.replace(/\s*MON$/i, "").trim(), "MON"]
+    : [priceLabel, ""];
   return (
-    <li className="group relative flex flex-col overflow-hidden rounded-2xl border border-white/10 bg-white/[0.02] transition-all duration-300 hover:border-purple-500/50 hover:bg-white/[0.04] hover:shadow-[0_0_28px_-8px_rgba(168,85,247,0.45)]">
+    <li className="glass-panel-glow group relative flex flex-col">
       {/* Class-tinted top edge */}
       <div
-        className="absolute inset-x-0 top-0 h-px opacity-70"
+        className="absolute inset-x-0 top-0 h-px opacity-80"
         style={{
           background: `linear-gradient(90deg, transparent, ${classMeta.secondary}, transparent)`,
         }}
         aria-hidden
       />
+      {/* idle sweep along the top edge */}
+      <div
+        className="pointer-events-none absolute inset-x-0 top-0 h-px overflow-hidden opacity-0 transition-opacity duration-500 group-hover:opacity-100"
+        aria-hidden
+      >
+        <div className="h-px w-1/3 animate-edge-sweep bg-gradient-to-r from-transparent via-fuchsia-300 to-transparent" />
+      </div>
   {/* Character — a live 3D preview render, no 2D sprite */}
   <div className="relative flex h-[220px] items-center justify-center overflow-hidden">
+        <div
+          className="pointer-events-none absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-fuchsia-500/10 to-transparent"
+          aria-hidden
+        />
         <FighterPreview3D
           fighterClass={npc.fighterClass}
           size={220}
           className="w-full"
         />
       </div>
-      <div className="absolute inset-x-0 bottom-0 z-20 bg-gradient-to-t from-black/80 via-black/40 to-transparent p-4">
-        <p className="text-xl font-black uppercase tracking-wider text-white">
+      <div className="absolute inset-x-0 bottom-0 z-20 bg-gradient-to-t from-black/85 via-black/50 to-transparent p-4">
+        <p className="font-display text-xl font-bold uppercase tracking-[0.1em] text-white">
           {displayName}
         </p>
-        <div className="mt-1 flex items-center justify-between">
-          <span className="font-mono text-sm font-black tabular-nums text-amber-300">
-            {priceLabel}
+        <div className="mt-1.5 flex items-center justify-between gap-2">
+          <span className="stat-value text-sm font-bold text-amber-300">
+            {priceValue}
+            {priceUnit && (
+              <span className="ml-1 text-[10px] font-semibold text-amber-200/70">
+                {priceUnit}
+              </span>
+            )}
           </span>
           <button
             type="button"
             onClick={onFight}
-            className="rounded-lg bg-rose-600 px-3 py-1.5 text-xs font-bold text-white opacity-0 shadow-lg shadow-rose-600/30 transition-all duration-300 group-hover:opacity-100 hover:bg-rose-500"
+            className="rounded-lg border border-fuchsia-400/40 bg-fuchsia-500/15 px-3 py-1.5 font-display text-xs font-bold uppercase tracking-[0.16em] text-fuchsia-100 opacity-70 shadow-glow-purple transition-all duration-300 group-hover:opacity-100 hover:border-fuchsia-300/80 hover:bg-fuchsia-500/30"
           >
-            CHALLENGE
+            Challenge
           </button>
         </div>
       </div>
@@ -366,9 +393,9 @@ function PlayerDuelRow({
     address != null && duel.creator.toLowerCase() === address.toLowerCase();
   const classMeta = FIGHTER_CLASS_META[profileClass];
   return (
-    <li className="group relative overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-900/80 px-4 py-3 transition-all duration-300 hover:border-purple-500/50 hover:bg-zinc-900/95 hover:shadow-[0_0_28px_-8px_rgba(168,85,247,0.35)]">
+    <li className="glass-panel-glow relative px-4 py-3">
       <div
-        className="absolute inset-x-0 top-0 h-px opacity-60"
+        className="absolute inset-x-0 top-0 h-px opacity-80"
         style={{
           background: `linear-gradient(90deg, transparent, ${classMeta.secondary}, transparent)`,
         }}
@@ -378,10 +405,10 @@ function PlayerDuelRow({
         <div className="flex min-w-0 items-center gap-3">
           <FighterAvatarBadge address={duel.creator} size="md" />
           <div className="min-w-0">
-            <p className="flex flex-wrap items-center gap-2 text-sm font-bold text-zinc-100">
+            <p className="flex flex-wrap items-center gap-2 font-display text-sm font-bold text-zinc-100">
               {profileUsername ?? truncateAddress(duel.creator)}
               <span
-                className="rounded-full border px-2 py-0.5 text-[10px] font-semibold"
+                className="rounded-full border px-2 py-0.5 font-display text-[10px] font-semibold uppercase tracking-[0.12em]"
                 style={{
                   borderColor: `${classMeta.secondary}55`,
                   color: classMeta.secondary,
@@ -391,8 +418,8 @@ function PlayerDuelRow({
                 {classMeta.label}
               </span>
               {isMine && (
-                <span className="rounded-full bg-purple-500/15 px-2 py-0.5 text-[10px] font-semibold text-purple-300">
-                  YOUR DUEL
+                <span className="rounded-full border border-fuchsia-400/40 bg-fuchsia-500/15 px-2 py-0.5 font-display text-[10px] font-semibold uppercase tracking-[0.12em] text-fuchsia-200">
+                  Your Duel
                 </span>
               )}
             </p>
@@ -405,19 +432,19 @@ function PlayerDuelRow({
 
         <div className="flex shrink-0 items-center gap-3">
           {/* Glowing stake badge */}
-          <div className="flex flex-col items-center rounded-xl border border-amber-400/30 bg-gradient-to-b from-amber-500/15 to-violet-600/10 px-3 py-1.5 shadow-[0_0_18px_-4px_rgba(251,191,36,0.45)]">
-            <span className="text-[9px] font-bold uppercase tracking-[0.25em] text-amber-200/70">
-              Stake
-            </span>
-            <span className="font-mono text-sm font-black tabular-nums text-amber-300">
+          <div className="flex flex-col items-center rounded-xl border border-amber-400/30 bg-amber-500/10 px-3 py-1.5 shadow-glow-amber backdrop-blur-md">
+            <span className="stat-label text-amber-200/70">Stake</span>
+            <span className="stat-value text-sm font-bold text-amber-300">
               {formatMon(duel.betAmount)}
-              <span className="ml-1 text-[10px] font-bold text-amber-200/80">MON</span>
+              <span className="ml-1 text-[10px] font-bold text-amber-200/80">
+                MON
+              </span>
             </span>
           </div>
 
           {isMine ? (
             <div className="flex items-center gap-2">
-              <span className="rounded-full border border-purple-400/30 bg-purple-500/10 px-3 py-1.5 text-xs font-semibold text-purple-200">
+              <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1.5 font-display text-xs font-semibold uppercase tracking-[0.12em] text-zinc-400">
                 Waiting…
               </span>
               <button
@@ -425,10 +452,10 @@ function PlayerDuelRow({
                 onClick={onCancel}
                 disabled={canceling}
                 className={cn(
-                  "rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm font-semibold transition",
+                  "rounded-xl border border-white/10 bg-white/5 px-4 py-2 font-display text-sm font-semibold uppercase tracking-[0.12em] backdrop-blur-md transition",
                   canceling
                     ? "cursor-wait text-zinc-500"
-                    : "text-zinc-300 hover:border-red-400/40 hover:text-red-300",
+                    : "text-zinc-300 hover:border-rose-400/50 hover:bg-rose-500/10 hover:text-rose-200",
                 )}
               >
                 {canceling ? "Cancelling…" : "Cancel"}
@@ -438,7 +465,7 @@ function PlayerDuelRow({
             <button
               type="button"
               onClick={onAccept}
-              className="rounded-xl bg-gradient-to-r from-rose-600 to-pink-600 px-4 py-2 text-sm font-bold text-white shadow-lg shadow-rose-600/25 transition-all duration-300 hover:scale-105 hover:from-rose-500 hover:to-pink-500 active:scale-95"
+              className="btn-neon !px-4 !py-2 !text-xs"
             >
               Accept Challenge
             </button>

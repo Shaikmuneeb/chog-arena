@@ -839,12 +839,18 @@ function PreviewRig({
     if (bbox && bbox.sizeY > 0) {
       /* the idle clips raise the arms above the bind pose — leave headroom */
       const zoom = PREVIEW_ZOOM[fighterClass] ?? 1;
-      const targetHeight = height * 0.72 * zoom;
+      /* Never let the figure exceed the canvas: a zoom that overflows the
+       * ortho frustum crops the head off (Chog Princess did exactly that).
+       * The zoom biases the fit, the clamp guarantees the whole rig is
+       * inside the frame. */
+      const maxHeight = height * 0.86;
+      const targetHeight = Math.min(height * 0.72 * zoom, maxHeight);
       const scale = targetHeight / bbox.sizeY;
       group.current.scale.setScalar(scale);
       group.current.position.x =
         (facingLeft ? bbox.centerX : -bbox.centerX) * scale * 0.15;
-      group.current.position.y = -height * 0.42 - bbox.minY * scale;
+      /* feet sit just below the lower third so the body reads centred */
+      group.current.position.y = -height * 0.4 - bbox.minY * scale;
     }
     desired.current = state;
   });

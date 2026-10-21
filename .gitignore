@@ -9,6 +9,7 @@ web/node_modules/
 web/.next/
 dist/
 *.log
+*.tsbuildinfo
 
 # Commonly ignored directories
 .logs/

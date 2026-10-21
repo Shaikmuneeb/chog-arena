@@ -28,6 +28,7 @@ import {
   useFighterProfile,
 } from "@/context/FighterProfileContext";
 import { FIGHTER_CLASS_META, type FighterClass } from "@/config/fighterClasses";
+import { DEFAULT_FIGHTER_CLASS } from "@/config/fighterModels";
 import dynamic from "next/dynamic";
 
 const FighterPreview3D = dynamic(
@@ -519,12 +520,12 @@ export function AcceptDuelModal({ duel, onClose, onSettled }: AcceptDuelModalPro
         address: duel.creator,
         name: visibleFighterName(
           getProfile(duel.creator)?.username,
-          getProfile(duel.creator)?.fighterClass ?? "chogzila",
+          getProfile(duel.creator)?.fighterClass ?? DEFAULT_FIGHTER_CLASS,
         ),
         title: getProfile(duel.creator)?.title,
-        fighterClass: getProfile(duel.creator)?.fighterClass ?? "chogzila",
+        fighterClass: getProfile(duel.creator)?.fighterClass ?? DEFAULT_FIGHTER_CLASS,
       };
-  const challengerClass = getProfile(address)?.fighterClass ?? "chogzila";
+  const challengerClass = getProfile(address)?.fighterClass ?? DEFAULT_FIGHTER_CLASS;
   const challengerFighter: FighterDescriptor = {
     address: address ?? ZERO,
     name: visibleFighterName(getProfile(address)?.username, challengerClass),
@@ -535,11 +536,11 @@ export function AcceptDuelModal({ duel, onClose, onSettled }: AcceptDuelModalPro
   return (
     <>
       <div
-        className="fixed inset-0 z-[90] flex items-center justify-center bg-zinc-950/80 p-4 backdrop-blur-xl"
+        className="fixed inset-0 z-[90] flex items-center justify-center bg-black/80 p-4 backdrop-blur-xl"
         onClick={phase === "matchup" ? onClose : undefined}
       >
         <div
-          className="w-full max-w-2xl rounded-2xl border border-red-500/30 bg-zinc-950/90 p-6 shadow-[0_0_50px_-10px_rgba(239,68,68,0.25)] animate-rise-in"
+          className="glass-panel w-full max-w-2xl rounded-2xl border-fuchsia-500/25 p-6 shadow-[0_0_70px_-20px_rgba(217,70,239,0.6)] animate-rise-in"
           onClick={(e) => e.stopPropagation()}
           role="dialog"
           aria-modal="true"
@@ -549,13 +550,13 @@ export function AcceptDuelModal({ duel, onClose, onSettled }: AcceptDuelModalPro
               {/* Header */}
               <div className="mb-6 flex items-start justify-between">
                 <div>
-                  <h2 className="flex items-center gap-2 bg-gradient-to-r from-red-400 via-orange-300 to-amber-200 bg-clip-text text-2xl font-extrabold tracking-wide text-transparent">
-                    <span className="drop-shadow-[0_0_10px_rgba(239,68,68,0.8)] animate-pulse">
-                      ⚡
-                    </span>
-                    CHALLENGE AWAITING
+                  <p className="stat-label text-fuchsia-300/80">
+                    Matchup // Duel #{duel.id}
+                  </p>
+                  <h2 className="neon-title mt-1 text-2xl font-bold uppercase tracking-[0.1em]">
+                    Challenge Awaiting
                   </h2>
-                  <p className="mt-1 text-xs text-zinc-400">
+                  <p className="mt-1.5 font-display text-xs text-zinc-400">
                     {duel.npc
                       ? `${duel.npc.name} — stake real MON, winner takes the pot.`
                       : `Duel #${duel.id} — study your opponent, then accept.`}
@@ -564,7 +565,7 @@ export function AcceptDuelModal({ duel, onClose, onSettled }: AcceptDuelModalPro
                 <button
                   type="button"
                   onClick={onClose}
-                  className="shrink-0 rounded-lg p-1 text-zinc-500 transition hover:bg-white/5 hover:text-zinc-300"
+                  className="shrink-0 rounded-lg p-1 text-zinc-500 transition hover:bg-white/5 hover:text-zinc-200"
                   aria-label="Close"
                 >
                   <X className="h-4 w-4" />
@@ -575,36 +576,46 @@ export function AcceptDuelModal({ duel, onClose, onSettled }: AcceptDuelModalPro
               <div className="flex flex-col items-center gap-6">
                 <div className="flex items-center justify-center gap-8">
                   <div className="flex flex-col items-center">
-                    <FighterPreview3D
-                      fighterClass={creatorFighter.fighterClass}
-                      facing="right"
-                      size={190}
-                      className="w-40"
-                    />
-                    <p className="mt-2 w-40 text-center text-sm font-black uppercase tracking-wider text-white">
+                    <div className="relative flex h-[190px] w-40 items-center justify-center">
+                      <div
+                        className="pointer-events-none absolute inset-x-0 bottom-0 h-20 rounded-full bg-fuchsia-500/20 blur-2xl"
+                        aria-hidden
+                      />
+                      <FighterPreview3D
+                        fighterClass={creatorFighter.fighterClass}
+                        facing="right"
+                        size={190}
+                        className="relative w-40"
+                      />
+                    </div>
+                    <p className="mt-2 w-40 text-center font-display text-sm font-bold uppercase tracking-[0.12em] text-white">
                       {creatorFighter.name}
                     </p>
                   </div>
-                  <div className="text-6xl font-black text-rose-500 drop-shadow-[0_0_20px_rgba(239,68,68,0.8)]">
+                  <div className="font-display text-6xl font-bold text-fuchsia-400 drop-shadow-[0_0_24px_rgba(217,70,239,0.9)]">
                     VS
                   </div>
                   <div className="flex flex-col items-center">
-                    <FighterPreview3D
-                      fighterClass={challengerFighter.fighterClass}
-                      facing="left"
-                      size={190}
-                      className="w-40"
-                    />
-                    <p className="mt-2 w-40 text-center text-sm font-black uppercase tracking-wider text-white">
+                    <div className="relative flex h-[190px] w-40 items-center justify-center">
+                      <div
+                        className="pointer-events-none absolute inset-x-0 bottom-0 h-20 rounded-full bg-pink-500/20 blur-2xl"
+                        aria-hidden
+                      />
+                      <FighterPreview3D
+                        fighterClass={challengerFighter.fighterClass}
+                        facing="left"
+                        size={190}
+                        className="relative w-40"
+                      />
+                    </div>
+                    <p className="mt-2 w-40 text-center font-display text-sm font-bold uppercase tracking-[0.12em] text-white">
                       {challengerFighter.name}
                     </p>
                   </div>
                 </div>
-                <div className="text-center">
-                  <p className="text-[10px] font-semibold uppercase tracking-widest text-zinc-500">
-                    Prize Pot
-                  </p>
-                  <p className="text-4xl font-black text-amber-300 drop-shadow-[0_0_14px_rgba(249,115,22,0.55)]">
+                <div className="glass-panel w-full max-w-xs px-5 py-4 text-center">
+                  <p className="stat-label">Prize Pot</p>
+                  <p className="stat-value mt-1 text-4xl font-bold text-amber-300 drop-shadow-[0_0_16px_rgba(249,115,22,0.55)]">
                     {formatMon(pot)} MON
                   </p>
                 </div>
@@ -617,13 +628,13 @@ export function AcceptDuelModal({ duel, onClose, onSettled }: AcceptDuelModalPro
                     <button
                       type="button"
                       onClick={() => setShowConnectors((v) => !v)}
-                      className="flex w-full animate-pulse items-center justify-center gap-2 rounded-xl border border-red-500/50 bg-gradient-to-r from-red-600/20 to-orange-600/20 py-3.5 text-sm font-extrabold tracking-wide text-red-100 shadow-[0_0_24px_rgba(239,68,68,0.35)] transition hover:from-red-600/30 hover:to-orange-600/30"
+                      className="flex w-full animate-pulse items-center justify-center gap-2 rounded-xl border border-fuchsia-400/50 bg-gradient-to-r from-fuchsia-600/25 to-pink-600/25 py-3.5 font-display text-sm font-bold uppercase tracking-[0.14em] text-fuchsia-100 shadow-glow-purple transition hover:from-fuchsia-600/40 hover:to-pink-600/40"
                     >
                       <Wallet className="h-4 w-4" aria-hidden />
                       ⚔️ CONNECT WALLET TO ACCEPT
                     </button>
                     {showConnectors && (
-                      <div className="mt-2 overflow-hidden rounded-xl border border-white/10 bg-zinc-900">
+                      <div className="glass-deep mt-2 overflow-hidden rounded-xl">
                         {connectors.length === 0 ? (
                           <p className="px-4 py-3 text-xs text-zinc-500">
                             No browser wallets detected. Install MetaMask,
@@ -639,7 +650,7 @@ export function AcceptDuelModal({ duel, onClose, onSettled }: AcceptDuelModalPro
                                 connect({ connector });
                                 setShowConnectors(false);
                               }}
-                              className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-sm text-zinc-200 transition hover:bg-white/5 disabled:opacity-50"
+                              className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left font-display text-sm text-zinc-200 transition hover:bg-fuchsia-500/10 hover:text-white disabled:opacity-50"
                             >
                               <Wallet
                                 className="h-4 w-4 text-zinc-400"
@@ -656,9 +667,9 @@ export function AcceptDuelModal({ duel, onClose, onSettled }: AcceptDuelModalPro
                   <button
                     type="button"
                     onClick={() => switchChain({ chainId: targetChain.id })}
-                    className="flex w-full items-center justify-center gap-2 rounded-xl border border-amber-400/50 bg-gradient-to-r from-amber-600/20 to-orange-600/20 py-3.5 text-sm font-extrabold tracking-wide text-amber-100 shadow-[0_0_24px_rgba(245,158,11,0.35)] transition hover:from-amber-600/30 hover:to-orange-600/30"
+                    className="flex w-full items-center justify-center gap-2 rounded-xl border border-amber-400/50 bg-gradient-to-r from-amber-600/20 to-orange-600/20 py-3.5 font-display text-sm font-bold uppercase tracking-[0.14em] text-amber-100 shadow-glow-amber transition hover:from-amber-600/30 hover:to-orange-600/30"
                   >
-                    SWITCH TO MONAD NETWORK
+                    Switch to Monad Network
                   </button>
                 ) : (
                   <button
@@ -666,10 +677,8 @@ export function AcceptDuelModal({ duel, onClose, onSettled }: AcceptDuelModalPro
                     onClick={accept}
                     disabled={busy}
                     className={cn(
-                      "flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-red-600 via-rose-600 to-orange-600 bg-[length:200%_100%] py-3.5 text-sm font-extrabold tracking-wide text-white shadow-[0_0_28px_rgba(239,68,68,0.45)] transition",
-                      busy
-                        ? "cursor-not-allowed opacity-60"
-                        : "animate-pulse hover:from-red-500 hover:via-rose-500 hover:to-orange-500",
+                      "btn-neon w-full !py-3.5 !text-sm",
+                      busy && "animate-none",
                     )}
                   >
                     {busy && (
@@ -694,16 +703,16 @@ export function AcceptDuelModal({ duel, onClose, onSettled }: AcceptDuelModalPro
             /* Clash settlement phase */
             <div className="py-14 text-center">
               <p className="animate-clash text-7xl">⚔️</p>
-              <h2 className="mt-6 bg-gradient-to-r from-red-300 to-orange-300 bg-clip-text text-2xl font-extrabold tracking-wide text-transparent">
-                FIGHTERS CLASHING
+              <h2 className="neon-title mt-6 text-2xl font-bold uppercase tracking-[0.12em]">
+                Fighters Clashing
               </h2>
-              <p className="mt-2 text-sm text-zinc-400">
+              <p className="mt-2 font-display text-sm text-zinc-400">
                 {duel.npc
                   ? `${formatMon(pot)} MON pot · settling on Monad…`
                   : `Duel #${duel.id} · ${formatMon(pot)} MON pot · settling on Monad…`}
               </p>
-              <div className="mx-auto mt-6 h-1 w-56 overflow-hidden rounded-full bg-black/50">
-                <div className="h-full w-full bg-gradient-to-r from-red-500 via-orange-400 to-amber-300 animate-shimmer" />
+              <div className="mx-auto mt-6 h-1 w-56 overflow-hidden rounded-full bg-white/5">
+                <div className="h-full w-full bg-gradient-to-r from-fuchsia-500 via-pink-400 to-cyan-300 animate-shimmer" />
               </div>
             </div>
           )}
@@ -751,11 +760,11 @@ function SecondWindBadge({ address }: { address?: `0x${string}` }) {
   const holder = typeof nftBalance === "bigint" && nftBalance > 0n;
 
   return holder ? (
-    <span className="inline-flex animate-pulse items-center gap-1 rounded-full border border-purple-400/40 bg-purple-500/15 px-2.5 py-1 text-[10px] font-bold text-purple-200 shadow-[0_0_12px_rgba(168,85,247,0.45)]">
+    <span className="inline-flex animate-pulse items-center gap-1 rounded-full border border-fuchsia-400/40 bg-fuchsia-500/15 px-2.5 py-1 font-display text-[10px] font-bold uppercase tracking-[0.1em] text-fuchsia-200 shadow-glow-purple">
       🛡️ SECOND WIND ACTIVE
     </span>
   ) : (
-    <span className="inline-flex items-center gap-1 rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-[10px] font-semibold text-zinc-500">
+    <span className="inline-flex items-center gap-1 rounded-full border border-white/10 bg-white/5 px-2.5 py-1 font-display text-[10px] font-semibold uppercase tracking-[0.1em] text-zinc-500">
       NO SECOND WIND
     </span>
   );
@@ -777,21 +786,19 @@ function FighterCard({
   const { getProfile } = useFighterProfile();
   const profile = !placeholder && address !== ZERO ? getProfile(address) : null;
   const fighterClass: FighterClass =
-    npc?.fighterClass ?? profile?.fighterClass ?? "chogzila";
+    npc?.fighterClass ?? profile?.fighterClass ?? DEFAULT_FIGHTER_CLASS;
   const theme = FIGHTER_CLASS_META[fighterClass];
 
   return (
     <div
       className={cn(
-        "flex flex-col items-center gap-3 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-5 text-center",
+        "glass-panel flex flex-col items-center gap-3 px-4 py-5 text-center",
         side === "left"
           ? "sm:border-r-0 sm:rounded-r-none"
           : "sm:border-l-0 sm:rounded-l-none",
       )}
     >
-      <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">
-        {role}
-      </p>
+      <p className="stat-label">{role}</p>
       {placeholder ? (
         <div className="h-16 w-16 animate-pulse rounded-xl bg-white/5" />
       ) : (
@@ -807,7 +814,7 @@ function FighterCard({
           <div className="-mt-2 flex items-center gap-2">
             <FighterAvatarBadge address={address} size="sm" />
             <span
-              className="rounded-full border px-2 py-0.5 text-[10px] font-bold"
+              className="rounded-full border px-2 py-0.5 font-display text-[10px] font-bold uppercase tracking-[0.1em]"
               style={{
                 borderColor: `${theme.secondary}55`,
                 color: theme.secondary,
@@ -820,13 +827,13 @@ function FighterCard({
         </>
       )}
       <div className="min-w-0">
-        <p className="truncate text-sm font-bold text-zinc-100">
+        <p className="truncate font-display text-sm font-bold text-zinc-100">
           {placeholder
             ? "—"
             : (npc?.name ?? profile?.username ?? truncateAddress(address))}
         </p>
         {(npc?.title || profile?.title) && (
-          <p className="mt-0.5 text-[10px] font-semibold text-zinc-400">
+          <p className="mt-0.5 font-display text-[10px] font-semibold uppercase tracking-[0.1em] text-zinc-400">
             {npc?.title ?? profile?.title}
           </p>
         )}
@@ -836,7 +843,7 @@ function FighterCard({
       </div>
       {!placeholder && !npc && <SecondWindBadge address={address} />}
       {!placeholder && npc && (
-        <span className="inline-flex items-center gap-1 rounded-full border border-amber-400/40 bg-amber-500/10 px-2.5 py-1 text-[10px] font-bold text-amber-200">
+        <span className="inline-flex items-center gap-1 rounded-full border border-amber-400/40 bg-amber-500/10 px-2.5 py-1 font-display text-[10px] font-bold uppercase tracking-[0.1em] text-amber-200">
           🤖 ARENA NPC
         </span>
       )}

@@ -89,3 +89,10 @@ export const BATTLE_ROSTER: readonly FighterClass[] = [
   "void_lord_james",
   "chog_princess",
 ];
+
+/**
+ * Default fighter class for a player with no saved profile. It MUST be a
+ * character that ships a 3D model — a legacy class would render an empty
+ * slot in the VS screen and on the profile card.
+ */
+export const DEFAULT_FIGHTER_CLASS: FighterClass = "void_lord_james";
