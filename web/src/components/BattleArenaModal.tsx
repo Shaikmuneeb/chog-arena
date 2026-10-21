@@ -12,6 +12,8 @@ import dynamic from "next/dynamic";
 import { ExternalLink, Loader2, Swords } from "lucide-react";
 import { FIGHTER_CLASS_META, type FighterClass } from "@/config/fighterClasses";
 import { has3DModel, type FighterActionState } from "@/config/fighterModels";
+import type { StageRigStatus } from "./Fighter3D";
+import { stageAnchorX } from "@/config/stageLayout";
 import type { StageFighter3D } from "./Fighter3D";
 
 /* three.js + R3F are heavy — load the 3D layer only when a duel starts. */
@@ -162,10 +164,18 @@ const ACTION_HOLD: Record<AttackKind, number> = {
 const HIT_HOLD = 640;
 
 /**
- * The pre-match "READY?" intro. The face-off also waits for the 3D rigs to
- * stream in, but never longer than this — the match always starts promptly.
+ * The pre-match "READY?" intro. The countdown is PAUSED while the 3D rigs
+ * stream in and the canvas paints them — it only starts running once the
+ * stage is playable, so the round never opens on a cold, stalling canvas.
  */
 const FACE_OFF_MS = 2500;
+
+/**
+ * How long the arena waits for the 3D layer to report in before it gives
+ * up and starts the match anyway. A rig that never loads must not freeze
+ * the whole fight.
+ */
+const STAGE_LOAD_GRACE_MS = 20_000;
 
 /**
  * The fighting gap, in stage percent of CENTRE distance. The 3D stage is 12
@@ -1347,17 +1357,80 @@ export function BattleArenaModal({
       facing: "right",
     },
   ]);
-  /* True once both rigs are on stage — the face-off holds until then. */
-  const [rigsReady, setRigsReady] = useState(false);
-  const rigsReadyRef = useRef(false);
-  rigsReadyRef.current = rigsReady;
-  const handle3DStatus = useCallback(() => {
-    setRigsReady(true);
+  /* ================= 3D STAGE READINESS =================
+   * The 3D layer streams ~200MB of Mixamo rigs before the bell. The match
+   * is HELD in the face-off until every rigged fighter reports that it is
+   * loaded, textured, bound to its clips and has painted a frame — that is
+   * what keeps the opening punch off a cold, stalling canvas. */
+  const [rigStatus, setRigStatus] = useState<Record<FighterSide, StageRigStatus>>(
+    {
+      creator: { side: "creator", progress: 0, ready: false, failed: false },
+      challenger: {
+        side: "challenger",
+        progress: 0,
+        ready: false,
+        failed: false,
+      },
+    },
+  );
+  const handle3DStatus = useCallback((status: StageRigStatus) => {
+    setRigStatus((prev) => {
+      const current = prev[status.side];
+      /* The state only ever moves FORWARD: a rig that reported ready stays
+       * ready, even when the endgame clips keep streaming in behind the
+       * fight. */
+      if (current.ready || current.failed) return prev;
+      if (
+        current.ready === status.ready &&
+        current.failed === status.failed &&
+        current.progress === status.progress
+      ) {
+        return prev;
+      }
+      return { ...prev, [status.side]: status };
+    });
   }, []);
 
-  /* Safety net: never let a slow/failed model stall the face-off. */
+  /* Only the fighters that actually ship a rig gate the start. */
+  const gatedSides = useMemo<FighterSide[]>(() => {
+    const sides: FighterSide[] = [];
+    if (has3DModel(creatorFighter.fighterClass)) sides.push("creator");
+    if (has3DModel(challengerFighter.fighterClass)) sides.push("challenger");
+    return sides;
+  }, [creatorFighter.fighterClass, challengerFighter.fighterClass]);
+
+  /* The stage is playable once every rigged fighter has reported in —
+   * either ready, or failed (a broken rig must not freeze the match). */
+  const stageReady = gatedSides.every(
+    (side) => rigStatus[side].ready || rigStatus[side].failed,
+  );
+  const stageReadyRef = useRef(stageReady);
+  stageReadyRef.current = stageReady;
+
+  /* Loading progress for the READY? screen (0..1 across both fighters). */
+  const stageProgress = useMemo(() => {
+    if (!gatedSides.length) return 1;
+    const sum = gatedSides.reduce(
+      (acc, side) => acc + rigStatus[side].progress,
+      0,
+    );
+    return sum / gatedSides.length;
+  }, [gatedSides, rigStatus]);
+
+  /* Safety net: a rig that never reports in (a hung fetch) must not freeze
+   * the match — after the grace period the stage is released anyway. */
   useEffect(() => {
-    const t = setTimeout(() => setRigsReady(true), 2200);
+    const t = setTimeout(() => {
+      setRigStatus((prev) => {
+        const next = { ...prev };
+        for (const side of ["creator", "challenger"] as const) {
+          if (!next[side].ready && !next[side].failed) {
+            next[side] = { ...next[side], failed: true, progress: 1 };
+          }
+        }
+        return next;
+      });
+    }, STAGE_LOAD_GRACE_MS);
     return () => clearTimeout(t);
   }, []);
 
@@ -1411,8 +1484,8 @@ export function BattleArenaModal({
     let raf = 0;
     let last = performance.now();
     let lastPaint = 0;
-    /** wall-clock time the face-off has been on screen */
-    let faceoffElapsed = 0;
+    /** the READY? clock — it only runs while the stage is playable */
+    let faceoffClock = 0;
     /* Award a round win the moment a K.O. resolves. Refs are bumped first
      * (no stale-closure risk), then mirrored into state for the HUD. */
     const onRoundWin = (winner: FighterSide) => {
@@ -1427,16 +1500,13 @@ export function BattleArenaModal({
     const loop = (now: number) => {
       const dt = Math.min(now - last, 50);
       last = now;
-      /* Keep the READY? banner up while the 3D rigs stream in, but the whole
-       * pre-match never lasts longer than FACE_OFF_MS — the round starts
-       * promptly whether or not the rigs have landed. */
+      /* The READY? countdown is PAUSED until the 3D stage is playable: the
+       * clock only advances once every rig has landed, been textured, bound
+       * its clips and painted a frame. The round therefore never opens on a
+       * cold canvas — that was the opening freeze. */
       if (m.stage === "faceoff") {
-        faceoffElapsed += dt;
-        if (!rigsReadyRef.current && faceoffElapsed < FACE_OFF_MS) {
-          m.stageMs = 0;
-        } else {
-          m.stageMs = faceoffElapsed;
-        }
+        if (stageReadyRef.current) faceoffClock += dt;
+        m.stageMs = faceoffClock;
       }
       step(m, dt, script, playerSide, onRoundWin);
 
@@ -1658,12 +1728,13 @@ export function BattleArenaModal({
                     side === "creator"
                       ? creatorFighter.fighterClass
                       : challengerFighter.fighterClass;
-                  const x =
-                    cls === "chog_princess"
-                      ? 28
-                      : cls === "void_lord_james"
-                        ? 73
-                        : view.fighters[side].x;
+                  const foeCls =
+                    side === "creator"
+                      ? challengerFighter.fighterClass
+                      : creatorFighter.fighterClass;
+                  /* the anchor follows the fighter's stage slot, so the
+                   * number stays on the body that was actually hit */
+                  const x = stageAnchorX(side, cls, foeCls);
                   return (
                   <div
                     key={`dmg-${side}`}
@@ -1850,13 +1921,36 @@ export function BattleArenaModal({
                 </div>
               )}
 
-              {/* Face-off intro */}
+              {/* Face-off intro — the READY? countdown only starts once the
+                  3D stage has finished loading and painting the fighters. */}
               {view.stage === "faceoff" && (
                 <div className="pointer-events-none absolute inset-0 z-[34] flex items-center justify-center">
-                  <div className="flex flex-col items-center gap-1">
-                    <p className="animate-pop-in whitespace-nowrap bg-gradient-to-r from-red-300 via-amber-200 to-orange-300 bg-clip-text text-4xl font-black tracking-widest text-transparent drop-shadow-[0_0_22px_rgba(239,68,68,0.9)] sm:text-5xl">
-                      ⚔️ READY?
-                    </p>
+                  <div className="flex flex-col items-center gap-2">
+                    {stageReady ? (
+                      <p className="animate-pop-in whitespace-nowrap bg-gradient-to-r from-red-300 via-amber-200 to-orange-300 bg-clip-text text-4xl font-black tracking-widest text-transparent drop-shadow-[0_0_22px_rgba(239,68,68,0.9)] sm:text-5xl">
+                        ⚔️ READY?
+                      </p>
+                    ) : (
+                      <>
+                        <p className="animate-pulse whitespace-nowrap bg-gradient-to-r from-fuchsia-300 via-pink-300 to-cyan-300 bg-clip-text text-3xl font-black tracking-widest text-transparent drop-shadow-[0_0_22px_rgba(217,70,239,0.9)] sm:text-4xl">
+                          ◍ LOADING ARENA
+                        </p>
+                        {/* Streamed clip progress — the bell waits for the rigs */}
+                        <div className="h-1 w-56 overflow-hidden rounded-full bg-white/10">
+                          <div
+                            className="h-full rounded-full bg-gradient-to-r from-fuchsia-500 via-pink-400 to-cyan-300 transition-[width] duration-300"
+                            style={{
+                              width: `${Math.round(
+                                Math.min(1, Math.max(0.02, stageProgress)) * 100,
+                              )}%`,
+                            }}
+                          />
+                        </div>
+                        <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-zinc-400">
+                          Streaming fighter rigs · {Math.round(stageProgress * 100)}%
+                        </p>
+                      </>
+                    )}
                     <p className="text-[10px] font-bold uppercase tracking-[0.35em] text-zinc-400">
                       {nameOf(leftSide)} vs {nameOf(rightSide)} · Best of 3
                     </p>

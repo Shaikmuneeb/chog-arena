@@ -15,18 +15,21 @@ import * as THREE from "three";
 import { FBXLoader } from "three/examples/jsm/loaders/FBXLoader.js";
 import * as SkeletonUtils from "three/examples/jsm/utils/SkeletonUtils.js";
 import {
+  Component,
   Suspense,
   useEffect,
   useMemo,
   useRef,
   useState,
   type MutableRefObject,
+  type ReactNode,
 } from "react";
 import {
   fighter3DConfig,
   type Fighter3DConfig,
   type FighterActionState,
 } from "@/config/fighterModels";
+import { stageSlot } from "@/config/stageLayout";
 import type { FighterClass } from "@/config/fighterClasses";
 
 export type StageFighter3D = {
@@ -38,6 +41,47 @@ export type StageFighter3D = {
   x: number;
   facing: "left" | "right";
 };
+
+/**
+ * What the 3D layer tells the arena about one fighter.
+ *
+ * The arena holds its READY? countdown until every rigged fighter reports
+ * `ready` — that is the signal that the mesh is in, the skin is applied, the
+ * opening clips are bound to the mixer and a frame has actually been
+ * painted. Starting the round before that is what causes the opening freeze.
+ */
+export type StageRigStatus = {
+  side: "creator" | "challenger";
+  /** 0..1 — how much of this fighter's opening clips have landed. */
+  progress: number;
+  /** Fully loaded, textured, bound and painted — the stage can be fought on. */
+  ready: boolean;
+  /** The rig could not be loaded — the match must not wait for it. */
+  failed: boolean;
+};
+
+/**
+ * The clips the arena actually plays.
+ *
+ * `ko` and `victory` are deliberately absent: a knock-out is posed by hand
+ * (the body is laid on its back) and the winner holds the standing
+ * fight-idle, so those two exports are never played. Every other state has
+ * a dedicated Mixamo clip.
+ *
+ * The arena does not start the match until EVERY one of these is in memory
+ * and bound to the mixer. Each file is ~20MB and FBX parsing is CPU-bound,
+ * so a clip that arrives mid-round stalls the fight — waiting for the lot
+ * up front is what keeps the opening exchanges smooth.
+ */
+const PLAYABLE_STATES: readonly FighterActionState[] = [
+  "idle",
+  "lightAttack",
+  "heavyAttack",
+  "block",
+  "hit",
+  "special",
+  "critical",
+];
 
 /**
  * Remove the Mixamo root-motion track from a clip.
@@ -53,30 +97,6 @@ function stripRootMotion(clip: THREE.AnimationClip): THREE.AnimationClip {
     (t) => !/Hips\.position$/i.test(t.name),
   );
   return copy;
-}
-
-/**
- * Fixed stage slots. The fighters stand on a fixed line either side of the
- * CWO lettering and never cross it — no stage-% mapping, no drifting.
- * Screen anchors match these slots so damage numbers stay on the body that
- * was actually hit (the fight sim's x drifts; the models do not).
- */
-const CHARACTER_SLOT: Partial<Record<FighterClass, number>> = {
-  chog_princess: -2.35,
-  void_lord_james: 2.35,
-};
-
-/** Stage-% that lines up with CHARACTER_SLOT under the arena camera. */
-export const VISUAL_ANCHOR_X: Partial<Record<FighterClass, number>> = {
-  chog_princess: 28,
-  void_lord_james: 73,
-};
-
-export function visualAnchorX(
-  fighterClass: FighterClass,
-  fallback = 50,
-): number {
-  return VISUAL_ANCHOR_X[fighterClass] ?? fallback;
 }
 
 /**
@@ -209,52 +229,74 @@ function measureBindBox(object: THREE.Object3D): THREE.Box3 {
  * Every Mixamo export names its clip "mixamo.com", so the clips are RENAMED
  * after their action state — that is what makes `actions[state]` resolve.
  *
- * The clip load is ASYNC (each FBX is ~10-20MB), so a clip may not exist
- * yet when an action fires. Two things make that safe:
- *   1. every clip is pre-fetched as soon as the rig lands;
- *   2. when a clip arrives, the action map is rebuilt and the currently
- *      playing action is re-applied (see `useEffect` on `actions`).
+ * The clip load is ASYNC (each FBX is ~20MB) and parsing it is CPU-bound, so
+ * a clip that arrives mid-round stalls the fight. Everything the arena can
+ * play is therefore fetched in ONE wave, and the arena holds its READY?
+ * countdown until the lot has landed.
+ *
+ * Files are fetched ONCE each: several states usually share the same export
+ * (a special and a critical are often the same FBX) and every file is
+ * ~20MB, so the dedupe is worth real seconds.
  */
 function useFighterActions(
   cfg: Fighter3DConfig,
   group: React.RefObject<THREE.Group | null>,
   wanted: FighterActionState[],
+  onProgress?: (loaded: number, total: number) => void,
 ) {
   const [clips, setClips] = useState<THREE.AnimationClip[]>([]);
   const [loaded, setLoaded] = useState(false);
   const key = wanted.join(",");
 
+  /* keep the progress callback out of the effect deps — an unstable
+   * identity would re-fetch every clip on every render. */
+  const progressRef = useRef(onProgress);
+  progressRef.current = onProgress;
+
   /* fetch the clips this consumer needs, renaming as we go */
   useEffect(() => {
     let cancelled = false;
     const states = (key ? key.split(",") : []) as FighterActionState[];
-    Promise.all(
-      states.map(async (state) => {
-        const group = await loadFbx(clipUrl(cfg, cfg.clips[state]));
-        const clip = group.animations?.[0];
-        if (!clip) return null;
-        /* strip the root motion so the rig never leaves the floor */
-        const copy = stripRootMotion(clip);
-        copy.name = state;
-        return copy;
-      }),
-    )
-      .then((list) => {
-        if (cancelled) return;
-        /* de-duplicate: several states can share one clip file */
-        const seen = new Set<string>();
-        const unique = list.filter((clip): clip is THREE.AnimationClip => {
-          if (!clip) return false;
-          if (seen.has(clip.name)) return false;
-          seen.add(clip.name);
-          return true;
-        });
-        setClips(unique);
-        setLoaded(true);
-      })
-      .catch(() => {
-        if (!cancelled) setLoaded(true);
-      });
+
+    /* one fetch per FILE: map every file to the states that use it */
+    const byUrl = new Map<string, FighterActionState[]>();
+    for (const state of states) {
+      const url = clipUrl(cfg, cfg.clips[state]);
+      const list = byUrl.get(url);
+      if (list) list.push(state);
+      else byUrl.set(url, [state]);
+    }
+
+    const total = byUrl.size;
+    let done = 0;
+
+    (async () => {
+      const groups = await Promise.all(
+        [...byUrl.keys()].map(async (url) => {
+          const group = await loadFbx(url);
+          done += 1;
+          progressRef.current?.(done, total);
+          return { url, group };
+        }),
+      );
+      if (cancelled) return;
+      const out: THREE.AnimationClip[] = [];
+      for (const { url, group } of groups) {
+        const source = group.animations?.[0];
+        if (!source) continue;
+        for (const state of byUrl.get(url) ?? []) {
+          /* strip the root motion so the rig never leaves the floor */
+          const copy = stripRootMotion(source);
+          copy.name = state;
+          out.push(copy);
+        }
+      }
+      setClips(out);
+      setLoaded(true);
+    })().catch(() => {
+      /* a clip that will not load must not strand the match */
+      if (!cancelled) setLoaded(true);
+    });
     return () => {
       cancelled = true;
     };
@@ -276,7 +318,7 @@ function FighterModel({
 }: {
   spec: StageFighter3D;
   fightersRef: MutableRefObject<StageFighter3D[]>;
-  onStatus?: (side: "creator" | "challenger", ok: boolean) => void;
+  onStatus?: (status: StageRigStatus) => void;
 }) {
   const cfg = fighter3DConfig(spec.fighterClass) as Fighter3DConfig;
   const group = useRef<THREE.Group>(null);
@@ -294,9 +336,18 @@ function FighterModel({
   const source = useFBX(clipUrl(cfg, cfg.clips.idle));
   const scene = useMemo(() => SkeletonUtils.clone(source), [source]);
 
-  useEffect(() => {
-    onStatus?.(spec.side, true);
-  }, [spec.side, onStatus]);
+  /* the status callback is kept in a ref so a new identity from the parent
+   * never re-runs the load effects */
+  const statusRef = useRef(onStatus);
+  statusRef.current = onStatus;
+
+  /* ---- readiness ----------------------------------------------------
+   * The arena waits for this signal before it starts the round. A rig is
+   * only "ready" once the mesh is mounted, the skin is applied, the
+   * opening clips are bound to the mixer AND a frame has actually been
+   * painted — anything less and the first punch lands on a stall. */
+  const readyReported = useRef(false);
+  const readyArmed = useRef(false);
 
   /* the skin texture (the FBX's own path is broken) */
   const [texture, setTexture] = useState<THREE.Texture | null>(null);
@@ -336,12 +387,23 @@ function FighterModel({
     materialCache.current = mats;
   }, [scene, texture]);
 
-  /* the stage needs every clip — the fight can throw any of them */
-  const ALL_STATES = Object.keys(cfg.clips) as FighterActionState[];
+  /* only the clips the arena actually plays — the knock-out and victory
+   * exports are never used, and every file is ~20MB */
   const { actions, mixer, loaded } = useFighterActions(
     cfg,
     group,
-    ALL_STATES,
+    PLAYABLE_STATES as FighterActionState[],
+    (done, total) => {
+      /* once the rig is ready the endgame wave keeps loading in the
+       * background — that must never un-ready the fighter */
+      if (readyReported.current) return;
+      statusRef.current?.({
+        side: spec.side,
+        progress: total > 0 ? done / total : 1,
+        ready: false,
+        failed: false,
+      });
+    },
   );
 
   /* ---- play the action for the current state ---- */
@@ -411,6 +473,25 @@ function FighterModel({
 
   /* ---- per-frame: transform + action state machine ---- */
   useFrame((_, delta) => {
+    /* ---- readiness gate --------------------------------------------
+     * The rig is only reported ready AFTER a frame has been painted with
+     * it on screen: the first qualifying frame arms the gate, the next
+     * one reports. That guarantees the arena never starts a round on a
+     * canvas that has not actually drawn the fighter. */
+    if (!readyReported.current) {
+      if (readyArmed.current) {
+        readyReported.current = true;
+        statusRef.current?.({
+          side: spec.side,
+          progress: 1,
+          ready: true,
+          failed: false,
+        });
+      } else if (loaded && textureSettled && actions.idle) {
+        readyArmed.current = true;
+      }
+    }
+
     const live = fightersRef.current.find((f) => f.side === spec.side);
     if (!live || !group.current) return;
 
@@ -423,10 +504,14 @@ function FighterModel({
 
     /* ---- fixed stage slots ------------------------------------------
      * Each character owns a slot on the stage: the Princess stands on the
-     * left of the CWO lettering, James on the right. They never cross it. */
-    const slotX = CHARACTER_SLOT[spec.fighterClass] ?? 0;
+     * left of the CWO lettering, James on the right. They never cross it.
+     * A mirror match (both fighters the same character) splits by role so
+     * the pair never stacks on top of each other. */
     const foe = fightersRef.current.find((f) => f.side !== spec.side);
-    const foeSlotX = foe ? CHARACTER_SLOT[foe.fighterClass] ?? 0 : -slotX;
+    const slotX = stageSlot(spec.side, spec.fighterClass, foe?.fighterClass);
+    const foeSlotX = foe
+      ? stageSlot(foe.side, foe.fighterClass, spec.fighterClass)
+      : -slotX;
 
     /* ---- look at the opponent ---------------------------------------
      * The rigs are authored facing +Z, so the yaw that points a fighter
@@ -648,12 +733,36 @@ function CameraRig() {
 
 /* ------------------------------------------------------------------ the stage */
 
+/**
+ * Catches a rig that fails to load (a broken or missing FBX) so the arena
+ * can carry on without it instead of crashing the whole canvas — and so
+ * the match is never left waiting for a fighter that will never arrive.
+ */
+class RigErrorBoundary extends Component<
+  { children: ReactNode; onError: () => void },
+  { failed: boolean }
+> {
+  state = { failed: false };
+
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+
+  componentDidCatch() {
+    this.props.onError();
+  }
+
+  render() {
+    return this.state.failed ? null : this.props.children;
+  }
+}
+
 function StageScene({
   fightersRef,
   onStatus,
 }: {
   fightersRef: MutableRefObject<StageFighter3D[]>;
-  onStatus?: (side: "creator" | "challenger", ok: boolean) => void;
+  onStatus?: (status: StageRigStatus) => void;
 }) {
   const { size } = useThree();
   const three = fightersRef.current.filter((f) => fighter3DConfig(f.fighterClass));
@@ -680,12 +789,23 @@ function StageScene({
       <pointLight position={[4, 1.6, 4]} intensity={9} color="#8b5cf6" />
       <pointLight position={[0, 0.4, 3]} intensity={5} color="#22d3ee" />
       {three.map((spec) => (
-        <FighterModel
+        <RigErrorBoundary
           key={spec.side}
-          spec={spec}
-          fightersRef={fightersRef}
-          onStatus={onStatus}
-        />
+          onError={() =>
+            onStatus?.({
+              side: spec.side,
+              progress: 1,
+              ready: false,
+              failed: true,
+            })
+          }
+        >
+          <FighterModel
+            spec={spec}
+            fightersRef={fightersRef}
+            onStatus={onStatus}
+          />
+        </RigErrorBoundary>
       ))}
     </>
   );
@@ -700,7 +820,7 @@ export function FighterStage3D({
   onStatus,
 }: {
   fightersRef: MutableRefObject<StageFighter3D[]>;
-  onStatus?: (side: "creator" | "challenger", ok: boolean) => void;
+  onStatus?: (status: StageRigStatus) => void;
 }) {
   return (
     <div className="pointer-events-none absolute inset-0 z-[25]">
