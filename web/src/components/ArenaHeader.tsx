@@ -5,11 +5,9 @@ import {
   useAccount,
   useBalance,
   useChainId,
-  useConnect,
-  useDisconnect,
   useReadContract,
 } from "wagmi";
-import { ChevronDown, LogOut, Swords, Wallet } from "lucide-react";
+import { Wallet } from "lucide-react";
 import {
   CHOG_ARENA_ADDRESS,
   CHOG_NFT_ADDRESS,
@@ -21,6 +19,7 @@ import {
   useFighterProfile,
 } from "@/context/FighterProfileContext";
 import { ProfileModal } from "./ProfileModal";
+import { WalletConnectModal } from "./WalletConnectModal";
 import { monad, monadTestnet } from "@/config/monadChain";
 import { cn, truncateAddress } from "@/lib/utils";
 
@@ -31,16 +30,17 @@ const ZERO = "0x0000000000000000000000000000000000000000";
  *
  * Wallet state is fully driven by wagmi:
  * - useAccount  → address / isConnected
- * - useConnect  → connectors + connect({ connector }) (EIP-6963 aware)
  * - useBalance  → native MON balance for the connected address/chain
- * - useDisconnect → dropdown disconnect
+ *
+ * The wallet picker lives in WalletConnectModal (and the connection state
+ * machine in useWalletConnection) so the header stays a status bar.
  *
  * The wallet area is gated behind a `mounted` flag so the server render and
  * the first client render match (no hydration mismatch on address/balance).
  */
 export function ArenaHeader() {
   const [mounted, setMounted] = useState(false);
-  const [menuOpen, setMenuOpen] = useState(false);
+  const [walletOpen, setWalletOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const { address, isConnected, chainId: walletChainId } = useAccount();
   const { getProfile } = useFighterProfile();
@@ -48,8 +48,6 @@ export function ArenaHeader() {
   // config chain from useChainId).
   const appChainId = useChainId();
   const chainId = walletChainId ?? appChainId;
-  const { connect, connectors, isPending } = useConnect();
-  const { disconnect } = useDisconnect();
   const { data: balance } = useBalance({
     address,
     chainId,
@@ -59,16 +57,6 @@ export function ArenaHeader() {
   useEffect(() => {
     setMounted(true);
   }, []);
-
-  // Close the dropdown on outside click.
-  useEffect(() => {
-    if (!menuOpen) return;
-    function onDocClick() {
-      setMenuOpen(false);
-    }
-    document.addEventListener("click", onDocClick);
-    return () => document.removeEventListener("click", onDocClick);
-  }, [menuOpen]);
 
   const network =
     chainId === monad.id
@@ -180,53 +168,15 @@ export function ArenaHeader() {
                 aria-hidden
               />
             ) : !isConnected ? (
-              /* ---------- Connect: connector list (EIP-6963 + injected) ---------- */
-              <div className="relative" onClick={(e) => e.stopPropagation()}>
-                <button
-                  type="button"
-                  onClick={() => setMenuOpen((v) => !v)}
-                  className="inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-fuchsia-600 to-pink-600 px-4 py-2 font-display text-xs font-bold uppercase tracking-[0.16em] text-white shadow-neon-edge transition-all hover:from-fuchsia-500 hover:to-pink-500"
-                >
-                  <Wallet className="h-4 w-4" aria-hidden />
-                  Connect
-                  <ChevronDown className="h-3.5 w-3.5 opacity-70" aria-hidden />
-                </button>
-
-                {menuOpen && (
-                  <div className="glass-deep absolute right-0 mt-2 w-56 overflow-hidden rounded-xl shadow-2xl shadow-black/60">
-                    <p className="stat-label border-b border-white/5 px-4 py-2.5">
-                      Choose a wallet
-                    </p>
-                    {connectors.length === 0 ? (
-                      <p className="px-4 py-3 text-xs text-zinc-500">
-                        No browser wallets detected. Install MetaMask, Rabby,
-                        or Backpack and reload.
-                      </p>
-                    ) : (
-                      connectors.map((connector) => (
-                        <button
-                          key={connector.uid}
-                          type="button"
-                          disabled={isPending}
-                          onClick={() => {
-                            connect({ connector });
-                            setMenuOpen(false);
-                          }}
-                          className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left font-display text-sm text-zinc-200 transition hover:bg-fuchsia-500/10 hover:text-white disabled:opacity-50"
-                        >
-                          <Wallet className="h-4 w-4 text-zinc-400" aria-hidden />
-                          <span className="flex-1">{connector.name}</span>
-                          {isPending && (
-                            <span className="font-mono text-[10px] text-zinc-500">
-                              connecting…
-                            </span>
-                          )}
-                        </button>
-                      ))
-                    )}
-                  </div>
-                )}
-              </div>
+              /* ---------- Connect: the glass wallet picker ---------- */
+              <button
+                type="button"
+                onClick={() => setWalletOpen(true)}
+                className="inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-fuchsia-600 to-pink-600 px-4 py-2 font-display text-xs font-bold uppercase tracking-[0.16em] text-white shadow-neon-edge transition-all hover:from-fuchsia-500 hover:to-pink-500"
+              >
+                <Wallet className="h-4 w-4" aria-hidden />
+                Connect
+              </button>
             ) : (
               /* ---------- Connected: profile button + address/balance pill ---------- */
               <div className="flex items-center gap-2">
@@ -242,10 +192,9 @@ export function ArenaHeader() {
                   </span>
                 </button>
 
-                <div className="relative" onClick={(e) => e.stopPropagation()}>
                 <button
                   type="button"
-                  onClick={() => setMenuOpen((v) => !v)}
+                  onClick={() => setWalletOpen(true)}
                   className="inline-flex items-center gap-2.5 rounded-full border border-white/10 bg-white/5 px-3 py-1.5 backdrop-blur-md transition hover:border-fuchsia-400/50 hover:bg-fuchsia-500/10"
                 >
                   <span className={cn("h-1.5 w-1.5 rounded-full", network.dot)} />
@@ -255,47 +204,17 @@ export function ArenaHeader() {
                   <span className="hidden font-mono text-xs font-medium text-amber-300 sm:inline">
                     {monBalance}
                   </span>
-                  <ChevronDown className="h-3.5 w-3.5 text-zinc-500" aria-hidden />
                 </button>
-
-                {menuOpen && (
-                  <div className="glass-deep absolute right-0 mt-2 w-60 overflow-hidden rounded-xl shadow-2xl shadow-black/60">
-                    <div className="border-b border-white/5 px-4 py-3">
-                      <p className="font-mono text-xs font-semibold text-zinc-100">
-                        {address ? truncateAddress(address) : ""}
-                      </p>
-                      <p className="mt-1 text-xs text-zinc-500">
-                        Balance:{" "}
-                        <span className="font-mono font-semibold text-amber-300">
-                          {monBalance}
-                        </span>
-                      </p>
-                      <p className="mt-0.5 flex items-center gap-1.5 font-mono text-xs text-zinc-500">
-                        <span
-                          className={cn("h-1.5 w-1.5 rounded-full", network.dot)}
-                        />
-                        {network.label}
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        disconnect();
-                        setMenuOpen(false);
-                      }}
-                      className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left font-display text-sm text-zinc-200 transition hover:bg-rose-500/10 hover:text-rose-200"
-                    >
-                      <LogOut className="h-4 w-4 text-zinc-400" aria-hidden />
-                      Disconnect
-                    </button>
-                  </div>
-                )}
-                </div>
               </div>
             )}
           </div>
         </div>
       </header>
+
+      <WalletConnectModal
+        open={walletOpen}
+        onClose={() => setWalletOpen(false)}
+      />
 
       <ProfileModal
         open={profileOpen}
