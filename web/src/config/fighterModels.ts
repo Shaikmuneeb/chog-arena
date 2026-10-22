@@ -96,3 +96,33 @@ export const BATTLE_ROSTER: readonly FighterClass[] = [
  * slot in the VS screen and on the profile card.
  */
 export const DEFAULT_FIGHTER_CLASS: FighterClass = "void_lord_james";
+
+/**
+ * The characters that ship a rigged 3D model.
+ *
+ * A duel is always fought between two DIFFERENT characters: a mirror match
+ * would load two identical models, two identical stat lines and two
+ * identical nameplates.
+ */
+export const MODEL_ROSTER: readonly FighterClass[] = [
+  "void_lord_james",
+  "chog_princess",
+];
+
+/**
+ * Resolve the fighter for one side of a duel against the other side.
+ *
+ * The preferred pick wins whenever it is a character that actually has a
+ * model AND it is not the opponent — that is the player's own choice and
+ * it is respected. Otherwise the other 3D character is used, so the two
+ * sides can never end up loading the same rig.
+ */
+export function pickOpposingFighter(
+  preferred: FighterClass | undefined,
+  opponent: FighterClass,
+): FighterClass {
+  if (preferred && preferred !== opponent && has3DModel(preferred)) {
+    return preferred;
+  }
+  return opponent === "void_lord_james" ? "chog_princess" : "void_lord_james";
+}

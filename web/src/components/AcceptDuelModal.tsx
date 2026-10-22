@@ -27,7 +27,10 @@ import {
   useFighterProfile,
 } from "@/context/FighterProfileContext";
 import { FIGHTER_CLASS_META, type FighterClass } from "@/config/fighterClasses";
-import { DEFAULT_FIGHTER_CLASS } from "@/config/fighterModels";
+import {
+  DEFAULT_FIGHTER_CLASS,
+  pickOpposingFighter,
+} from "@/config/fighterModels";
 import dynamic from "next/dynamic";
 
 const FighterPreview3D = dynamic(
@@ -507,7 +510,18 @@ export function AcceptDuelModal({ duel, onClose, onSettled }: AcceptDuelModalPro
   const busy = isPending || isConfirming;
   const pot = duel.betAmount * 2n;
 
-  /* Fighter identities for the battle stage. */
+  /* Fighter identities for the battle stage.
+   *
+   * The two sides must never be the same character. The opponent is
+   * resolved first, then the local player's class is resolved AGAINST it:
+   * a mirror match would load two identical models, two identical stat
+   * lines and two identical HUD nameplates. */
+  const creatorClass = duel.npc
+    ? duel.npc.fighterClass
+    : pickOpposingFighter(
+        getProfile(duel.creator)?.fighterClass,
+        getProfile(address)?.fighterClass ?? DEFAULT_FIGHTER_CLASS,
+      );
   const creatorFighter: FighterDescriptor = duel.npc
     ? {
         address: duel.npc.address,
@@ -519,12 +533,15 @@ export function AcceptDuelModal({ duel, onClose, onSettled }: AcceptDuelModalPro
         address: duel.creator,
         name: visibleFighterName(
           getProfile(duel.creator)?.username,
-          getProfile(duel.creator)?.fighterClass ?? DEFAULT_FIGHTER_CLASS,
+          creatorClass,
         ),
         title: getProfile(duel.creator)?.title,
-        fighterClass: getProfile(duel.creator)?.fighterClass ?? DEFAULT_FIGHTER_CLASS,
+        fighterClass: creatorClass,
       };
-  const challengerClass = getProfile(address)?.fighterClass ?? DEFAULT_FIGHTER_CLASS;
+  const challengerClass = pickOpposingFighter(
+    getProfile(address)?.fighterClass,
+    creatorFighter.fighterClass,
+  );
   const challengerFighter: FighterDescriptor = {
     address: address ?? ZERO,
     name: visibleFighterName(getProfile(address)?.username, challengerClass),

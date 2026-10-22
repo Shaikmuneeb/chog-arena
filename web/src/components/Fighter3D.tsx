@@ -176,6 +176,13 @@ export function textureUrl(cfg: Fighter3DConfig): string {
  * The exported FBX references its diffuse map through a relative
  * `<hash>.fbm/<file>.png` path that does not exist next to the archive, so
  * without this the character would spawn untextured (white).
+ *
+ * The material is CLONED for this instance. `SkeletonUtils.clone` shares
+ * material instances with the source rig and with every other clone of the
+ * same FBX, so a shared material means the hit flash on one fighter tints
+ * the other, and a rig cloned in a later round inherits the emissive the
+ * last round left behind. Owning the material keeps the colours — and the
+ * damage flash — strictly per fighter.
  */
 function applySkinTexture(object: THREE.Object3D, texture: THREE.Texture) {
   texture.colorSpace = THREE.SRGBColorSpace;
@@ -184,18 +191,22 @@ function applySkinTexture(object: THREE.Object3D, texture: THREE.Texture) {
   object.traverse((node) => {
     const mesh = node as THREE.Mesh;
     if (!mesh.isMesh) return;
-    const materials = Array.isArray(mesh.material)
+    const source = Array.isArray(mesh.material)
       ? mesh.material
       : [mesh.material];
-    for (const material of materials) {
-      if (!material) continue;
-      const mat = material as THREE.MeshPhongMaterial;
+    const owned = source.map((entry) => {
+      if (!entry) return entry;
+      const mat = (entry as THREE.MeshPhongMaterial).clone() as THREE.MeshPhongMaterial;
       mat.map = texture;
       mat.color?.set(0xffffff);
       mat.shininess = 14;
       mat.specular?.set(0x1a1a1a);
+      /* a fresh material starts untinted — no red flash carried over */
+      mat.emissive?.setRGB(0, 0, 0);
       mat.needsUpdate = true;
-    }
+      return mat;
+    });
+    mesh.material = Array.isArray(mesh.material) ? owned : owned[0];
   });
 }
 

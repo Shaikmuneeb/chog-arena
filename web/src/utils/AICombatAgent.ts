@@ -59,6 +59,10 @@ export type AgentProfile = {
   speed: number;
   /** How eagerly it presses an attack (0..1). */
   aggression: number;
+  /** How readily it gives ground when a heavy comes in (0..1). */
+  evadeBias: number;
+  /** The strike kinds it leads with, most preferred first. */
+  preferred: AgentAttackKind[];
   /** The combo routes it can run, most preferred first. */
   routes: AgentAttackKind[][];
   /** Cooldown after a strike of each kind (ms). */
@@ -74,34 +78,39 @@ export type AgentProfile = {
  * rhythm — a heavy bruiser and a glass duelist never behave the same way.
  */
 export const AGENT_PROFILES: Record<FighterClass, AgentProfile> = {
-  // Void Lord James — a heavy bruiser. He lives inside your guard and
-  // hits like a truck, so he takes the tightest range on the roster and
-  // answers with jabs that feed a slam.
+  // Void Lord James — a HEAVY close-range brawler. He fights inside your
+  // guard, leads with the slam and does not run from a heavy: he takes it
+  // and answers harder. Relentless rhythm, slow to give ground.
   void_lord_james: {
     engageRange: 23,
     speed: 18,
-    aggression: 0.74,
+    aggression: 0.82,
+    evadeBias: 0.3,
+    preferred: ["heavy", "light", "special"],
     routes: [
+      ["heavy", "light", "heavy"],
       ["light", "heavy", "light"],
       ["heavy", "special"],
-      ["light", "light", "heavy"],
     ],
-    cooldowns: { light: 240, heavy: 600, special: 880, critical: 1550 },
-    paceMs: 320,
+    cooldowns: { light: 230, heavy: 520, special: 880, critical: 1550 },
+    paceMs: 260,
   },
-  // Chog Princess — a duelist. She hangs at the edge of her light reach
-  // and punishes anyone who gives her the room.
+  // Chog Princess — an AGILE evasive striker. She holds the edge of her
+  // light reach, leads with the jab and slips out of a heavy rather than
+  // trading through it. Quick feet, longer resets.
   chog_princess: {
     engageRange: 28,
     speed: 20,
-    aggression: 0.58,
+    aggression: 0.55,
+    evadeBias: 0.9,
+    preferred: ["light", "special", "heavy"],
     routes: [
-      ["heavy", "special"],
-      ["light", "heavy"],
-      ["light", "special"],
+      ["light", "special", "light"],
+      ["light", "heavy", "special"],
+      ["special", "light"],
     ],
-    cooldowns: { light: 300, heavy: 640, special: 1000, critical: 1800 },
-    paceMs: 420,
+    cooldowns: { light: 240, heavy: 640, special: 900, critical: 1700 },
+    paceMs: 340,
   },
   // Crimson Lord Benja — fast and brutal. He is always in your face and
   // chains the shortest strikes together.
@@ -109,6 +118,8 @@ export const AGENT_PROFILES: Record<FighterClass, AgentProfile> = {
     engageRange: 23,
     speed: 34,
     aggression: 0.88,
+    evadeBias: 0.55,
+    preferred: ["light", "heavy", "special"],
     routes: [
       ["light", "light", "heavy"],
       ["light", "heavy", "special"],
@@ -122,6 +133,8 @@ export const AGENT_PROFILES: Record<FighterClass, AgentProfile> = {
     engageRange: 25,
     speed: 24,
     aggression: 0.76,
+    evadeBias: 0.6,
+    preferred: ["light", "heavy", "special"],
     routes: [
       ["light", "heavy", "special"],
       ["light", "light", "heavy"],
@@ -135,6 +148,8 @@ export const AGENT_PROFILES: Record<FighterClass, AgentProfile> = {
     engageRange: 26,
     speed: 26,
     aggression: 0.66,
+    evadeBias: 0.7,
+    preferred: ["light", "heavy", "special"],
     routes: [
       ["light", "heavy"],
       ["heavy", "special"],
@@ -149,6 +164,8 @@ export const AGENT_PROFILES: Record<FighterClass, AgentProfile> = {
     engageRange: 23,
     speed: 14,
     aggression: 0.52,
+    evadeBias: 0.25,
+    preferred: ["heavy", "special", "light"],
     routes: [
       ["heavy", "special"],
       ["heavy"],
@@ -192,7 +209,11 @@ export type AgentContext = {
   self: AgentFighterView;
   /** The fighter it is fighting. */
   foe: AgentFighterView;
-  /** This fighter's own profile. */
+  /** A unique id for this fighter instance — the brain's own identity. */
+  selfId: string;
+  /** A unique id for the opponent — what this brain is locked onto. */
+  foeId: string;
+  /** This fighter's own profile, read from the LOADED fighter config. */
   profile: AgentProfile;
   /** The opponent's profile — the standoff is the middle of the two
    *  fighting ranges, so both brains agree on where to stand and the
@@ -201,10 +222,11 @@ export type AgentContext = {
   /** The track the fighter is confined to (stage %). */
   track: readonly [number, number];
   /** The opponent's track — together they define the closest two fighters
-   *  can ever stand, which is what the standoff is measured against. */
+   * can ever stand, which is what the standoff is measured against. */
   foeTrack: readonly [number, number];
-  /** Fire a strike — the arena decides whether it is allowed. */
-  strike: (kind: AgentAttackKind) => void;
+  /** Fire a strike at the locked-on opponent. The arena refuses anything
+   *  aimed at the wrong target. */
+  strike: (kind: AgentAttackKind, targetId: string) => void;
 };
 
 /** How long the agent keeps a route alive while it cannot reach. */
@@ -228,6 +250,8 @@ export class AICombatAgent {
   state: AgentState = "approach";
   /** Why the agent is doing what it is doing this frame (debug/HUD). */
   reason = "idle";
+  /** The unique id of the opponent this brain is locked onto. */
+  targetId = "";
   /** ms spent in the current state. */
   stateMs = 0;
   /** The strike sequence being executed. */
@@ -270,6 +294,9 @@ export class AICombatAgent {
   update(dt: number, ctx: AgentContext): void {
     const { self, foe } = ctx;
     this.stateMs += dt;
+    /* The brain is locked onto ONE opponent id — the hitbox it tracks
+     * always belongs to that exact fighter. */
+    this.targetId = ctx.foeId;
 
     if (this.paceMs > 0) this.paceMs = Math.max(0, this.paceMs - dt);
     if (this.evadeLockMs > 0) this.evadeLockMs = Math.max(0, this.evadeLockMs - dt);
@@ -461,9 +488,11 @@ export class AICombatAgent {
       return;
     }
 
-    /* Fire it. The arena has the last word on whether it is allowed. */
+    /* Fire it. The arena has the last word on whether it is allowed, and
+     * the target id travels with it so the strike can only ever land on
+     * the fighter this brain is locked onto. */
     this.reason = "fired";
-    ctx.strike(kind);
+    ctx.strike(kind, ctx.foeId);
     this.cooldown[kind] = profile.cooldowns[kind];
     this.step += 1;
     this.routeWaitMs = 0;
@@ -482,7 +511,12 @@ export class AICombatAgent {
         (kind) =>
           self.meter >= AGENT_METER_COST[kind] && this.cooldown[kind] <= 0,
       );
-      if (usable.length) return usable;
+      if (!usable.length) continue;
+      /* The fighter's own preference orders the sequence: a brawler leads
+       * with the slam, a skirmisher leads with the jab. */
+      return usable.sort(
+        (a, b) => profile.preferred.indexOf(a) - profile.preferred.indexOf(b),
+      );
     }
     return [];
   }
@@ -531,8 +565,11 @@ export class AICombatAgent {
   }
 
   private enterEvade(ctx: AgentContext, durationMs: number): void {
+    /* How readily this character gives ground: a brawler barely moves,
+     * a skirmisher slips all the way out. */
+    const bias = ctx.profile.evadeBias;
     this.setState("evade");
-    this.evadeMs = durationMs;
+    this.evadeMs = Math.round(durationMs * (0.5 + bias * 0.7));
     /* A short lockout after the evade, so the agent cannot bounce in and
      * out of the state while the threat is still on screen. */
     this.evadeLockMs = EVADE_LOCKOUT_MS;

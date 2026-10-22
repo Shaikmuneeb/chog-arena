@@ -17,7 +17,7 @@ import { stageAnchorX } from "@/config/stageLayout";
 import { setChogScene } from "@/lib/chogTheme";
 import type { StageFighter3D } from "./Fighter3D";
 
-/* three.js + R3F are heavy — load the 3D layer only when a duel starts. */
+/* three.js + R3F are heavy â€” load the 3D layer only when a duel starts. */
 const FighterStage3D = dynamic(
   () => import("./Fighter3D").then((m) => m.FighterStage3D),
   { ssr: false },
@@ -144,7 +144,7 @@ type Stage = "faceoff" | "roundintro" | "fight" | "ko" | "verdict";
 type AttackKind = "light" | "heavy" | "special" | "critical";
 
 /**
- * Map the simulation onto the 3D animation states — every strike kind gets
+ * Map the simulation onto the 3D animation states â€” every strike kind gets
  * its own Mixamo clip (light / heavy / special / critical).
  */
 
@@ -155,7 +155,7 @@ const MOVE_SPEED = 24; // %/s player slide speed
 /**
  * How long each strike's animation is held, so the full Mixamo clip can
  * play instead of being cut off after the first few frames. The clips run
- * 2-5s, the old pose window was only ~300ms — that is why the fighters
+ * 2-5s, the old pose window was only ~300ms â€” that is why the fighters
  * looked frozen.
  */
 const ACTION_HOLD: Record<AttackKind, number> = {
@@ -170,7 +170,7 @@ const HIT_HOLD = 640;
 
 /**
  * The pre-match "READY?" intro. The countdown is PAUSED while the 3D rigs
- * stream in and the canvas paints them — it only starts running once the
+ * stream in and the canvas paints them â€” it only starts running once the
  * stage is playable, so the round never opens on a cold, stalling canvas.
  */
 const FACE_OFF_MS = 2500;
@@ -214,7 +214,7 @@ const RECOVER: Record<AttackKind, number> = {
   special: 280,
   critical: 340,
 };
-/** Center-to-center reach (stage %) for each attack — shared with the AI
+/** Center-to-center reach (stage %) for each attack â€” shared with the AI
  *  agent so the brain and the hit detection always agree on what lands. */
 const REACH = AGENT_REACH;
 const MOVE_FX_MS: Record<SpecialMove["vfxType"], number> = {
@@ -275,7 +275,7 @@ type FighterRT = {
   toward: boolean;
   leanDir: "forward" | "retreat" | null;
   activeMoveName: string | null;
-  /** The strike currently being animated — drives which Mixamo clip plays. */
+  /** The strike currently being animated â€” drives which Mixamo clip plays. */
   actionKind: AttackKind | null;
   /** ms left on the current animation, so the clip can play to its end. */
   actionTimer: number;
@@ -314,7 +314,7 @@ type MatchState = {
   heldRight: boolean;
   heldBlock: boolean;
   attackQueued: AttackKind | null;
-  /** One local AI brain per fighter — stepped every frame by the game loop. */
+  /** One local AI brain per fighter â€” stepped every frame by the game loop. */
   agents: Record<FighterSide, AICombatAgent>;
   aiNextMs: number;
   aiAction: AiAction | null;
@@ -389,7 +389,11 @@ function fighterLabel(name: string, fighterClass: FighterClass): string {
   return FIGHTER_CLASS_META[fighterClass].label;
 }
 
-function createMatch(script: MatchScript, playerSide: PlayerSide): MatchState {
+function createMatch(
+  script: MatchScript,
+  playerSide: PlayerSide,
+  fighters: Record<FighterSide, FighterDescriptor>,
+): MatchState {
   const playerX = playerSide === "left" ? 32 : 68;
   const oppX = playerSide === "left" ? 68 : 32;
   const playerFacing: "left" | "right" = playerSide === "left" ? "right" : "left";
@@ -439,8 +443,8 @@ function createMatch(script: MatchScript, playerSide: PlayerSide): MatchState {
     heldBlock: false,
     attackQueued: null,
     agents: {
-      creator: new AICombatAgent(agentProfileFor(script.creatorClass)),
-      challenger: new AICombatAgent(agentProfileFor(script.challengerClass)),
+      creator: new AICombatAgent(agentProfileFor(fighters.creator.fighterClass)),
+      challenger: new AICombatAgent(agentProfileFor(fighters.challenger.fighterClass)),
     },
     aiNextMs: 400,
     aiAction: null,
@@ -485,7 +489,7 @@ function createMatch(script: MatchScript, playerSide: PlayerSide): MatchState {
  * Which Mixamo clip a fighter should be playing right now.
  *
  * The strike's animation outlives its damage window (ACTION_HOLD), so the
- * clip plays to the end instead of being cut after the first few frames —
+ * clip plays to the end instead of being cut after the first few frames â€”
  * that is what made the fighters look frozen mid-punch.
  */
 function fighterActionState(f: FighterRT): FighterActionState {
@@ -717,7 +721,7 @@ function startRound(
   ai.hitTimer = 0;
   p.nextActionMs = 500;
   ai.nextActionMs = 500;
-  /* A fresh round means a fresh brain — no leftover route, cooldown or
+  /* A fresh round means a fresh brain â€” no leftover route, cooldown or
    * evade state carries into the next fight. */
   m.agents.creator.reset();
   m.agents.challenger.reset();
@@ -777,7 +781,8 @@ function startKO(
   win.actionTimer = 0;
   m.cinematic = { id: ++m.fxId, kind: "ko" };
   m.cinematicMs = 750;
-  playHitSfx();
+  /* The knock-out strike that emptied the health bar already sounded when
+   * it landed — the K.O. adds no second impact. */
 }
 
 function triggerSecondWind(m: MatchState, p: FighterRT) {
@@ -842,7 +847,7 @@ function startStrike(
   };
   f.activeMoveName = move ? move.name : null;
   /* the animation outlives the strike's damage window so the whole Mixamo
-   * clip can play — the pose alone only lasted ~300ms. */
+   * clip can play â€” the pose alone only lasted ~300ms. */
   f.actionKind = kind;
   f.actionTimer = ACTION_HOLD[kind];
   f.pose = "attack";
@@ -859,7 +864,7 @@ function applyHit(
   playerSide: PlayerSide,
 ) {
   const dist = Math.abs(attacker.x - defender.x);
-  if (dist > REACH[a.kind]) return; // whiff — out of range! No sound, no damage.
+  if (dist > REACH[a.kind]) return; // whiff â€” out of range! No sound, no damage.
   if (defender.shieldMs > 0) return; // invulnerable
 
   const crit = a.kind === "critical" || a.kind === "special";
@@ -914,7 +919,9 @@ function applyHit(
   // 90ms arcade hit-stop freeze on heavy hits
   m.hitStopMs = a.kind === "light" ? 60 : 90;
   m.camShakeMs = a.kind === "light" ? 280 : 440;
-  playHitSfx();
+  /* ONE impact sound per landed hit, and only here — inside applyHit,
+   * which is the only place damage is actually applied. A swing that
+   * whiffs never reaches this line, so it never makes a sound. */
   if (a.move) playImpactSfx(impactCueFor(a.move.soundCue));
   else playImpactSfx(crit ? "crit" : a.kind === "heavy" ? "slam" : "slash");
 
@@ -1009,7 +1016,7 @@ function updateAttack(
 /**
  * Drive a fighter with its LOCAL AI AGENT.
  *
- * The agent owns the tactics — approach, combo, evade — and is stepped
+ * The agent owns the tactics â€” approach, combo, evade â€” and is stepped
  * here, once per animation frame, from the arena's single game loop. It
  * is a pure in-browser state machine: no timers, no network, no audio
  * dependency, so a decision lands on the very next frame.
@@ -1020,6 +1027,7 @@ function updateAutoFighter(
   script: MatchScript,
   playerSide: PlayerSide,
   side: FighterSide,
+  fighters: Record<FighterSide, FighterDescriptor>,
 ) {
   const f = m.fighters[side];
   const foeSide: FighterSide = side === "creator" ? "challenger" : "creator";
@@ -1027,16 +1035,40 @@ function updateAutoFighter(
   const agent = m.agents[side];
   const track = side === "creator" ? oppTrack(playerSide) : playerTrack(playerSide);
   const foeTrack = side === "creator" ? playerTrack(playerSide) : oppTrack(playerSide);
+  /* The brain reads the LOADED fighter â€” its class, and the unique id it
+   * is locked onto. */
+  const selfId = fighterInstanceId(side, fighters[side]);
+  const foeId = fighterInstanceId(foeSide, fighters[foeSide]);
 
   agent.update(dt, {
     self: f,
     foe,
+    selfId,
+    foeId,
     profile: agent.profile,
     foeProfile: m.agents[foeSide].profile,
     track,
     foeTrack,
-    strike: (kind: AgentAttackKind) => startStrike(m, side, kind, script),
+    strike: (kind: AgentAttackKind, targetId: string) => {
+      /* a strike aimed at anything but the locked-on opponent is a
+       * mis-aim and is dropped */
+      if (targetId !== foeId) return;
+      startStrike(m, side, kind, script);
+    },
   });
+}
+
+/**
+ * A unique id for a fighter instance.
+ *
+ * The AI brain locks onto these, so a strike can only ever be resolved
+ * against one exact opponent â€” never "the other side".
+ */
+function fighterInstanceId(
+  side: FighterSide,
+  fighter: FighterDescriptor,
+): string {
+  return `${side}:${fighter.fighterClass}:${fighter.address}`;
 }
 
 
@@ -1079,6 +1111,7 @@ function updateFight(
   dt: number,
   script: MatchScript,
   playerSide: PlayerSide,
+  fighters: Record<FighterSide, FighterDescriptor>,
 ) {
   m.timer -= dt / 1000;
   if (m.timer <= 0) {
@@ -1091,8 +1124,8 @@ function updateFight(
   /* Spectator mode: no manual input. BOTH fighters are driven by the same
    * auto-fighter brain, so they square up, close the distance and trade
    * strikes instead of one standing still. */
-  updateAutoFighter(m, dt, script, playerSide, "creator");
-  updateAutoFighter(m, dt, script, playerSide, "challenger");
+  updateAutoFighter(m, dt, script, playerSide, "creator", fighters);
+  updateAutoFighter(m, dt, script, playerSide, "challenger", fighters);
   updateAttack(m, p, dt, true, script, playerSide);
   updateAttack(m, ai, dt, false, script, playerSide);
   tickFighter(p, dt);
@@ -1105,6 +1138,7 @@ function step(
   dt: number,
   script: MatchScript,
   playerSide: PlayerSide,
+  fighters: Record<FighterSide, FighterDescriptor>,
   onRoundWin?: (winner: FighterSide) => void,
 ) {
   m.stageMs += dt;
@@ -1125,7 +1159,7 @@ function step(
       }
       break;
     case "fight":
-      updateFight(m, dt, script, playerSide);
+      updateFight(m, dt, script, playerSide, fighters);
       break;
     case "ko":
       if (m.stageMs >= m.stageDur) {
@@ -1159,7 +1193,7 @@ type BattleArenaModalProps = {
   isOpen?: boolean;
   /** Which side of the stage the local player occupies. */
   playerSide?: PlayerSide;
-  /** Verdict "Play Again" — re-runs the on-chain stake flow for a rematch. */
+  /** Verdict "Play Again" â€” re-runs the on-chain stake flow for a rematch. */
   onPlayAgain?: () => void;
   /** While the rematch stake is awaiting wallet/chain confirmation. */
   onPlayAgainBusy?: boolean;
@@ -1250,7 +1284,7 @@ export function BattleArenaModal({
    * Fighters that ship a rigged Meshy model are drawn in a transparent R3F
    * canvas that sits behind the 2D sprites; everyone else keeps the 2D
    * treatment. The array is mutated in place every frame so the canvas
-   * never re-renders — it just reads the latest values in useFrame. */
+   * never re-renders â€” it just reads the latest values in useFrame. */
   const fighters3DRef = useRef<StageFighter3D[]>([
     {
       side: "creator",
@@ -1270,7 +1304,7 @@ export function BattleArenaModal({
   /* ================= 3D STAGE READINESS =================
    * The 3D layer streams ~200MB of Mixamo rigs before the bell. The match
    * is HELD in the face-off until every rigged fighter reports that it is
-   * loaded, textured, bound to its clips and has painted a frame — that is
+   * loaded, textured, bound to its clips and has painted a frame â€” that is
    * what keeps the opening punch off a cold, stalling canvas. */
   const [rigStatus, setRigStatus] = useState<Record<FighterSide, StageRigStatus>>(
     {
@@ -1309,7 +1343,7 @@ export function BattleArenaModal({
     return sides;
   }, [creatorFighter.fighterClass, challengerFighter.fighterClass]);
 
-  /* The stage is playable once every rigged fighter has reported in —
+  /* The stage is playable once every rigged fighter has reported in â€”
    * either ready, or failed (a broken rig must not freeze the match). */
   const stageReady = gatedSides.every(
     (side) => rigStatus[side].ready || rigStatus[side].failed,
@@ -1328,7 +1362,7 @@ export function BattleArenaModal({
   }, [gatedSides, rigStatus]);
 
   /* Safety net: a rig that never reports in (a hung fetch) must not freeze
-   * the match — after the grace period the stage is released anyway. */
+   * the match â€” after the grace period the stage is released anyway. */
   useEffect(() => {
     const t = setTimeout(() => {
       setRigStatus((prev) => {
@@ -1347,7 +1381,7 @@ export function BattleArenaModal({
   const nameOf = (side: FighterSide): string =>
     side === "creator" ? creatorFighter.name : challengerFighter.name;
 
-  /* Winner/loser sides + Second Wind resolution — computed once. */
+  /* Winner/loser sides + Second Wind resolution â€” computed once. */
   const script = useMemo<MatchScript | null>(() => {
     if (!outcome) return null;
     const creatorWon =
@@ -1391,11 +1425,14 @@ export function BattleArenaModal({
   /* ================= REAL-TIME GAME LOOP =================
    * Single rAF loop: step the ref-based match state, then mirror a plain
    * view object into React state for rendering. Never re-triggered by view
-   * updates — only by isOpen + a fresh confirmed outcome. */
+   * updates â€” only by isOpen + a fresh confirmed outcome. */
   useEffect(() => {
     if (!isOpen || !outcome || !script) return;
     resetArenaAudio();
-    const m = createMatch(script, playerSide);
+    const m = createMatch(script, playerSide, {
+    creator: creatorFighter,
+    challenger: challengerFighter,
+  });
     matchRef.current = m;
     const snap = snapshot(m);
     viewRef.current = snap;
@@ -1404,7 +1441,7 @@ export function BattleArenaModal({
     let raf = 0;
     let last = performance.now();
     let lastPaint = 0;
-    /** the READY? clock — it only runs while the stage is playable */
+    /** the READY? clock â€” it only runs while the stage is playable */
     let faceoffClock = 0;
     /* Award a round win the moment a K.O. resolves. Refs are bumped first
      * (no stale-closure risk), then mirrored into state for the HUD. */
@@ -1423,15 +1460,18 @@ export function BattleArenaModal({
       /* The READY? countdown is PAUSED until the 3D stage is playable: the
        * clock only advances once every rig has landed, been textured, bound
        * its clips and painted a frame. The round therefore never opens on a
-       * cold canvas — that was the opening freeze. */
+       * cold canvas â€” that was the opening freeze. */
       if (m.stage === "faceoff") {
         if (stageReadyRef.current) faceoffClock += dt;
         m.stageMs = faceoffClock;
       }
-      step(m, dt, script, playerSide, onRoundWin);
+      step(m, dt, script, playerSide, {
+      creator: creatorFighter,
+      challenger: challengerFighter,
+    }, onRoundWin);
 
       /* Mirror the fight state into the 3D layer every frame (mutated in
-       * place — the canvas does not re-render). React only paints when the
+       * place â€” the canvas does not re-render). React only paints when the
        * HUD actually changes, otherwise setState-every-frame stalls the
        * overlay several seconds behind the audio and the hit markers. */
       for (const entry of fighters3DRef.current) {
@@ -1469,7 +1509,7 @@ export function BattleArenaModal({
   const leftDesc = leftSide === "challenger" ? challengerFighter : creatorFighter;
   const rightDesc = rightSide === "challenger" ? challengerFighter : creatorFighter;
 
-  /* Dynamic Stage Camera & Zoom — subtle push-in as the fighters close, with
+  /* Dynamic Stage Camera & Zoom â€” subtle push-in as the fighters close, with
    * the pivot low enough that the 3D fighters never clip out of frame. */
   const dist = Math.abs(view.fighters.creator.x - view.fighters.challenger.x);
   const closeRatio = Math.max(0, Math.min(1, (65 - dist) / 45));
@@ -1478,7 +1518,7 @@ export function BattleArenaModal({
   const midX = (view.fighters.creator.x + view.fighters.challenger.x) / 2;
   const cameraPanX = (50 - midX) * 0.22;
 
-  /* The match winner is decided STRICTLY from the manual round scoreboard —
+  /* The match winner is decided STRICTLY from the manual round scoreboard â€”
    * never from the pre-rolled on-chain outcome. First to 2 round wins. */
   const manualPlayerWon = playerWins >= 2;
   const leftWins = leftSide === "challenger" ? playerWins : opponentWins;
@@ -1506,9 +1546,9 @@ export function BattleArenaModal({
                   {formatMon(outcome.pot)} MON
                 </p>
                 <p className="whitespace-nowrap text-[9px] font-bold uppercase tracking-widest text-red-300/90">
-                  {view.round === 3 ? "FINAL ROUND" : `ROUND ${view.round}`} · Orbs{" "}
+                  {view.round === 3 ? "FINAL ROUND" : `ROUND ${view.round}`} Â· Orbs{" "}
                   <span className="text-amber-300">
-                    {leftWins}–{rightWins}
+                    {leftWins}â€“{rightWins}
                   </span>
                 </p>
               </div>
@@ -1558,7 +1598,7 @@ export function BattleArenaModal({
                   />
                 )}
 
-                {/* Arena floor — perspective grid only, no dark slab */}
+                {/* Arena floor â€” perspective grid only, no dark slab */}
                 <div className="absolute inset-x-0 bottom-0 h-[38%]">
                   <svg
                     className="absolute inset-0 h-full w-full"
@@ -1589,9 +1629,9 @@ export function BattleArenaModal({
                     />
                   </svg>
                   {[
-                    { left: "18%", top: "30%", glyph: "ᛝ" },
-                    { left: "48%", top: "55%", glyph: "ᛟ" },
-                    { left: "76%", top: "25%", glyph: "ᛉ" },
+                    { left: "18%", top: "30%", glyph: "á›" },
+                    { left: "48%", top: "55%", glyph: "á›Ÿ" },
+                    { left: "76%", top: "25%", glyph: "á›‰" },
                   ].map((rune) => (
                     <span
                       key={rune.glyph}
@@ -1604,7 +1644,7 @@ export function BattleArenaModal({
                   ))}
                 </div>
 
-                {/* Ambient fighter lighting — soft backlight spots */}
+                {/* Ambient fighter lighting â€” soft backlight spots */}
                 {(["creator", "challenger"] as const).map((side) => {
                   const f = view.fighters[side];
                   const anchor = { left: `${f.x}%` };
@@ -1632,7 +1672,7 @@ export function BattleArenaModal({
                   );
                 })}
 
-                {/* 3D fighter layer — the canvas IS the stage: rigged Mixamo
+                {/* 3D fighter layer â€” the canvas IS the stage: rigged Mixamo
                     meshes, lit and animated, filling the whole viewport. */}
                 {(has3DModel(creatorFighter.fighterClass) ||
                   has3DModel(challengerFighter.fighterClass)) && (
@@ -1798,7 +1838,7 @@ export function BattleArenaModal({
                 </div>
               )}
 
-              {/* Signature move — a light banner, the animation plays through */}
+              {/* Signature move â€” a light banner, the animation plays through */}
               {view.cinematic?.kind === "special" && (
                 <div
                   key={`spec-${view.cinematic.id}`}
@@ -1811,7 +1851,7 @@ export function BattleArenaModal({
                 </div>
               )}
 
-              {/* K.O. banner — sits ABOVE the fighters, never on the body */}
+              {/* K.O. banner â€” sits ABOVE the fighters, never on the body */}
               {view.koBanner && (
                 <div
                   className="pointer-events-none absolute inset-x-0 top-8 z-[33] flex justify-center"
@@ -1841,21 +1881,21 @@ export function BattleArenaModal({
                 </div>
               )}
 
-              {/* Face-off intro — the READY? countdown only starts once the
+              {/* Face-off intro â€” the READY? countdown only starts once the
                   3D stage has finished loading and painting the fighters. */}
               {view.stage === "faceoff" && (
                 <div className="pointer-events-none absolute inset-0 z-[34] flex items-center justify-center">
                   <div className="flex flex-col items-center gap-2">
                     {stageReady ? (
                       <p className="animate-pop-in whitespace-nowrap bg-gradient-to-r from-red-300 via-amber-200 to-orange-300 bg-clip-text text-4xl font-black tracking-widest text-transparent drop-shadow-[0_0_22px_rgba(239,68,68,0.9)] sm:text-5xl">
-                        ⚔️ READY?
+                        âš”ï¸ READY?
                       </p>
                     ) : (
                       <>
                         <p className="animate-pulse whitespace-nowrap bg-gradient-to-r from-fuchsia-300 via-pink-300 to-cyan-300 bg-clip-text text-3xl font-black tracking-widest text-transparent drop-shadow-[0_0_22px_rgba(217,70,239,0.9)] sm:text-4xl">
-                          ◍ LOADING ARENA
+                          â— LOADING ARENA
                         </p>
-                        {/* Streamed clip progress — the bell waits for the rigs */}
+                        {/* Streamed clip progress â€” the bell waits for the rigs */}
                         <div className="h-1 w-56 overflow-hidden rounded-full bg-white/10">
                           <div
                             className="h-full rounded-full bg-gradient-to-r from-fuchsia-500 via-pink-400 to-cyan-300 transition-[width] duration-300"
@@ -1867,12 +1907,12 @@ export function BattleArenaModal({
                           />
                         </div>
                         <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-zinc-400">
-                          Streaming fighter rigs · {Math.round(stageProgress * 100)}%
+                          Streaming fighter rigs Â· {Math.round(stageProgress * 100)}%
                         </p>
                       </>
                     )}
                     <p className="text-[10px] font-bold uppercase tracking-[0.35em] text-zinc-400">
-                      {nameOf(leftSide)} vs {nameOf(rightSide)} · Best of 3
+                      {nameOf(leftSide)} vs {nameOf(rightSide)} Â· Best of 3
                     </p>
                   </div>
                 </div>
@@ -1888,7 +1928,7 @@ export function BattleArenaModal({
                    <div className="pointer-events-none absolute inset-0 z-30 flex items-start justify-center pt-16">
                      <div className="animate-pop-in rounded-2xl border-2 border-purple-400/60 bg-black/85 px-8 py-6 text-center shadow-[0_0_50px_rgba(168,85,247,0.6)]">
                       <p className="text-5xl">
-                        {view.shieldFx.kind === "secondwind" ? "🛡️" : "⚡"}
+                        {view.shieldFx.kind === "secondwind" ? "ðŸ›¡ï¸" : "âš¡"}
                       </p>
                       <h3 className="mt-3 bg-gradient-to-r from-purple-200 via-amber-200 to-purple-200 bg-clip-text text-xl font-extrabold tracking-wide text-transparent sm:text-2xl">
                         {view.shieldFx.kind === "secondwind"
@@ -1897,7 +1937,7 @@ export function BattleArenaModal({
                       </h3>
                       <p className="mt-1.5 text-xs font-bold uppercase tracking-widest text-purple-300">
                         {view.shieldFx.kind === "secondwind"
-                          ? "ADRENALINE SHIELD · 20% CHOG NFT PERK"
+                          ? "ADRENALINE SHIELD Â· 20% CHOG NFT PERK"
                           : "CRITICAL ART ENGAGED"}
                       </p>
                     </div>
@@ -2044,7 +2084,7 @@ function DamageNumber({ hit }: { hit: HitRT }) {
 
 /**
  * Cyberpunk hit-marker: neon slash cross (cyan/fuchsia), violet/gold
- * spark flyout, and a sleek white core flash — no cartoon explosions.
+ * spark flyout, and a sleek white core flash â€” no cartoon explosions.
  * `x` is the stage-% position of the impact.
  */
 function NeonHitMarker({ x }: { x: number }) {
@@ -2111,7 +2151,7 @@ function DustFx({ x }: { x: number }) {
   );
 }
 
-/** Soft radial red/white flash over the staggered defender (blurred — no hard box). */
+/** Soft radial red/white flash over the staggered defender (blurred â€” no hard box). */
 function StaggerFlash({ x, bright }: { x: number; bright: boolean }) {
   return (
     <div
@@ -2159,7 +2199,7 @@ function DamageSparks({ x }: { x: number }) {
   );
 }
 
-/** Warlord Chogzilla — ground-pound shockwave, blade trail, magma particles. */
+/** Warlord Chogzilla â€” ground-pound shockwave, blade trail, magma particles. */
 function ChogzillaSlamFx({ x }: { x: number }) {
   return (
     <div className="pointer-events-none absolute inset-0 z-[25]" aria-hidden>
@@ -2204,7 +2244,7 @@ function ChogzillaSlamFx({ x }: { x: number }) {
   );
 }
 
-/** Chog chog_samurai — multi-slash streaks, crescent plasma beam, sparks. */
+/** Chog chog_samurai â€” multi-slash streaks, crescent plasma beam, sparks. */
 function SamuraiSlashFx({ x }: { x: number }) {
   return (
     <div className="pointer-events-none absolute inset-0 z-[25]" aria-hidden>
@@ -2303,7 +2343,7 @@ function VoidLightning({ x }: { x: number }) {
   );
 }
 
-/** VOID CLAW SLAM — shockwave ring + jagged lightning + void runes. */
+/** VOID CLAW SLAM â€” shockwave ring + jagged lightning + void runes. */
 function SlamFx({ x }: { x: number }) {
   return (
     <>
@@ -2314,7 +2354,7 @@ function SlamFx({ x }: { x: number }) {
       />
       <VoidLightning x={x} />
       {/* Floating void runes */}
-      {["ᚠ", "ᚢ", "ᚦ", "ᚨ"].map((glyph, i) => (
+      {["áš ", "áš¢", "áš¦", "áš¨"].map((glyph, i) => (
         <span
           key={glyph}
           className="rune-float pointer-events-none absolute z-[26] text-xl font-bold text-purple-300"
@@ -2333,7 +2373,7 @@ function SlamFx({ x }: { x: number }) {
   );
 }
 
-/** Keone void_lord_james signature — holographic purple/magenta portal + lightning burst. */
+/** Keone void_lord_james signature â€” holographic purple/magenta portal + lightning burst. */
 function KeonePortalFx({ x }: { x: number }) {
   return (
     <div className="pointer-events-none absolute inset-0 z-[25]" aria-hidden>
@@ -2476,11 +2516,11 @@ function VerdictScreen({
         {/* Trophy / Skull Championship Emblem */}
         {won ? (
           <div className="mx-auto mb-2 flex h-14 w-14 items-center justify-center rounded-full border border-amber-400/40 bg-amber-500/20 text-3xl shadow-[0_0_24px_rgba(251,191,36,0.6)] animate-pop-in">
-            🏆
+            ðŸ†
           </div>
         ) : (
           <div className="mx-auto mb-2 flex h-14 w-14 items-center justify-center rounded-full border border-red-500/40 bg-red-500/20 text-3xl shadow-[0_0_24px_rgba(239,68,68,0.5)] animate-pop-in">
-            💀
+            ðŸ’€
           </div>
         )}
 
@@ -2519,14 +2559,14 @@ function VerdictScreen({
 
         {clutch && (
           <p className="mx-auto mt-4 inline-block animate-pop-in rounded-full border border-orange-400/50 bg-orange-500/15 px-4 py-1.5 text-xs font-extrabold tracking-wide text-orange-200 shadow-[0_0_18px_rgba(251,146,60,0.5)]">
-            🔥 CLUTCH RESURRECTION WIN
+            ðŸ”¥ CLUTCH RESURRECTION WIN
           </p>
         )}
 
         {/* Second Wind coaching prompt on a plain loss */}
         {!won && !outcome.secondWind && (
           <p className="mx-auto mt-3 max-w-sm text-[11px] leading-relaxed text-zinc-500">
-            💡 Hold a Chog NFT for a 20% chance of Second Wind resurrection —
+            ðŸ’¡ Hold a Chog NFT for a 20% chance of Second Wind resurrection â€”
             it could have saved this duel.
           </p>
         )}
@@ -2537,12 +2577,12 @@ function VerdictScreen({
         )}
         {!won && outcome.secondWind && !outcome.userResurrected && revivedName && (
           <p className="mx-auto mt-3 max-w-sm text-[11px] leading-relaxed text-zinc-500">
-            {revivedName}&apos;s Second Wind turned the tide — grab a Chog NFT
+            {revivedName}&apos;s Second Wind turned the tide â€” grab a Chog NFT
             to fight back next time.
           </p>
         )}
 
-        {/* Post-match actions — two distinct arcade buttons, never merged */}
+        {/* Post-match actions â€” two distinct arcade buttons, never merged */}
         <div className="mt-6 flex w-full flex-col items-center justify-center gap-4 sm:flex-row">
           <button
             type="button"
@@ -2553,7 +2593,7 @@ function VerdictScreen({
             {onPlayAgainBusy ? (
               <>
                 <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-                Confirm stake in wallet…
+                Confirm stake in walletâ€¦
               </>
             ) : (
               <>
