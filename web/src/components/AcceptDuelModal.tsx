@@ -5,7 +5,6 @@ import {
   useAccount,
   useChainId,
   useConfig,
-  useConnect,
   useReadContract,
   useSendTransaction,
   useSwitchChain,
@@ -42,6 +41,7 @@ import {
   type DuelOutcome,
   type FighterDescriptor,
 } from "./BattleArenaModal";
+import { WalletConnectModal } from "./WalletConnectModal";
 
 import type { ArenaDuel } from "./DuelBoard";
 
@@ -70,7 +70,7 @@ type AcceptDuelModalProps = {
 export function AcceptDuelModal({ duel, onClose, onSettled }: AcceptDuelModalProps) {
   const [phase, setPhase] = useState<"matchup" | "settling">("matchup");
   const [outcome, setOutcome] = useState<DuelOutcome | null>(null);
-  const [showConnectors, setShowConnectors] = useState(false);
+  const [walletPickerOpen, setWalletPickerOpen] = useState(false);
   const [playAgainBusy, setPlayAgainBusy] = useState(false);
   const toastIdRef = useRef<number | null>(null);
   const demoSettleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -82,7 +82,6 @@ export function AcceptDuelModal({ duel, onClose, onSettled }: AcceptDuelModalPro
   const appChainId = useChainId();
   const chainId = walletChainId ?? appChainId;
   const config = useConfig();
-  const { connect, connectors, isPending: isConnecting } = useConnect();
   const { switchChain } = useSwitchChain();
 
   const { writeContract, writeContractAsync, data: txHash, isPending, reset } =
@@ -98,7 +97,7 @@ export function AcceptDuelModal({ duel, onClose, onSettled }: AcceptDuelModalPro
   useEffect(() => {
     setPhase("matchup");
     setOutcome(null);
-    setShowConnectors(false);
+    setWalletPickerOpen(false);
     if (demoSettleRef.current !== null) {
       clearTimeout(demoSettleRef.current);
       demoSettleRef.current = null;
@@ -624,45 +623,14 @@ export function AcceptDuelModal({ duel, onClose, onSettled }: AcceptDuelModalPro
               {/* Action */}
               <div className="mt-6">
                 {!isConnected ? (
-                  <div>
-                    <button
-                      type="button"
-                      onClick={() => setShowConnectors((v) => !v)}
-                      className="flex w-full animate-pulse items-center justify-center gap-2 rounded-xl border border-fuchsia-400/50 bg-gradient-to-r from-fuchsia-600/25 to-pink-600/25 py-3.5 font-display text-sm font-bold uppercase tracking-[0.14em] text-fuchsia-100 shadow-glow-purple transition hover:from-fuchsia-600/40 hover:to-pink-600/40"
-                    >
-                      <Wallet className="h-4 w-4" aria-hidden />
-                      ⚔️ CONNECT WALLET TO ACCEPT
-                    </button>
-                    {showConnectors && (
-                      <div className="glass-deep mt-2 overflow-hidden rounded-xl">
-                        {connectors.length === 0 ? (
-                          <p className="px-4 py-3 text-xs text-zinc-500">
-                            No browser wallets detected. Install MetaMask,
-                            Rabby, or Backpack and reload.
-                          </p>
-                        ) : (
-                          connectors.map((connector) => (
-                            <button
-                              key={connector.uid}
-                              type="button"
-                              disabled={isConnecting}
-                              onClick={() => {
-                                connect({ connector });
-                                setShowConnectors(false);
-                              }}
-                              className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left font-display text-sm text-zinc-200 transition hover:bg-fuchsia-500/10 hover:text-white disabled:opacity-50"
-                            >
-                              <Wallet
-                                className="h-4 w-4 text-zinc-400"
-                                aria-hidden
-                              />
-                              {connector.name}
-                            </button>
-                          ))
-                        )}
-                      </div>
-                    )}
-                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setWalletPickerOpen(true)}
+                    className="flex w-full animate-pulse items-center justify-center gap-2 rounded-xl border border-fuchsia-400/50 bg-gradient-to-r from-fuchsia-600/25 to-pink-600/25 py-3.5 font-display text-sm font-bold uppercase tracking-[0.14em] text-fuchsia-100 shadow-glow-purple transition hover:from-fuchsia-600/40 hover:to-pink-600/40"
+                  >
+                    <Wallet className="h-4 w-4" aria-hidden />
+                    ⚔️ CONNECT WALLET TO ACCEPT
+                  </button>
                 ) : !onMonad ? (
                   <button
                     type="button"
@@ -742,6 +710,12 @@ export function AcceptDuelModal({ duel, onClose, onSettled }: AcceptDuelModalPro
           onClose={closeOutcome}
         />
       )}
+
+      {/* The branded wallet picker — real logos, real status, no duplicates. */}
+      <WalletConnectModal
+        open={walletPickerOpen}
+        onClose={() => setWalletPickerOpen(false)}
+      />
     </>
   );
 }

@@ -5,14 +5,13 @@ import {
   useAccount,
   useBalance,
   useChainId,
-  useConnect,
   useReadContract,
   useSwitchChain,
   useWaitForTransactionReceipt,
   useWriteContract,
 } from "wagmi";
 import { formatEther, parseEther } from "viem";
-import { Coins, Loader2, Swords, Wallet, X, Zap } from "lucide-react";
+import { Coins, Loader2, Swords, X, Zap } from "lucide-react";
 import {
   CHOG_ARENA_ADDRESS,
   CHOG_NFT_ADDRESS,
@@ -31,6 +30,7 @@ import {
   useFighterProfile,
 } from "@/context/FighterProfileContext";
 import { pushToast, updateToast } from "./Toast";
+import { WalletConnectModal } from "./WalletConnectModal";
 
 const ZERO = "0x0000000000000000000000000000000000000000";
 const BPS = 10000n;
@@ -52,7 +52,7 @@ type CreateDuelModalProps = {
 export function CreateDuelModal({ open, onClose, onCreated }: CreateDuelModalProps) {
   const [amount, setAmount] = useState("");
   const [activeChip, setActiveChip] = useState<string | null>(null);
-  const [showConnectors, setShowConnectors] = useState(false);
+  const [walletPickerOpen, setWalletPickerOpen] = useState(false);
   const toastIdRef = useRef<number | null>(null);
   const { getProfile } = useFighterProfile();
 
@@ -63,7 +63,6 @@ export function CreateDuelModal({ open, onClose, onCreated }: CreateDuelModalPro
   const appChainId = useChainId();
   const chainId = walletChainId ?? appChainId;
   const { switchChain } = useSwitchChain();
-  const { connect, connectors, isPending: isConnecting } = useConnect();
   const { data: balance } = useBalance({
     address,
     chainId,
@@ -102,7 +101,7 @@ export function CreateDuelModal({ open, onClose, onCreated }: CreateDuelModalPro
     if (open) {
       setAmount("");
       setActiveChip(null);
-      setShowConnectors(false);
+      setWalletPickerOpen(false);
     }
   }, [open]);
 
@@ -361,42 +360,14 @@ export function CreateDuelModal({ open, onClose, onCreated }: CreateDuelModalPro
 
         {/* Action */}
         {!isConnected ? (
-          <div className="mt-5">
-            <button
-              type="button"
-              onClick={() => setShowConnectors((v) => !v)}
-              className="flex w-full animate-pulse items-center justify-center gap-2 rounded-xl border border-fuchsia-400/50 bg-gradient-to-r from-fuchsia-600/25 to-pink-600/25 py-3.5 font-display text-sm font-bold uppercase tracking-[0.14em] text-fuchsia-100 shadow-glow-purple transition hover:from-fuchsia-600/40 hover:to-pink-600/40"
-            >
-              <Swords className="h-4 w-4" aria-hidden />
-              ⚔️ CONNECT WALLET TO ENTER ARENA
-            </button>
-            {showConnectors && (
-              <div className="glass-deep mt-2 overflow-hidden rounded-xl">
-                {connectors.length === 0 ? (
-                  <p className="px-4 py-3 text-xs text-zinc-500">
-                    No browser wallets detected. Install MetaMask, Rabby, or
-                    Backpack and reload.
-                  </p>
-                ) : (
-                  connectors.map((connector) => (
-                    <button
-                      key={connector.uid}
-                      type="button"
-                      disabled={isConnecting}
-                      onClick={() => {
-                        connect({ connector });
-                        setShowConnectors(false);
-                      }}
-                      className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left font-display text-sm text-zinc-200 transition hover:bg-fuchsia-500/10 hover:text-white disabled:opacity-50"
-                    >
-                      <Wallet className="h-4 w-4 text-zinc-400" aria-hidden />
-                      {connector.name}
-                    </button>
-                  ))
-                )}
-              </div>
-            )}
-          </div>
+          <button
+            type="button"
+            onClick={() => setWalletPickerOpen(true)}
+            className="mt-5 flex w-full animate-pulse items-center justify-center gap-2 rounded-xl border border-fuchsia-400/50 bg-gradient-to-r from-fuchsia-600/25 to-pink-600/25 py-3.5 font-display text-sm font-bold uppercase tracking-[0.14em] text-fuchsia-100 shadow-glow-purple transition hover:from-fuchsia-600/40 hover:to-pink-600/40"
+          >
+            <Swords className="h-4 w-4" aria-hidden />
+            ⚔️ CONNECT WALLET TO ENTER ARENA
+          </button>
         ) : !onMonad ? (
           <button
             type="button"
@@ -424,6 +395,12 @@ export function CreateDuelModal({ open, onClose, onCreated }: CreateDuelModalPro
           </button>
         )}
       </div>
+
+      {/* The branded wallet picker — real logos, real status, no duplicates. */}
+      <WalletConnectModal
+        open={walletPickerOpen}
+        onClose={() => setWalletPickerOpen(false)}
+      />
     </div>
   );
 }
