@@ -41,6 +41,12 @@ import {
 } from "@/data/fighterMoves";
 import { cn, formatMon, truncateAddress } from "@/lib/utils";
 import {
+  AGENT_REACH,
+  AICombatAgent,
+  agentProfileFor,
+  type AgentAttackKind,
+} from "@/utils/AICombatAgent";
+import {
   playDashSfx,
   playHitSfx,
   playImpactSfx,
@@ -145,8 +151,6 @@ type AttackKind = "light" | "heavy" | "special" | "critical";
 /* ------------------------------------------------------------------ tuning */
 
 const MOVE_SPEED = 24; // %/s player slide speed
-const AI_APPROACH_SPEED = 24; // %/s AI closes distance aggressively
-const AI_BACKSTEP_SPEED = 18; // %/s AI retreats
 
 /**
  * How long each strike's animation is held, so the full Mixamo clip can
@@ -179,29 +183,8 @@ const FACE_OFF_MS = 2500;
 const STAGE_LOAD_GRACE_MS = 20_000;
 
 /**
- * The fighting gap, in stage percent of CENTRE distance. The 3D stage is 12
- * world units wide and each fighter is ~1.2 units across, so a 23% centre
- * distance leaves about 1.6 units of clear air between the two bodies. The
- * tracks below stop them either side of the CWO lettering, so they always
- * flank the logo and never walk into it.
+ * Per-archetype windup timings (ms).
  */
-const FIGHT_GAP = 23;
-
-/** AI cadence: how long a fighter waits between decisions (ms). */
-const AI_DECIDE_MIN = 900;
-const AI_DECIDE_MAX = 1650;
-
-/** Per-archetype movement speed (%/s). */
-const FIGHTER_SPEED: Record<FighterClass, number> = {
-  chogzila: 14,
-  chog_samurai: 24,
-  void_lord_james: 18,
-  crimson_lord_benja: 34,
-  lady_chog: 26,
-  chog_princess: 20,
-};
-
-/** Per-archetype windup timings (ms). */
 const WINDUP_FOR: Record<FighterClass, Record<AttackKind, number>> = {
   chogzila: { light: 160, heavy: 400, special: 420, critical: 500 },
   chog_samurai: { light: 110, heavy: 220, special: 300, critical: 380 },
@@ -231,13 +214,9 @@ const RECOVER: Record<AttackKind, number> = {
   special: 280,
   critical: 340,
 };
-/** Center-to-center reach (stage %) for each attack. */
-const REACH: Record<AttackKind, number> = {
-  light: 28,
-  heavy: 32,
-  special: 34,
-  critical: 36,
-};
+/** Center-to-center reach (stage %) for each attack — shared with the AI
+ *  agent so the brain and the hit detection always agree on what lands. */
+const REACH = AGENT_REACH;
 const MOVE_FX_MS: Record<SpecialMove["vfxType"], number> = {
   void_rift: 650,
   laser: 750,
@@ -335,6 +314,8 @@ type MatchState = {
   heldRight: boolean;
   heldBlock: boolean;
   attackQueued: AttackKind | null;
+  /** One local AI brain per fighter — stepped every frame by the game loop. */
+  agents: Record<FighterSide, AICombatAgent>;
   aiNextMs: number;
   aiAction: AiAction | null;
   aiActionMs: number;
@@ -457,6 +438,10 @@ function createMatch(script: MatchScript, playerSide: PlayerSide): MatchState {
     heldRight: false,
     heldBlock: false,
     attackQueued: null,
+    agents: {
+      creator: new AICombatAgent(agentProfileFor(script.creatorClass)),
+      challenger: new AICombatAgent(agentProfileFor(script.challengerClass)),
+    },
     aiNextMs: 400,
     aiAction: null,
     aiActionMs: 0,
@@ -732,6 +717,10 @@ function startRound(
   ai.hitTimer = 0;
   p.nextActionMs = 500;
   ai.nextActionMs = 500;
+  /* A fresh round means a fresh brain — no leftover route, cooldown or
+   * evade state carries into the next fight. */
+  m.agents.creator.reset();
+  m.agents.challenger.reset();
   p.x = playerSide === "left" ? 32 : 68;
   ai.x = playerSide === "left" ? 68 : 32;
   p.pose = "idle";
@@ -1018,14 +1007,12 @@ function updateAttack(
 }
 
 /**
- * The auto-fighter brain — shared by BOTH sides.
+ * Drive a fighter with its LOCAL AI AGENT.
  *
- * Every fighter gets the same aggressive loop: always square up to the
- * opponent, close the distance when out of range, then throw a strike on a
- * short cadence (light / heavy / special / critical) or raise a guard when
- * the opponent is winding up. Because the brain is symmetric, the match
- * looks like two characters actually trading blows instead of one fighter
- * standing still while the other walks in.
+ * The agent owns the tactics — approach, combo, evade — and is stepped
+ * here, once per animation frame, from the arena's single game loop. It
+ * is a pure in-browser state machine: no timers, no network, no audio
+ * dependency, so a decision lands on the very next frame.
  */
 function updateAutoFighter(
   m: MatchState,
@@ -1035,99 +1022,21 @@ function updateAutoFighter(
   side: FighterSide,
 ) {
   const f = m.fighters[side];
-  const foe = m.fighters[side === "creator" ? "challenger" : "creator"];
-  const cls = side === "creator" ? script.creatorClass : script.challengerClass;
+  const foeSide: FighterSide = side === "creator" ? "challenger" : "creator";
+  const foe = m.fighters[foeSide];
+  const agent = m.agents[side];
   const track = side === "creator" ? oppTrack(playerSide) : playerTrack(playerSide);
-  const speed = FIGHTER_SPEED[cls] ?? AI_APPROACH_SPEED;
+  const foeTrack = side === "creator" ? playerTrack(playerSide) : oppTrack(playerSide);
 
-  if (f.down || f.stunMs > 0) {
-    f.moveDir = 0;
-    f.leanDir = null;
-    f.blockHeld = false;
-    return;
-  }
-
-  /* 1) always face the opponent */
-  f.facing = foe.x >= f.x ? "right" : "left";
-
-  /* 2) mid-strike: let the attack cycle finish */
-  if (f.attack) {
-    f.moveDir = 0;
-    f.leanDir = null;
-    return;
-  }
-
-  const dist = Math.abs(f.x - foe.x);
-  const reach = REACH.light;
-
-  /* 3) too close: re-open the gap so the fighters never overlap */
-  if (dist < FIGHT_GAP - 1.5) {
-    const away = Math.sign(f.x - foe.x) || 1;
-    f.moveDir = away;
-    f.toward = false;
-    f.leanDir = "retreat";
-    f.x += away * speed * 0.5 * (dt / 1000);
-    f.x = clamp(f.x, track);
-    f.blockHeld = false;
-    return;
-  }
-
-  /* 4) out of range: walk into striking distance (and stop at the gap) */
-  if (dist > FIGHT_GAP) {
-    const dir = Math.sign(foe.x - f.x) || (f.facing === "left" ? -1 : 1);
-    f.moveDir = dir;
-    f.toward = true;
-    f.leanDir = "forward";
-    f.x += dir * speed * (dt / 1000);
-    f.x = clamp(f.x, track);
-    f.blockHeld = false;
-    if (Math.random() < 0.16) {
-      m.dust = { id: ++m.fxId, x: f.x };
-      m.dustMs = 350;
-    }
-    return;
-  }
-
-  /* 5) in range: aggressive mix-ups */
-  f.nextActionMs -= dt;
-  if (f.nextActionMs > 0) {
-    /* hold the current intent (e.g. keep the guard up between decisions) */
-    f.moveDir = 0;
-    f.leanDir = null;
-    return;
-  }
-  f.nextActionMs = randInt(AI_DECIDE_MIN, AI_DECIDE_MAX);
-
-  const roll = Math.random();
-
-  /* the opponent is winding up — sometimes raise the guard */
-  if (foe.attack && foe.attack.windup > 0 && roll < 0.45) {
-    f.blockHeld = true;
-    f.moveDir = 0;
-    f.leanDir = null;
-    return;
-  }
-
-  f.blockHeld = false;
-  f.moveDir = 0;
-  f.leanDir = null;
-
-  /* 6) pick a strike — specials and criticals need meter, so fall back */
-  let kind: AttackKind = "light";
-  if (f.meter >= 100 && roll < 0.30) kind = "critical";
-  else if (f.meter >= 40 && roll < 0.55) kind = "special";
-  else if (roll < 0.72) kind = "heavy";
-
-  startStrike(m, side, kind, script);
-
-  /* 7) occasionally shuffle backwards to bait a whiff */
-  if (kind === "light" && Math.random() < 0.18) {
-    const retreat = Math.sign(f.x - foe.x) || (f.facing === "left" ? 1 : -1);
-    f.x += retreat * speed * 0.6 * (dt / 1000);
-    f.x = clamp(f.x, track);
-    f.moveDir = retreat;
-    f.leanDir = "retreat";
-  }
+  agent.update(dt, {
+    self: f,
+    foe,
+    profile: agent.profile,
+    foeProfile: m.agents[foeSide].profile,
+    track,
+    foeTrack,
+    strike: (kind: AgentAttackKind) => startStrike(m, side, kind, script),
+  });
 }
 
 
