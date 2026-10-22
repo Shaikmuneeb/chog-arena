@@ -329,18 +329,29 @@ function NpcFighterCard({
       >
         <div className="h-px w-1/3 animate-edge-sweep bg-gradient-to-r from-transparent via-fuchsia-300 to-transparent" />
       </div>
-  {/* Character — a live 3D preview render, no 2D sprite */}
+  {/* Banner — a static card illustration when the roster entry supplies one,
+      falling back to the live 3D preview otherwise */}
   <div className="relative flex h-[220px] items-center justify-center overflow-hidden">
-        <div
-          className="pointer-events-none absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-fuchsia-500/10 to-transparent"
-          aria-hidden
-        />
-        <FighterPreview3D
-          fighterClass={npc.fighterClass}
-          size={220}
-          className="w-full"
-        />
-      </div>
+    {entry?.banner ? (
+      <img
+        src={entry.banner}
+        alt=""
+        className="pointer-events-none absolute inset-0 h-full w-full object-cover"
+        style={{ imageRendering: "auto" }}
+        aria-hidden
+      />
+    ) : (
+      <FighterPreview3D
+        fighterClass={npc.fighterClass}
+        size={220}
+        className="w-full"
+      />
+    )}
+    <div
+      className="pointer-events-none absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-fuchsia-500/10 to-transparent"
+      aria-hidden
+    />
+  </div>
       <div className="absolute inset-x-0 bottom-0 z-20 bg-gradient-to-t from-black/85 via-black/50 to-transparent p-4">
         <p className="font-display text-xl font-bold uppercase tracking-[0.1em] text-white">
           {displayName}

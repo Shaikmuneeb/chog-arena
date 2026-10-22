@@ -26,6 +26,8 @@ export type FighterRosterEntry = {
   style: string;
   /** Hardcoded stake price for this fighter's arena challenge. */
   price: string;
+  /** Optional full-width card banner shown on the lobby fighter card. */
+  banner?: string;
 };
 
 /**
@@ -55,6 +57,7 @@ export const FIGHTER_ROSTER: readonly FighterRosterEntry[] = [
     video: "/fighters/new design void lord james.mp4",
     style: "Void Dimension Cleave",
     price: "1 MON",
+    banner: "/banners/james-card new banner.png",
   },
   {
     id: "crimson_lord_benja",
@@ -76,6 +79,7 @@ export const FIGHTER_ROSTER: readonly FighterRosterEntry[] = [
     video: "/fighters/chog princess new design.mp4",
     style: "Supernova Astral Beam",
     price: "1.2 MON",
+    banner: "/banners/chog princess card new banner.png",
   },
 ];
 
