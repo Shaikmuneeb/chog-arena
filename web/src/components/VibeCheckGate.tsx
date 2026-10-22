@@ -5,7 +5,7 @@ import { Check, ChevronRight, Sparkles } from "lucide-react";
 import { pushToast } from "./Toast";
 import { CwoCinematicIntro, preloadCwoFrames } from "./CwoCinematicIntro";
 import { ThemeMuteButton } from "./ThemeMuteButton";
-import { preloadChogTheme } from "@/lib/chogTheme";
+import { setChogScene } from "@/lib/chogTheme";
 
 /** sessionStorage key — the gate only has to be passed once per session. */
 export const VIBE_CHECK_KEY = "cwo-vibe-check";
@@ -87,11 +87,15 @@ export function VibeCheckGate({ onPass }: { onPass: () => void }) {
 
   /* Pull the cinematic frames down while the visitor is still reading the
    * gate — by the time they hit the button they are already cached, so the
-   * final flash never waits on a 4.5MB download. The theme track comes
-   * down with them. */
+   * final flash never waits on a 4.5MB download.
+   *
+   * The theme track comes down with them, and starts at full energy: the
+   * quiz is the first screen of the session, so this is where the music
+   * begins. Browsers that refuse to play before an interaction simply pick
+   * it up on the visitor's first click. */
   useEffect(() => {
     preloadCwoFrames();
-    preloadChogTheme();
+    setChogScene("quiz");
   }, []);
 
   /* The certificate holds for a few seconds so the "admire Chog Princess"

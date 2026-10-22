@@ -9,6 +9,7 @@ import { ArenaHeader } from "@/components/ArenaHeader";
 import { CreateDuelModal } from "@/components/CreateDuelModal";
 import { DuelBoard, type ArenaDuel } from "@/components/DuelBoard";
 import { vibeCheckPassed } from "@/components/VibeCheckGate";
+import { setChogScene } from "@/lib/chogTheme";
 import { BATTLE_ROSTER } from "@/config/fighterModels";
 import { CHOG_ARENA_ADDRESS, chogArenaAbi } from "@/contracts";
 
@@ -31,6 +32,10 @@ export default function Home() {
   useEffect(() => {
     if (vibeCheckPassed()) {
       setScreened(true);
+      /* The lobby is where the theme lives at its ambient level. The
+       * cinematic hands it over on its way out; a visitor who skipped the
+       * screening picks it up here instead. */
+      setChogScene("lobby");
     } else {
       router.replace("/vibe-check");
     }

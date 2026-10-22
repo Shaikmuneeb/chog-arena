@@ -1,32 +1,57 @@
 /**
  * The Chog theme track - "we believe in chog".
  *
- * One module level <audio> element owns the whole soundtrack:
+ * One module level <audio> element owns the whole soundtrack, and a single
+ * scene switch says what that element should be doing at any moment:
  *
- *  - the CWO cinematic fires it at full energy (0.85) for the five second
- *    title sequence,
- *  - the flash that hands the visitor over to the lobby ramps the level
- *    down over exactly as long as that visual transition takes,
- *  - and the very same element keeps looping in the lobby at an ambient
- *    0.175, never restarting.
+ *   quiz   the starting quiz   playing at 0.85
+ *   intro  the CWO cinematic   playing at 0.85
+ *   lobby  the main lobby      looping at 0.15
+ *   arena  the game arena      faded out and paused
  *
- * It lives in module scope rather than inside a component because the
- * intro unmounts the moment the route changes to "/" - an element owned by
- * that component would be torn down halfway through the fade, taking the
- * music with it.
+ * The element is created once and never replaced, so the track can neither
+ * duplicate nor restart as the visitor moves between screens - it only
+ * changes level, and it always changes level with a fade.
+ *
+ * It lives in module scope rather than inside a component because the intro
+ * unmounts the moment the route changes to "/" - an element owned by that
+ * component would be torn down halfway through the fade, taking the music
+ * with it.
  */
 
 /** The track, served out of the app's public root. */
 const TRACK_SRC = "/we believe in chog (chog).mp3";
 
-/** Full energy - the cinematic. */
+/** Full energy - the starting quiz and the cinematic. */
 export const INTRO_VOLUME = 0.85;
 
-/** A dimmed background bed - the lobby. */
-export const AMBIENT_VOLUME = 0.175;
+/** A dimmed background bed - the main lobby. */
+export const AMBIENT_VOLUME = 0.15;
+
+/** How long the arena takes to fade the music out before it stops. */
+export const ARENA_FADE_MS = 600;
+
+/** How long the music takes to ease between two levels. */
+export const LOBBY_FADE_MS = 600;
 
 /** The visitor's mute choice is remembered between visits. */
 const MUTE_KEY = "cwo-theme-muted";
+
+/**
+ * The screens the track knows about.
+ *
+ * The scene is the single source of truth for the level: every screen just
+ * says where it is, and the controller does the rest.
+ */
+export type ChogScene = "quiz" | "intro" | "lobby" | "arena";
+
+/** What each scene wants from the track. */
+const SCENE_LEVEL: Record<ChogScene, { volume: number; playing: boolean }> = {
+  quiz: { volume: INTRO_VOLUME, playing: true },
+  intro: { volume: INTRO_VOLUME, playing: true },
+  lobby: { volume: AMBIENT_VOLUME, playing: true },
+  arena: { volume: 0, playing: false },
+};
 
 export type ChogThemeSnapshot = {
   /** has the track ever been started */
@@ -46,6 +71,13 @@ const SERVER_SNAPSHOT: ChogThemeSnapshot = {
 
 let element: HTMLAudioElement | null = null;
 let fadeRaf = 0;
+
+/** The fade that is running right now, if any. */
+let fade: {
+  target: number;
+  endsAt: number;
+  onDone?: () => void;
+} | null = null;
 
 let snapshot: ChogThemeSnapshot = { ...SERVER_SNAPSHOT };
 
@@ -141,66 +173,137 @@ function armUnlock(): void {
 }
 
 /**
- * Pull the track down while the visitor is still at the vibe check.
+ * Ease the level towards a target.
  *
- * The file is 2.5MB, so it is worth having in the cache before the
- * cinematic needs it.
+ * Driven by requestAnimationFrame so the fade lands on the same frames the
+ * visitor is watching - no timer drift, and the fade finishes on its own
+ * even if the screen that asked for it has already gone.
  */
-export function preloadChogTheme(): void {
-  ensureElement();
-}
-
-/**
- * Start the track at full energy.
- *
- * Safe to call more than once - the element is only created once and
- * `play()` on an element that is already playing does not restart it, so
- * the intro can never restart the song mid-way.
- */
-export function playChogTheme(): void {
-  const audio = ensureElement();
-  if (!audio) return;
-
-  if (!snapshot.started) {
-    audio.volume = INTRO_VOLUME;
-    publish({ ...snapshot, started: true });
+function startFade(
+  target: number,
+  durationMs: number,
+  onDone?: () => void,
+): void {
+  const audio = element;
+  if (!audio) {
+    onDone?.();
+    return;
   }
-  audio.muted = snapshot.muted;
 
-  const started = audio.play();
-  if (!started || typeof started.then !== "function") return;
-  started
-    .then(() => publish({ ...snapshot, playing: true }))
-    .catch(() => armUnlock());
+  const now = performance.now();
+
+  /* Already on its way there - let the running fade finish untouched, so
+   * a handover keeps the exact timing it was given. */
+  if (fade && fade.target === target && fade.endsAt > now) {
+    if (onDone) {
+      const prev = fade.onDone;
+      fade.onDone = () => {
+        prev?.();
+        onDone();
+      };
+    }
+    return;
+  }
+
+  cancelAnimationFrame(fadeRaf);
+  const from = audio.volume;
+  const startedAt = now;
+  const endsAt = startedAt + Math.max(0, durationMs);
+
+  /* already there - nothing to ease */
+  if (Math.abs(from - target) < 0.0005) {
+    audio.volume = target;
+    fadeRaf = 0;
+    fade = null;
+    onDone?.();
+    return;
+  }
+
+  fade = { target, endsAt, onDone };
+
+  if (durationMs <= 0) {
+    audio.volume = target;
+    fadeRaf = 0;
+    fade = null;
+    onDone?.();
+    return;
+  }
+
+  const step = () => {
+    /* The frame timestamp handed to a rAF callback is the time the frame
+     * was scheduled, which can be BEHIND the clock when the request was
+     * made - and a long frame (the arena streams its rigs) can push the
+     * next one further back still. Reading the clock here keeps the ramp
+     * monotonic, and the clamp keeps the level inside [0, 1]. */
+    const p = Math.min(1, Math.max(0, (performance.now() - startedAt) / durationMs));
+    audio.volume = Math.min(1, Math.max(0, from + (target - from) * p));
+    if (p < 1) {
+      fadeRaf = requestAnimationFrame(step);
+      return;
+    }
+    fadeRaf = 0;
+    const done = fade?.onDone;
+    fade = null;
+    done?.();
+  };
+  fadeRaf = requestAnimationFrame(step);
 }
 
 /**
  * Ramp the level to a new value over a span of time.
  *
- * Driven by requestAnimationFrame so the fade lands on the same frames the
- * visitor is watching - no timer drift, and the fade finishes on its own
- * even if the intro unmounts halfway through it.
+ * The public handle on the fade - the cinematic uses it to drop the music
+ * over exactly as long as its own visual transition takes.
  */
 export function rampChogThemeTo(target: number, durationMs: number): void {
-  const audio = element;
+  startFade(target, durationMs);
+}
+
+/**
+ * Move the soundtrack to the level a screen wants.
+ *
+ * Every screen announces itself here and the controller handles the rest:
+ * the level eases, the track never restarts, and the arena gets silence.
+ */
+export function setChogScene(next: ChogScene): void {
+  const want = SCENE_LEVEL[next];
+  const audio = ensureElement();
   if (!audio) return;
 
-  cancelAnimationFrame(fadeRaf);
-  const from = audio.volume;
-  if (durationMs <= 0 || from === target) {
-    audio.volume = target;
+  /* ---------- the arena: the music steps aside for the combat ---------- */
+  if (!want.playing) {
+    startFade(0, ARENA_FADE_MS, () => {
+      audio.pause();
+      publish({ ...snapshot, playing: false });
+    });
     return;
   }
 
-  const startedAt = performance.now();
-  const step = (now: number) => {
-    const p = Math.min(1, (now - startedAt) / durationMs);
-    audio.volume = from + (target - from) * p;
-    if (p < 1) {
-      fadeRaf = requestAnimationFrame(step);
+  /* ---------- coming back from the arena, or a cold start ---------- */
+  if (audio.paused) {
+    /* A track that has never played starts at the level the scene wants.
+     * One that is coming back from the arena eases up from silence, so it
+     * never lands with a jolt. */
+    const cold = !snapshot.started;
+    audio.volume = cold ? want.volume : 0;
+    audio.muted = snapshot.muted;
+
+    const started = audio.play();
+    if (started && typeof started.then === "function") {
+      started
+        .then(() => {
+          publish({ ...snapshot, started: true, playing: true });
+        })
+        .catch(() => armUnlock());
     }
-  };
-  fadeRaf = requestAnimationFrame(step);
+    publish({ ...snapshot, started: true });
+
+    startFade(want.volume, cold ? 0 : LOBBY_FADE_MS);
+    return;
+  }
+
+  /* ---------- already playing: ease it to the level this scene wants ---------- */
+  startFade(want.volume, LOBBY_FADE_MS);
 }
 
 /** Mute or unmute the track. The choice is remembered for the next visit. */

@@ -10,8 +10,8 @@ import {
 } from "@/config/cwoLockup";
 import {
   AMBIENT_VOLUME,
-  playChogTheme,
   rampChogThemeTo,
+  setChogScene,
 } from "@/lib/chogTheme";
 
 /**
@@ -141,8 +141,9 @@ export function CwoCinematicIntro({
 
     /* The theme track: "we believe in chog" at full energy for the
      * sequence. The element is owned by the module, not by this component,
-     * so it survives the route change into the lobby. */
-    playChogTheme();
+     * so it survives the route change into the lobby - the intro only ever
+     * changes its level, never its place in the track. */
+    setChogScene("intro");
 
     let raf = 0;
     let start = 0;

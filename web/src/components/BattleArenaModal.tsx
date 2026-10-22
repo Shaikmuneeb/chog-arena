@@ -14,6 +14,7 @@ import { FIGHTER_CLASS_META, type FighterClass } from "@/config/fighterClasses";
 import { has3DModel, type FighterActionState } from "@/config/fighterModels";
 import type { StageRigStatus } from "./Fighter3D";
 import { stageAnchorX } from "@/config/stageLayout";
+import { setChogScene } from "@/lib/chogTheme";
 import type { StageFighter3D } from "./Fighter3D";
 
 /* three.js + R3F are heavy — load the 3D layer only when a duel starts. */
@@ -1467,6 +1468,16 @@ export function BattleArenaModal({
     creatorFighter.fighterClass,
     challengerFighter.fighterClass,
   ]);
+
+  /* ================= THE THEME TRACK STEPS ASIDE =================
+   * The arena runs its own combat sound - impacts, dashes, the round
+   * announcer - so the lobby theme fades out and stops for the duration
+   * of the fight, then picks itself back up at ambient level when the
+   * visitor walks back out to the lobby. */
+  useEffect(() => {
+    setChogScene("arena");
+    return () => setChogScene("lobby");
+  }, []);
 
   /* ================= REAL-TIME GAME LOOP =================
    * Single rAF loop: step the ref-based match state, then mirror a plain
