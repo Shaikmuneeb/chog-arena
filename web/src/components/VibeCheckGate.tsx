@@ -104,7 +104,7 @@ export function VibeCheckGate({
     setChogScene("quiz");
   }, []);
 
-  /* The certificate holds for a few seconds so the "admire Chog Princess"
+  /* The certificate holds for a few seconds so the "admire Chog" button
    * button can actually be clicked — the button proceeds immediately.
    * The cinematic takes over that hold, so the timer stands down while
    * it plays. */
@@ -270,7 +270,7 @@ export function VibeCheckGate({
               aria-hidden
             />
             <h2 className="neon-title mt-4 max-w-xl text-2xl font-bold uppercase leading-tight tracking-tight drop-shadow-[0_0_28px_rgba(217,70,239,0.6)] sm:text-4xl">
-              You will be chugged by Benja
+              Congrats — You will be chugged by Benja
             </h2>
             <p className="stat-value mt-3 text-sm font-bold uppercase tracking-[0.3em] text-fuchsia-200">
               IQ Verified: 12
@@ -283,7 +283,7 @@ export function VibeCheckGate({
               onClick={onStartIntro}
               className="btn-neon mt-6 w-full !py-4 !text-xs"
             >
-              Click here to admire Chog Princess
+              Click here to admire Chog
             </button>
           </div>
         )}
