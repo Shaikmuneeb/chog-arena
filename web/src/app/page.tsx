@@ -32,7 +32,9 @@ export default function Home() {
   useEffect(() => {
     if (vibeCheckPassed()) {
       setScreened(true);
-      /* The lobby is where the theme lives at its ambient level. */
+      /* The lobby is where the theme lives at its ambient level. The
+       * cinematic hands it over on its way out; a visitor who skipped the
+       * screening picks it up here instead. */
       setChogScene("lobby");
     } else {
       router.replace("/vibe-check");
@@ -72,51 +74,77 @@ export default function Home() {
 
   /* hold the arena back until the screening check resolves */
   if (!screened) {
-    return <div className="min-h-[100dvh] w-full bg-zinc-950" />;
+    return <div className="min-h-[100dvh] w-full bg-black" />;
   }
 
   return (
     <>
       <ArenaHeader />
-      <main className="mx-auto max-w-6xl space-y-8 px-4 py-8">
-        {/* Create Duel CTA — frosted tactical panel with a neon rim */}
-        <section className="relative overflow-hidden rounded-3xl border border-purple-500/20 bg-white/[0.03] p-8 text-center backdrop-blur-xl shadow-[0_0_70px_-18px_rgba(168,85,247,0.55)] transition-shadow duration-300 hover:shadow-[0_0_90px_-16px_rgba(168,85,247,0.7)]">
+      <main className="mx-auto max-w-6xl space-y-6 px-4 py-8">
+        {/* Create Duel CTA — OLED glass panel with a neon rim */}
+        <section className="glass-panel animate-rise-in px-6 py-10 text-center sm:px-10 sm:py-14">
+          {/* ambient bloom + scanlines + corner brackets */}
           <div
-            className="absolute inset-0"
+            className="pointer-events-none absolute inset-0"
             style={{
               background:
-                "radial-gradient(ellipse at 50% 120%, rgba(168,85,247,0.35), transparent 55%), radial-gradient(ellipse at 15% 0%, rgba(236,72,153,0.22), transparent 50%), linear-gradient(180deg, #0b0616 0%, #12081f 60%, #05030c 100%)",
+                "radial-gradient(ellipse at 50% 118%, rgba(168,85,247,0.42), transparent 58%), radial-gradient(ellipse at 12% -10%, rgba(236,72,153,0.24), transparent 52%), radial-gradient(ellipse at 88% -10%, rgba(34,211,238,0.16), transparent 50%)",
             }}
             aria-hidden
           />
-          <div
-            className="absolute inset-0 bg-gradient-to-b from-black/50 via-black/35 to-black/70"
-            aria-hidden
-          />
-          {/* neon rim along the top edge */}
-          <div
-            className="pointer-events-none absolute inset-x-8 top-0 h-px bg-gradient-to-r from-transparent via-purple-400/70 to-transparent"
-            aria-hidden
-          />
+          <div className="scanlines pointer-events-none absolute inset-0" aria-hidden />
+          <div className="bracket-frame" aria-hidden />
+
           <div className="relative z-10">
-            <h1 className="text-4xl font-extrabold tracking-tight text-zinc-50 sm:text-5xl">
+            <p className="stat-label text-fuchsia-300/80">
+              Chog Arena // On-Chain Deathmatch
+            </p>
+            <h1 className="mt-3 font-display text-4xl font-bold uppercase leading-[1.05] tracking-tight text-white sm:text-5xl">
               Stake MON. Fight.{" "}
-              <span className="bg-gradient-to-r from-rose-300 to-orange-300 bg-clip-text text-transparent">
+              <span className="neon-title drop-shadow-[0_0_28px_rgba(217,70,239,0.55)]">
                 Instant settlement.
               </span>
             </h1>
-            <p className="mx-auto mt-3 max-w-xl text-sm text-zinc-400">
+            <p className="mx-auto mt-4 max-w-xl font-display text-sm font-medium leading-relaxed text-zinc-400">
               Open a duel or accept a challenge — the arena settles on the spot.
               Chog NFT holders resurrect with Second Wind (20%) and fight fee-free.
             </p>
-            <button
-              type="button"
-              onClick={() => setCreateOpen(true)}
-              className="mt-6 inline-flex items-center gap-2 rounded-2xl bg-rose-600 px-8 py-3.5 text-base font-bold text-white shadow-xl shadow-rose-600/30 transition hover:bg-rose-500"
-            >
-              <Swords className="h-5 w-5" aria-hidden />
-              Create Duel
-            </button>
+
+            <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
+              <button
+                type="button"
+                onClick={() => setCreateOpen(true)}
+                className="btn-neon"
+              >
+                <Swords className="h-4 w-4" aria-hidden />
+                Create Duel
+              </button>
+              <span className="rounded-xl border border-white/10 bg-white/5 px-4 py-3 font-mono text-xs font-semibold uppercase tracking-[0.18em] text-zinc-300 backdrop-blur-md">
+                {ROSTER.length} Fighters Online
+              </span>
+            </div>
+          </div>
+        </section>
+
+        {/* Key protocol stats — the dashboard readout strip */}
+        <section className="glass-panel grid grid-cols-1 divide-y divide-white/5 sm:grid-cols-3 sm:divide-x sm:divide-y-0">
+          <div className="px-5 py-4">
+            <p className="stat-label">Protocol Rake</p>
+            <p className="stat-value mt-1 text-2xl font-bold text-fuchsia-300">
+              2.00<span className="text-sm text-zinc-500">%</span>
+            </p>
+          </div>
+          <div className="px-5 py-4">
+            <p className="stat-label">Second Wind</p>
+            <p className="stat-value mt-1 text-2xl font-bold text-pink-300">
+              20<span className="text-sm text-zinc-500">%</span>
+            </p>
+          </div>
+          <div className="px-5 py-4">
+            <p className="stat-label">Settlement</p>
+            <p className="stat-value mt-1 text-2xl font-bold text-cyan-300">
+              INSTANT
+            </p>
           </div>
         </section>
 

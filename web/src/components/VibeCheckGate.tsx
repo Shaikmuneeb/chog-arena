@@ -123,24 +123,44 @@ export function VibeCheckGate({
   };
 
   return (
-    <div className="quiz-view flex min-h-[100dvh] w-full items-center justify-center p-4 sm:p-8">
+    <div className="relative flex min-h-[100dvh] w-full items-center justify-center overflow-hidden bg-black p-4 sm:p-8">
       {/* the theme toggle — the track starts with the cinematic, so the
           visitor gets a say before it does */}
       <div className="absolute right-4 top-4 z-10">
         <ThemeMuteButton />
       </div>
 
-      <div className="quiz-glass relative w-full max-w-3xl rounded-3xl border-fuchsia-500/30 p-6 shadow-[0_0_90px_-24px_rgba(217,70,239,0.75)] sm:p-10">
+      {/* ambient bloom */}
+      <div
+        className="pointer-events-none absolute inset-0"
+        style={{
+          background:
+            "radial-gradient(ellipse at 15% -5%, rgba(168,85,247,0.30), transparent 55%), radial-gradient(ellipse at 90% 105%, rgba(236,72,153,0.26), transparent 55%), radial-gradient(ellipse at 60% 40%, rgba(34,211,238,0.12), transparent 60%)",
+        }}
+        aria-hidden
+      />
+      {/* technical grid */}
+      <div
+        className="pointer-events-none absolute inset-0 animate-grid-drift opacity-[0.16]"
+        style={{
+          backgroundImage:
+            "linear-gradient(rgba(192,132,252,0.7) 1px, transparent 1px), linear-gradient(90deg, rgba(192,132,252,0.7) 1px, transparent 1px)",
+          backgroundSize: "44px 44px",
+        }}
+        aria-hidden
+      />
+
+      <div className="glass-panel relative w-full max-w-3xl rounded-3xl border-fuchsia-500/30 p-6 shadow-[0_0_90px_-24px_rgba(217,70,239,0.75)] sm:p-10">
         {/* scanlines + corner brackets */}
-        <div className="quiz-scanlines pointer-events-none absolute inset-0" aria-hidden />
-        <div className="quiz-bracket-frame" aria-hidden />
+        <div className="scanlines pointer-events-none absolute inset-0" aria-hidden />
+        <div className="bracket-frame" aria-hidden />
 
         {stage === "calibration" && (
           <>
-            <p className="quiz-stat-label text-fuchsia-300/80">
+            <p className="stat-label text-fuchsia-300/80">
               CWO Arena // Entry Screening
             </p>
-            <h2 className="quiz-neon-title mt-2 text-3xl font-bold uppercase leading-none tracking-tight drop-shadow-[0_0_24px_rgba(217,70,239,0.5)] sm:text-4xl">
+            <h2 className="neon-title mt-2 text-3xl font-bold uppercase leading-none tracking-tight drop-shadow-[0_0_24px_rgba(217,70,239,0.5)] sm:text-4xl">
               Vibe Check
             </h2>
             <p className="mt-3 font-display text-sm text-zinc-400">
@@ -149,19 +169,19 @@ export function VibeCheckGate({
             </p>
 
             {/* ---- calibration slider ---- */}
-            <div className="quiz-glass relative mt-7 p-5">
+            <div className="glass-panel relative mt-7 p-5">
               <div
                 className="pointer-events-none absolute inset-x-6 top-0 h-px bg-gradient-to-r from-transparent via-fuchsia-400/60 to-transparent"
                 aria-hidden
               />
               <label
                 htmlFor="cwo-gay-meter"
-                className="quiz-stat-label !text-fuchsia-200/90"
+                className="stat-label !text-fuchsia-200/90"
               >
                 How gay are you?
               </label>
               <div className="mt-4 flex items-center gap-4">
-                <span className="quiz-stat-value w-8 text-right text-2xl font-bold text-cyan-300 drop-shadow-[0_0_14px_rgba(34,211,238,0.6)]">
+                <span className="stat-value w-8 text-right text-2xl font-bold text-cyan-300 drop-shadow-[0_0_14px_rgba(34,211,238,0.6)]">
                   {meter}
                 </span>
                 <input
@@ -174,7 +194,7 @@ export function VibeCheckGate({
                   onChange={(e) => setMeter(Number(e.target.value))}
                   className="h-2 w-full cursor-pointer appearance-none rounded-full bg-gradient-to-r from-cyan-400 via-fuchsia-500 to-pink-400 accent-fuchsia-400"
                 />
-                <span className="quiz-stat-value w-8 text-2xl font-bold text-fuchsia-300 drop-shadow-[0_0_14px_rgba(217,70,239,0.6)]">
+                <span className="stat-value w-8 text-2xl font-bold text-fuchsia-300 drop-shadow-[0_0_14px_rgba(217,70,239,0.6)]">
                   10
                 </span>
               </div>
@@ -200,7 +220,7 @@ export function VibeCheckGate({
             <button
               type="button"
               onClick={() => setStage("question")}
-              className="quiz-btn-neon mt-6 w-full !py-4 sm:mx-auto sm:w-auto"
+              className="btn-neon mt-6 w-full !py-4 sm:mx-auto sm:w-auto"
             >
               Proceed to Vibe Check
               <ChevronRight className="h-4 w-4" aria-hidden />
@@ -210,7 +230,7 @@ export function VibeCheckGate({
 
         {stage === "question" && (
           <>
-            <p className="quiz-stat-label text-fuchsia-300/80">
+            <p className="stat-label text-fuchsia-300/80">
               Question {questionIndex + 1} / {QUESTIONS.length}
             </p>
             <h2 className="mt-2 font-display text-2xl font-bold uppercase leading-tight tracking-tight text-white drop-shadow-[0_0_18px_rgba(217,70,239,0.45)] sm:text-3xl">
@@ -249,10 +269,10 @@ export function VibeCheckGate({
               className="h-10 w-10 animate-pulse text-cyan-300 drop-shadow-[0_0_20px_rgba(34,211,238,0.8)]"
               aria-hidden
             />
-            <h2 className="quiz-neon-title mt-4 max-w-xl text-2xl font-bold uppercase leading-tight tracking-tight drop-shadow-[0_0_28px_rgba(217,70,239,0.6)] sm:text-4xl">
+            <h2 className="neon-title mt-4 max-w-xl text-2xl font-bold uppercase leading-tight tracking-tight drop-shadow-[0_0_28px_rgba(217,70,239,0.6)] sm:text-4xl">
               You will be chugged by Benja
             </h2>
-            <p className="quiz-stat-value mt-3 text-sm font-bold uppercase tracking-[0.3em] text-fuchsia-200">
+            <p className="stat-value mt-3 text-sm font-bold uppercase tracking-[0.3em] text-fuchsia-200">
               IQ Verified: 12
             </p>
             <p className="mt-3 font-mono text-xs text-zinc-500">
@@ -261,7 +281,7 @@ export function VibeCheckGate({
             <button
               type="button"
               onClick={onStartIntro}
-              className="quiz-btn-neon mt-6 w-full !py-4 !text-xs"
+              className="btn-neon mt-6 w-full !py-4 !text-xs"
             >
               Click here to admire Chog Princess
             </button>

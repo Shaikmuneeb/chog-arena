@@ -9,7 +9,7 @@ import {
   type FighterClass,
 } from "@/context/FighterProfileContext";
 import { FIGHTER_CLASS_META } from "@/config/fighterClasses";
-import { BATTLE_ROSTER } from "@/config/fighterModels";
+import { BATTLE_ROSTER, DEFAULT_FIGHTER_CLASS } from "@/config/fighterModels";
 import dynamic from "next/dynamic";
 
 const FighterPreview3D = dynamic(
@@ -66,7 +66,9 @@ export function ProfileModal({ open, onClose }: ProfileModalProps) {
   const [username, setUsername] = useState("");
   const [avatarUrl, setAvatarUrl] = useState("");
   const [title, setTitle] = useState<string>(FIGHTER_TITLES[0]);
-  const [fighterClass, setFighterClass] = useState<FighterClass>("chogzila");
+  const [fighterClass, setFighterClass] = useState<FighterClass>(
+    DEFAULT_FIGHTER_CLASS,
+  );
   const [urlInput, setUrlInput] = useState("");
   const [previewFailed, setPreviewFailed] = useState(false);
 
@@ -77,7 +79,7 @@ export function ProfileModal({ open, onClose }: ProfileModalProps) {
     setUsername(current?.username ?? "");
     setAvatarUrl(current?.avatarUrl ?? "");
     setTitle(current?.title ?? FIGHTER_TITLES[0]);
-    setFighterClass(current?.fighterClass ?? "chogzila");
+    setFighterClass(current?.fighterClass ?? DEFAULT_FIGHTER_CLASS);
     setUrlInput("");
     setPreviewFailed(false);
   }, [open, address, getProfile]);
@@ -148,19 +150,22 @@ export function ProfileModal({ open, onClose }: ProfileModalProps) {
 
   return (
     <div
-      className="fixed inset-0 z-[90] flex items-center justify-center bg-zinc-950/80 p-4 backdrop-blur-xl"
+      className="fixed inset-0 z-[90] flex items-center justify-center bg-black/80 p-4 backdrop-blur-xl"
       onClick={onClose}
     >
       <div
-        className="w-full max-w-md max-h-[92vh] overflow-y-auto rounded-2xl border border-red-500/30 bg-zinc-950/90 p-6 shadow-[0_0_50px_-10px_rgba(239,68,68,0.25)] animate-rise-in"
+        className="glass-panel max-h-[92vh] w-full max-w-md overflow-y-auto rounded-2xl border-fuchsia-500/25 p-6 shadow-[0_0_70px_-20px_rgba(217,70,239,0.6)] animate-rise-in"
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
       >
         <div className="mb-5 flex items-start justify-between">
           <div>
-            <h2 className="bg-gradient-to-r from-red-400 via-orange-300 to-amber-200 bg-clip-text text-xl font-extrabold tracking-wide text-transparent">
-              FIGHTER PROFILE
+            <p className="stat-label text-fuchsia-300/80">
+              Arena // Identity
+            </p>
+            <h2 className="neon-title mt-1 text-xl font-bold uppercase tracking-[0.12em]">
+              Fighter Profile
             </h2>
             <p className="mt-1 font-mono text-[11px] text-zinc-500">
               {address ? truncateAddress(address) : "—"}
@@ -169,7 +174,7 @@ export function ProfileModal({ open, onClose }: ProfileModalProps) {
           <button
             type="button"
             onClick={onClose}
-            className="shrink-0 rounded-lg p-1 text-zinc-500 transition hover:bg-white/5 hover:text-zinc-300"
+            className="shrink-0 rounded-lg p-1 text-zinc-500 transition hover:bg-white/5 hover:text-zinc-200"
             aria-label="Close"
           >
             <X className="h-4 w-4" />
@@ -177,14 +182,14 @@ export function ProfileModal({ open, onClose }: ProfileModalProps) {
         </div>
 
         {!isConnected ? (
-          <p className="rounded-xl border border-amber-500/20 bg-amber-500/10 px-3.5 py-3 text-center text-xs text-amber-200">
+          <p className="rounded-xl border border-amber-400/25 bg-amber-500/10 px-3.5 py-3 text-center font-display text-xs text-amber-200">
             Connect a wallet to edit your fighter profile.
           </p>
         ) : (
           <>
             {/* Callsign */}
-            <label className="block text-xs font-semibold uppercase tracking-wider text-zinc-500">
-              Fighter Callsign
+            <label className="block">
+              <span className="stat-label">Fighter Callsign</span>
               <input
                 type="text"
                 value={username}
@@ -195,25 +200,23 @@ export function ProfileModal({ open, onClose }: ProfileModalProps) {
                     e.target.value.replace(/[^a-zA-Z0-9]/g, "").slice(0, 16),
                   )
                 }
-                className="mt-1.5 w-full rounded-xl border border-white/10 bg-black/50 px-3 py-2.5 text-base font-bold text-zinc-100 outline-none transition placeholder:font-normal placeholder:text-zinc-700 focus:border-red-500/70 focus:shadow-[0_0_18px_rgba(239,68,68,0.35)]"
+                className="mt-1.5 w-full rounded-xl border border-white/10 bg-black/50 px-3 py-2.5 font-display text-base font-bold text-zinc-100 outline-none backdrop-blur-md transition placeholder:font-normal placeholder:text-zinc-700 focus:border-fuchsia-400/70 focus:shadow-glow-purple"
               />
-              <span className="mt-1 block text-[10px] font-normal text-zinc-600">
+              <span className="mt-1 block font-mono text-[10px] text-zinc-600">
                 Max 16 letters/numbers — falls back to your wallet address if
                 empty.
               </span>
             </label>
 
             {/* Custom avatar uploader */}
-            <p className="mt-5 text-xs font-semibold uppercase tracking-wider text-zinc-500">
-              Fighter Avatar
-            </p>
+            <p className="stat-label mt-5">Fighter Avatar</p>
             <div className="mt-2 flex items-start gap-4">
               {/* Live preview */}
               <div
                 className="flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-2xl border-2"
                 style={{
                   borderColor: fallbackHex,
-                  background: `radial-gradient(circle at 30% 30%, ${fallbackHex}33, transparent 70%), #09090b`,
+                  background: `radial-gradient(circle at 30% 30%, ${fallbackHex}33, transparent 70%), #000`,
                   boxShadow: `0 0 16px ${fallbackHex}66`,
                 }}
               >
@@ -225,14 +228,14 @@ export function ProfileModal({ open, onClose }: ProfileModalProps) {
                     onError={() => setPreviewFailed(true)}
                   />
                 ) : (
-                  <span className="text-2xl font-extrabold text-zinc-100">
+                  <span className="font-display text-2xl font-bold text-zinc-100">
                     {initials}
                   </span>
                 )}
               </div>
 
               <div className="min-w-0 flex-1 space-y-2">
-                <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-semibold text-zinc-200 transition hover:bg-white/10">
+                <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-xl border border-white/10 bg-white/5 px-3 py-2 font-display text-xs font-semibold text-zinc-200 transition hover:border-fuchsia-400/40 hover:bg-fuchsia-500/10">
                   <ImagePlus className="h-3.5 w-3.5" aria-hidden />
                   Upload Image
                   <input
@@ -247,7 +250,7 @@ export function ProfileModal({ open, onClose }: ProfileModalProps) {
                   <button
                     type="button"
                     onClick={removeAvatar}
-                    className="inline-flex items-center gap-1.5 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-semibold text-zinc-400 transition hover:border-red-400/40 hover:text-red-300"
+                    className="inline-flex items-center gap-1.5 rounded-xl border border-white/10 bg-white/5 px-3 py-2 font-display text-xs font-semibold text-zinc-400 transition hover:border-rose-400/50 hover:bg-rose-500/10 hover:text-rose-200"
                   >
                     <Trash2 className="h-3.5 w-3.5" aria-hidden />
                     Remove / Reset
@@ -255,7 +258,7 @@ export function ProfileModal({ open, onClose }: ProfileModalProps) {
                 )}
 
                 <div className="flex items-center gap-1.5">
-                  <div className="flex min-w-0 flex-1 items-center gap-1.5 rounded-xl border border-white/10 bg-black/50 px-2.5 py-2 focus-within:border-red-500/60">
+                  <div className="flex min-w-0 flex-1 items-center gap-1.5 rounded-xl border border-white/10 bg-black/50 px-2.5 py-2 backdrop-blur-md focus-within:border-fuchsia-400/60">
                     <Link className="h-3.5 w-3.5 shrink-0 text-zinc-500" aria-hidden />
                     <input
                       type="url"
@@ -268,19 +271,19 @@ export function ProfileModal({ open, onClose }: ProfileModalProps) {
                           applyUrl();
                         }
                       }}
-                      className="w-full min-w-0 bg-transparent text-xs text-zinc-200 outline-none placeholder:text-zinc-600"
+                      className="w-full min-w-0 bg-transparent font-mono text-xs text-zinc-200 outline-none placeholder:text-zinc-600"
                     />
                   </div>
                   <button
                     type="button"
                     onClick={applyUrl}
-                    className="shrink-0 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-semibold text-zinc-200 transition hover:bg-white/10"
+                    className="shrink-0 rounded-xl border border-white/10 bg-white/5 px-3 py-2 font-display text-xs font-semibold text-zinc-200 transition hover:border-fuchsia-400/40 hover:bg-fuchsia-500/10"
                   >
                     Set
                   </button>
                 </div>
 
-                <p className="text-[10px] leading-snug text-zinc-600">
+                <p className="font-mono text-[10px] leading-snug text-zinc-600">
                   PNG / JPEG / WebP / GIF up to 8 MB — resized to 160×160.
                   Supports direct links and ipfs:// URIs.
                 </p>
@@ -288,9 +291,7 @@ export function ProfileModal({ open, onClose }: ProfileModalProps) {
             </div>
 
             {/* Fighter class — the two characters that enter the 3D arena */}
-            <p className="mt-5 text-xs font-semibold uppercase tracking-wider text-zinc-500">
-              Fighter Class
-            </p>
+            <p className="stat-label mt-5">Fighter Class</p>
             <div className="mt-2 grid grid-cols-2 gap-2">
               {BATTLE_ROSTER.map((cls) => {
                 const meta = FIGHTER_CLASS_META[cls];
@@ -301,9 +302,9 @@ export function ProfileModal({ open, onClose }: ProfileModalProps) {
                     type="button"
                     onClick={() => setFighterClass(cls)}
                     className={cn(
-                      "flex flex-col items-center gap-1 rounded-xl border px-2 pb-2 pt-1 transition",
+                      "flex flex-col items-center gap-1 rounded-xl border px-2 pb-2 pt-1 transition-all",
                       selected
-                        ? "border-red-500/60 bg-red-500/10 shadow-[0_0_16px_rgba(239,68,68,0.3)]"
+                        ? "border-fuchsia-400/60 bg-fuchsia-500/10 shadow-glow-purple"
                         : "border-white/10 bg-black/40 hover:border-white/25",
                     )}
                   >
@@ -313,7 +314,7 @@ export function ProfileModal({ open, onClose }: ProfileModalProps) {
                        className="w-full"
                      />
                     <span
-                      className="text-[10px] font-extrabold uppercase tracking-wider"
+                      className="font-display text-[10px] font-bold uppercase tracking-[0.12em]"
                       style={{ color: selected ? meta.secondary : "#a1a1aa" }}
                     >
                       {meta.profileLabel ?? meta.label}
@@ -322,14 +323,12 @@ export function ProfileModal({ open, onClose }: ProfileModalProps) {
                 );
               })}
             </div>
-            <p className="mt-1.5 text-[10px] text-zinc-600">
+            <p className="mt-1.5 font-display text-[10px] text-zinc-500">
               {FIGHTER_CLASS_META[fighterClass].blurb}
             </p>
 
             {/* Title */}
-            <p className="mt-5 text-xs font-semibold uppercase tracking-wider text-zinc-500">
-              Fighter Title
-            </p>
+            <p className="stat-label mt-5">Fighter Title</p>
             <div className="mt-2 flex flex-wrap gap-2">
               {FIGHTER_TITLES.map((t) => (
                 <button
@@ -337,10 +336,10 @@ export function ProfileModal({ open, onClose }: ProfileModalProps) {
                   type="button"
                   onClick={() => setTitle(t)}
                   className={cn(
-                    "rounded-full border px-3 py-1.5 text-xs font-semibold transition",
+                    "rounded-full border px-3 py-1.5 font-display text-xs font-semibold transition-all",
                     title === t
-                      ? "border-red-500/60 bg-red-500/15 text-red-200 shadow-[0_0_12px_rgba(239,68,68,0.35)]"
-                      : "border-white/10 bg-white/5 text-zinc-300 hover:bg-white/10",
+                      ? "border-fuchsia-400/60 bg-fuchsia-500/15 text-fuchsia-100 shadow-glow-purple"
+                      : "border-white/10 bg-white/5 text-zinc-300 hover:border-fuchsia-400/40 hover:bg-fuchsia-500/10",
                   )}
                 >
                   {t}
@@ -351,10 +350,10 @@ export function ProfileModal({ open, onClose }: ProfileModalProps) {
             <button
               type="button"
               onClick={save}
-              className="mt-6 flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-red-600 via-rose-600 to-orange-600 py-3 text-sm font-extrabold tracking-wide text-white shadow-[0_0_24px_rgba(239,68,68,0.4)] transition hover:from-red-500 hover:via-rose-500 hover:to-orange-500"
+              className="btn-neon mt-6 w-full"
             >
               <Check className="h-4 w-4" aria-hidden />
-              SAVE FIGHTER PROFILE
+              Save Fighter Profile
             </button>
           </>
         )}
