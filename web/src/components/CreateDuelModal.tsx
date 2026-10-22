@@ -192,11 +192,11 @@ export function CreateDuelModal({ open, onClose, onCreated }: CreateDuelModalPro
 
   return (
     <div
-      className="fixed inset-0 z-[90] flex items-center justify-center bg-black/80 p-4 backdrop-blur-xl"
+      className="fixed inset-0 z-[90] flex items-center justify-center bg-zinc-950/80 p-4 backdrop-blur-xl"
       onClick={onClose}
     >
       <div
-        className="glass-panel w-full max-w-lg rounded-2xl border-fuchsia-500/25 p-6 shadow-[0_0_70px_-20px_rgba(217,70,239,0.6)] animate-rise-in"
+        className="w-full max-w-lg rounded-2xl border border-red-500/30 bg-zinc-950/90 p-6 shadow-[0_0_50px_-10px_rgba(239,68,68,0.25)] animate-rise-in"
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
@@ -204,13 +204,13 @@ export function CreateDuelModal({ open, onClose, onCreated }: CreateDuelModalPro
         {/* Header */}
         <div className="mb-5 flex items-start justify-between">
           <div>
-            <p className="stat-label text-fuchsia-300/80">
-              Duel Forge // Monad
-            </p>
-            <h2 className="neon-title mt-1 text-2xl font-bold uppercase tracking-[0.1em]">
-              Forge A Duel
+            <h2 className="flex items-center gap-2 bg-gradient-to-r from-red-400 via-orange-300 to-amber-200 bg-clip-text text-2xl font-extrabold tracking-wide text-transparent">
+              <span className="drop-shadow-[0_0_10px_rgba(239,68,68,0.8)] animate-pulse">
+                ⚔️
+              </span>
+              FORGE A DUEL
             </h2>
-            <p className="mt-1.5 font-display text-xs text-zinc-400">
+            <p className="mt-1 text-xs text-zinc-400">
               Stake native MON. Instant on-chain resolution. Winner claims the
               pot.
             </p>
@@ -218,11 +218,11 @@ export function CreateDuelModal({ open, onClose, onCreated }: CreateDuelModalPro
           <div className="flex items-center gap-2">
             {isConnected && address && (
               <span
-                className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 py-1 pl-1 pr-2.5 backdrop-blur-md"
+                className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 py-1 pl-1 pr-2.5"
                 title="Your fighter"
               >
                 <FighterAvatarBadge address={address} size="sm" />
-                <span className="max-w-24 truncate font-display text-[11px] font-bold text-zinc-200">
+                <span className="max-w-24 truncate text-[11px] font-bold text-zinc-200">
                   {getProfile(address)?.username ?? truncateAddress(address)}
                 </span>
               </span>
@@ -230,7 +230,7 @@ export function CreateDuelModal({ open, onClose, onCreated }: CreateDuelModalPro
             <button
               type="button"
               onClick={onClose}
-              className="shrink-0 rounded-lg p-1 text-zinc-500 transition hover:bg-white/5 hover:text-zinc-200"
+              className="shrink-0 rounded-lg p-1 text-zinc-500 transition hover:bg-white/5 hover:text-zinc-300"
               aria-label="Close"
             >
               <X className="h-4 w-4" />
@@ -240,10 +240,12 @@ export function CreateDuelModal({ open, onClose, onCreated }: CreateDuelModalPro
 
         {/* Wager input */}
         <div className="mb-1.5 flex items-center justify-between">
-          <label className="stat-label">Wager</label>
-          <span className="font-mono text-[11px] text-zinc-500">
+          <label className="text-xs font-semibold uppercase tracking-wider text-zinc-500">
+            Wager
+          </label>
+          <span className="text-[11px] text-zinc-500">
             Wallet Balance:{" "}
-            <span className="font-semibold text-amber-300">
+            <span className="font-semibold text-amber-200">
               {balance
                 ? `${Number(balance.formatted).toLocaleString("en-US", { maximumFractionDigits: 3 })} MON`
                 : isConnected
@@ -252,7 +254,7 @@ export function CreateDuelModal({ open, onClose, onCreated }: CreateDuelModalPro
             </span>
           </span>
         </div>
-        <div className="flex items-center gap-2 rounded-xl border border-white/10 bg-black/50 px-3 py-3 backdrop-blur-md transition focus-within:border-fuchsia-400/70 focus-within:shadow-glow-purple">
+        <div className="flex items-center gap-2 rounded-xl border border-white/10 bg-black/50 px-3 py-3 transition focus-within:border-red-500/70 focus-within:shadow-[0_0_18px_rgba(239,68,68,0.35)]">
           <input
             type="text"
             inputMode="decimal"
@@ -266,16 +268,14 @@ export function CreateDuelModal({ open, onClose, onCreated }: CreateDuelModalPro
                 setActiveChip(null);
               }
             }}
-            className="stat-value w-full bg-transparent text-xl font-bold text-zinc-100 outline-none placeholder:text-zinc-700"
+            className="w-full bg-transparent text-xl font-bold text-zinc-100 outline-none placeholder:text-zinc-700"
           />
-          <span className="rounded-md border border-white/10 bg-white/5 px-2 py-1 font-display text-xs font-bold text-zinc-300">
+          <span className="rounded-md border border-white/10 bg-white/5 px-2 py-1 text-xs font-bold text-zinc-300">
             MON
           </span>
         </div>
         {amountInvalid && (
-          <p className="mt-1 font-display text-xs text-rose-300">
-            Enter a valid MON amount
-          </p>
+          <p className="mt-1 text-xs text-red-400">Enter a valid MON amount</p>
         )}
 
         {/* Quick chips */}
@@ -286,10 +286,10 @@ export function CreateDuelModal({ open, onClose, onCreated }: CreateDuelModalPro
               type="button"
               onClick={() => pickChip(quick)}
               className={cn(
-                "rounded-lg border px-3 py-1.5 font-mono text-xs font-semibold transition-all",
+                "rounded-lg border px-3 py-1.5 text-xs font-semibold transition",
                 activeChip === quick
-                  ? "border-fuchsia-400/70 bg-fuchsia-500/20 text-fuchsia-100 shadow-glow-purple"
-                  : "border-white/10 bg-white/5 text-zinc-300 hover:border-fuchsia-400/50 hover:bg-fuchsia-500/10 hover:text-white",
+                  ? "border-red-500/60 bg-red-500/15 text-red-200 shadow-[0_0_14px_rgba(239,68,68,0.4)]"
+                  : "border-white/10 bg-white/5 text-zinc-300 hover:bg-white/10",
               )}
             >
               {quick} MON
@@ -300,10 +300,10 @@ export function CreateDuelModal({ open, onClose, onCreated }: CreateDuelModalPro
             onClick={pickMax}
             disabled={!balance || balance.value === 0n}
             className={cn(
-              "rounded-lg border px-3 py-1.5 font-mono text-xs font-bold transition-all disabled:cursor-not-allowed disabled:opacity-40",
+              "rounded-lg border px-3 py-1.5 text-xs font-bold transition disabled:cursor-not-allowed disabled:opacity-40",
               activeChip === "MAX"
-                ? "border-amber-400/70 bg-amber-500/20 text-amber-100 shadow-glow-amber"
-                : "border-white/10 bg-white/5 text-zinc-300 hover:border-amber-400/50 hover:bg-amber-500/10 hover:text-white",
+                ? "border-amber-400/60 bg-amber-500/15 text-amber-200 shadow-[0_0_14px_rgba(245,158,11,0.4)]"
+                : "border-white/10 bg-white/5 text-zinc-300 hover:bg-white/10",
             )}
           >
             MAX
@@ -311,47 +311,47 @@ export function CreateDuelModal({ open, onClose, onCreated }: CreateDuelModalPro
         </div>
 
         {/* Battle calculations */}
-        <div className="mt-5 divide-y divide-white/5 rounded-xl border border-white/10 bg-black/40 backdrop-blur-md">
-          <div className="data-row">
-            <span className="flex items-center gap-1.5 font-display text-xs font-medium text-zinc-400">
+        <div className="mt-5 divide-y divide-white/5 rounded-xl border border-white/5 bg-black/40">
+          <div className="flex items-center justify-between px-4 py-3">
+            <span className="flex items-center gap-1.5 text-xs font-medium text-zinc-400">
               <Coins className="h-3.5 w-3.5" aria-hidden />
               Total Arena Pot
             </span>
-            <span className="stat-value bg-gradient-to-r from-amber-300 to-orange-300 bg-clip-text text-2xl font-bold text-transparent drop-shadow-[0_0_12px_rgba(249,115,22,0.5)]">
+            <span className="text-2xl font-extrabold text-transparent bg-gradient-to-r from-amber-300 to-orange-300 bg-clip-text drop-shadow-[0_0_12px_rgba(249,115,22,0.5)]">
               {formatMon(pot)} MON
             </span>
           </div>
 
-          <div className="data-row">
-            <span className="font-display text-xs font-medium text-zinc-400">
+          <div className="flex items-center justify-between gap-3 px-4 py-3">
+            <span className="text-xs font-medium text-zinc-400">
               Potential Takehome
             </span>
             <div className="text-right">
-              <span className="stat-value block text-sm font-bold text-emerald-300">
+              <span className="block text-sm font-bold text-emerald-300">
                 {formatMon(takehome)} MON
               </span>
               {isChogHolder ? (
-                <span className="mt-0.5 inline-block rounded-full border border-fuchsia-400/40 bg-fuchsia-500/15 px-2 py-0.5 font-display text-[10px] font-semibold uppercase tracking-[0.1em] text-fuchsia-200">
+                <span className="mt-0.5 inline-block rounded-full border border-purple-400/40 bg-purple-500/15 px-2 py-0.5 text-[10px] font-semibold text-purple-200">
                   0% Protocol Rake (Chog NFT Holder)
                 </span>
               ) : (
-                <span className="mt-0.5 inline-block font-display text-[10px] font-semibold uppercase tracking-[0.1em] text-amber-300/80">
+                <span className="mt-0.5 inline-block text-[10px] font-semibold text-amber-300/80">
                   2% Arena Rake
                 </span>
               )}
             </div>
           </div>
 
-          <div className="data-row">
-            <span className="font-display text-xs font-medium text-zinc-400">
+          <div className="flex items-center justify-between gap-3 px-4 py-3">
+            <span className="text-xs font-medium text-zinc-400">
               Second Wind Defense
             </span>
             {isChogHolder ? (
-              <span className="inline-flex animate-pulse items-center gap-1 rounded-full border border-pink-400/40 bg-pink-500/15 px-2.5 py-1 font-display text-[10px] font-bold uppercase tracking-[0.1em] text-pink-200 shadow-glow-pink">
+              <span className="inline-flex animate-pulse items-center gap-1 rounded-full border border-purple-400/40 bg-purple-500/15 px-2.5 py-1 text-[10px] font-bold text-purple-200 shadow-[0_0_14px_rgba(168,85,247,0.45)]">
                 🛡️ Second Wind: 20% Instant Resurrect Active
               </span>
             ) : (
-              <span className="text-right font-display text-[10px] leading-snug text-zinc-500">
+              <span className="text-right text-[10px] leading-snug text-zinc-500">
                 ⚠️ Second Wind: Inactive (Hold a Chog NFT for a 20% Sudden
                 Death re-roll)
               </span>
@@ -365,13 +365,13 @@ export function CreateDuelModal({ open, onClose, onCreated }: CreateDuelModalPro
             <button
               type="button"
               onClick={() => setShowConnectors((v) => !v)}
-              className="flex w-full animate-pulse items-center justify-center gap-2 rounded-xl border border-fuchsia-400/50 bg-gradient-to-r from-fuchsia-600/25 to-pink-600/25 py-3.5 font-display text-sm font-bold uppercase tracking-[0.14em] text-fuchsia-100 shadow-glow-purple transition hover:from-fuchsia-600/40 hover:to-pink-600/40"
+              className="flex w-full animate-pulse items-center justify-center gap-2 rounded-xl border border-red-500/50 bg-gradient-to-r from-red-600/20 to-orange-600/20 py-3.5 text-sm font-extrabold tracking-wide text-red-100 shadow-[0_0_24px_rgba(239,68,68,0.35)] transition hover:from-red-600/30 hover:to-orange-600/30"
             >
               <Swords className="h-4 w-4" aria-hidden />
               ⚔️ CONNECT WALLET TO ENTER ARENA
             </button>
             {showConnectors && (
-              <div className="glass-deep mt-2 overflow-hidden rounded-xl">
+              <div className="mt-2 overflow-hidden rounded-xl border border-white/10 bg-zinc-900">
                 {connectors.length === 0 ? (
                   <p className="px-4 py-3 text-xs text-zinc-500">
                     No browser wallets detected. Install MetaMask, Rabby, or
@@ -387,7 +387,7 @@ export function CreateDuelModal({ open, onClose, onCreated }: CreateDuelModalPro
                         connect({ connector });
                         setShowConnectors(false);
                       }}
-                      className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left font-display text-sm text-zinc-200 transition hover:bg-fuchsia-500/10 hover:text-white disabled:opacity-50"
+                      className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-sm text-zinc-200 transition hover:bg-white/5 disabled:opacity-50"
                     >
                       <Wallet className="h-4 w-4 text-zinc-400" aria-hidden />
                       {connector.name}
@@ -401,9 +401,9 @@ export function CreateDuelModal({ open, onClose, onCreated }: CreateDuelModalPro
           <button
             type="button"
             onClick={() => switchChain({ chainId: targetChain.id })}
-            className="mt-5 flex w-full items-center justify-center gap-2 rounded-xl border border-amber-400/50 bg-gradient-to-r from-amber-600/20 to-orange-600/20 py-3.5 font-display text-sm font-bold uppercase tracking-[0.14em] text-amber-100 shadow-glow-amber transition hover:from-amber-600/30 hover:to-orange-600/30"
+            className="mt-5 flex w-full items-center justify-center gap-2 rounded-xl border border-amber-400/50 bg-gradient-to-r from-amber-600/20 to-orange-600/20 py-3.5 text-sm font-extrabold tracking-wide text-amber-100 shadow-[0_0_24px_rgba(245,158,11,0.35)] transition hover:from-amber-600/30 hover:to-orange-600/30"
           >
-            Switch to Monad Network
+            SWITCH TO MONAD NETWORK
           </button>
         ) : (
           <button
@@ -411,8 +411,10 @@ export function CreateDuelModal({ open, onClose, onCreated }: CreateDuelModalPro
             onClick={submit}
             disabled={!canSubmit}
             className={cn(
-              "btn-neon mt-5 w-full !py-3.5 !text-sm",
-              !canSubmit && "animate-none",
+              "mt-5 flex w-full animate-pulse items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-red-600 via-rose-600 to-orange-600 bg-[length:200%_100%] py-3.5 text-sm font-extrabold tracking-wide text-white shadow-[0_0_28px_rgba(239,68,68,0.45)] transition",
+              canSubmit
+                ? "hover:from-red-500 hover:via-rose-500 hover:to-orange-500"
+                : "cursor-not-allowed opacity-50 animate-none",
             )}
           >
             {busy && <Loader2 className="h-4 w-4 animate-spin" aria-hidden />}
