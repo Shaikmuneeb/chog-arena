@@ -12,34 +12,58 @@ export const VIBE_CHECK_KEY = "cwo-vibe-check";
 
 type Stage = "calibration" | "question" | "passed";
 
-type Question = {
-  prompt: string;
-  options: string[];
+type QuizOption = {
+  text: string;
+  /** The IQ points this answer is worth. */
+  iq: number;
 };
 
+type Question = {
+  prompt: string;
+  options: QuizOption[];
+};
+
+/**
+ * The screening questions.
+ *
+ * The answers are not graded — the point is the bit — but they DO add up to
+ * the IQ on the certificate, so the visitor's own choices decide the number
+ * they walk into the arena with. The middle option of each question is
+ * worth 4, so a middling run still lands on the classic 12; the sharpest
+ * run tops out at 18 and the laziest bottoms out at 8.
+ */
 const QUESTIONS: Question[] = [
   {
     prompt: "Did Benja and James kiss?",
     options: [
-      "Yes, they are gay",
-      "Yes, with the full spiky purple armor still on",
-      "No, they were just transferring MON mouth-to-mouth",
+      { text: "Yes, they are gay", iq: 4 },
+      {
+        text: "Yes, with the full spiky purple armor still on",
+        iq: 6,
+      },
+      { text: "No, they were just transferring MON mouth-to-mouth", iq: 3 },
     ],
   },
   {
     prompt: "Do you like Chog Princess?",
     options: [
-      "Yes, I would let her roundhouse kick me and drain my entire wallet",
-      "I am only here for the 3D physics, respectfully",
-      "No, I only simp for big sweaty armored men like Void Lord James",
+      {
+        text: "Yes, I would let her roundhouse kick me and drain my entire wallet",
+        iq: 6,
+      },
+      { text: "I am only here for the 3D physics, respectfully", iq: 4 },
+      {
+        text: "No, I only simp for big sweaty armored men like Void Lord James",
+        iq: 2,
+      },
     ],
   },
   {
     prompt: "Why did Benja touch Toad?",
     options: [
-      "Cause he cant touch mamio",
-      "Benja need a gay builder thats why",
-      "But toad liks chog princesss",
+      { text: "Cause he cant touch mamio", iq: 4 },
+      { text: "Benja need a gay builder thats why", iq: 6 },
+      { text: "But toad liks chog princesss", iq: 3 },
     ],
   },
 ];
@@ -75,7 +99,7 @@ export function VibeCheckGate({
   const [stage, setStage] = useState<Stage>("calibration");
   const [meter, setMeter] = useState(5);
   const [questionIndex, setQuestionIndex] = useState(0);
-  const [answers, setAnswers] = useState<string[]>([]);
+  const [answers, setAnswers] = useState<QuizOption[]>([]);
 
   /* Keep the callback in a ref: the parent re-renders often, and a changing
    * `onPass` identity would keep resetting the certificate timer. */
@@ -121,6 +145,9 @@ export function VibeCheckGate({
       message: "BASED OVERFLOW — meter maxed. Based.",
     });
   };
+
+  /* The certificate is the sum of what the visitor actually answered. */
+  const iqScore = answers.reduce((sum, answer) => sum + answer.iq, 0);
 
   return (
     <div className="relative flex min-h-[100dvh] w-full items-center justify-center overflow-hidden bg-black p-4 sm:p-8">
@@ -240,7 +267,7 @@ export function VibeCheckGate({
             <div className="mt-6 space-y-3">
               {QUESTIONS[questionIndex].options.map((option) => (
                 <button
-                  key={option}
+                  key={option.text}
                   type="button"
                   onClick={() => {
                     const next = [...answers, option];
@@ -256,7 +283,7 @@ export function VibeCheckGate({
                   <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-fuchsia-400/40 font-mono text-[10px] font-bold text-fuchsia-300 group-hover:bg-fuchsia-500/20">
                     {String.fromCharCode(65 + questionIndex)}
                   </span>
-                  {option}
+                  {option.text}
                 </button>
               ))}
             </div>
@@ -273,7 +300,7 @@ export function VibeCheckGate({
               Congrats — You will be chugged by Benja
             </h2>
             <p className="stat-value mt-3 text-sm font-bold uppercase tracking-[0.3em] text-fuchsia-200">
-              IQ Verified: 12
+              IQ Verified: {iqScore}
             </p>
             <p className="mt-3 font-mono text-xs text-zinc-500">
               Calibration {meter}/10 · {answers.length}/3 answered
