@@ -1,8 +1,24 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { CwoCinematicIntro } from "@/components/CwoCinematicIntro";
 import { VibeCheckGate, vibeCheckPassed } from "@/components/VibeCheckGate";
+
+/**
+ * The screens the screening route moves through.
+ *
+ *   quiz       the starting quiz — the calibration meter and the three
+ *              questions
+ *   cwo_intro  the CWO cinematic takeover, explicitly fired the moment the
+ *              visitor clicks the admire button
+ *   lobby      the Main Lobby, reached by the route change below
+ *
+ * The machine is explicit so the cinematic always plays BETWEEN the quiz
+ * and the lobby: it is a state, not a side effect, and it can never be
+ * skipped by a stray navigation.
+ */
+type View = "quiz" | "cwo_intro" | "lobby";
 
 /**
  * The CWO Vibe Check screening route.
@@ -13,16 +29,16 @@ import { VibeCheckGate, vibeCheckPassed } from "@/components/VibeCheckGate";
  */
 export default function VibeCheckPage() {
   const router = useRouter();
-  /* the gate only mounts for a visitor who has NOT cleared it yet */
-  const [showGate, setShowGate] = useState(false);
+  const [view, setView] = useState<View>("quiz");
 
   /* already cleared this session — don't make them sit through it again */
   useEffect(() => {
     if (vibeCheckPassed()) {
+      setView("lobby");
       router.replace("/");
       return;
     }
-    setShowGate(true);
+    setView("quiz");
   }, [router]);
 
   /* Warm the arena route now so the cinematic's final flash can hand the
@@ -31,16 +47,35 @@ export default function VibeCheckPage() {
     router.prefetch("/");
   }, [router]);
 
-  if (!showGate) {
-    /* A visitor who already cleared the screening is on their way to the
-     * lobby - mounting the gate would kick the theme off at full energy
-     * for a screen they are about to leave. */
-    return <div className="min-h-[100dvh] w-full bg-black" />;
-  }
+  /** The quiz is done — fire the cinematic before the lobby. */
+  const startIntro = useCallback(() => {
+    setView("cwo_intro");
+  }, []);
+
+  /**
+   * Hand over to the Main Lobby.
+   *
+   * The cinematic keeps rendering until the route actually swaps, so the
+   * final flash is never cut short.
+   */
+  const enterLobby = useCallback(() => {
+    router.replace("/");
+  }, [router]);
 
   return (
-    <VibeCheckGate
-      onPass={() => router.replace("/")}
-    />
+    <>
+      {view === "quiz" && (
+        <VibeCheckGate
+          onPass={enterLobby}
+          onStartIntro={startIntro}
+        />
+      )}
+      {view === "cwo_intro" && (
+        <CwoCinematicIntro
+          onComplete={enterLobby}
+          onFinished={enterLobby}
+        />
+      )}
+    </>
   );
 }

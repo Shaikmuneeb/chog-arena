@@ -28,6 +28,16 @@ export type FighterRosterEntry = {
   price: string;
   /** Optional full-width card banner shown on the lobby fighter card. */
   banner?: string;
+  /**
+   * Which slice of the banner artwork the card keeps, as a CSS
+   * object-position.
+   *
+   * The banner artwork is a finished card design — it carries its own
+   * lettering (eyebrow, name, price, challenge button) down the left edge.
+   * The lobby card crops to the character and renders its own crisp title,
+   * price and button underneath, so the two never collide.
+   */
+  bannerFocus?: string;
 };
 
 /**
@@ -58,6 +68,7 @@ export const FIGHTER_ROSTER: readonly FighterRosterEntry[] = [
     style: "Void Dimension Cleave",
     price: "1 MON",
     banner: "/banners/james-card new banner.png",
+    bannerFocus: "86% 50%",
   },
   {
     id: "crimson_lord_benja",
@@ -80,6 +91,7 @@ export const FIGHTER_ROSTER: readonly FighterRosterEntry[] = [
     style: "Supernova Astral Beam",
     price: "1.2 MON",
     banner: "/banners/chog princess card new banner.png",
+    bannerFocus: "100% 50%",
   },
 ];
 

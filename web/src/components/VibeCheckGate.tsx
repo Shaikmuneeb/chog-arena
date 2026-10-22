@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Check, ChevronRight, Sparkles } from "lucide-react";
 import { pushToast } from "./Toast";
-import { CwoCinematicIntro, preloadCwoFrames } from "./CwoCinematicIntro";
+import { preloadCwoFrames } from "./CwoCinematicIntro";
 import { ThemeMuteButton } from "./ThemeMuteButton";
 import { setChogScene } from "@/lib/chogTheme";
 
@@ -63,13 +63,19 @@ export function vibeCheckPassed(): boolean {
  * Rendered on its own route (`/vibe-check`) so visitors never see the
  * arena before clearing the screening.
  */
-export function VibeCheckGate({ onPass }: { onPass: () => void }) {
+export function VibeCheckGate({
+  onPass,
+  onStartIntro,
+}: {
+  /** The screening is over and there is no cinematic — go straight in. */
+  onPass: () => void;
+  /** The visitor asked for the cinematic — fire the cwo_intro view. */
+  onStartIntro: () => void;
+}) {
   const [stage, setStage] = useState<Stage>("calibration");
   const [meter, setMeter] = useState(5);
   const [questionIndex, setQuestionIndex] = useState(0);
   const [answers, setAnswers] = useState<string[]>([]);
-  /* the CWO cinematic takeover — plays over the certificate */
-  const [showIntro, setShowIntro] = useState(false);
 
   /* Keep the callback in a ref: the parent re-renders often, and a changing
    * `onPass` identity would keep resetting the certificate timer. */
@@ -103,10 +109,10 @@ export function VibeCheckGate({ onPass }: { onPass: () => void }) {
    * The cinematic takes over that hold, so the timer stands down while
    * it plays. */
   useEffect(() => {
-    if (stage !== "passed" || showIntro) return;
+    if (stage !== "passed") return;
     const t = setTimeout(() => onPassRef.current(), 8000);
     return () => clearTimeout(t);
-  }, [stage, showIntro]);
+  }, [stage]);
 
   const onMaxToggle = () => {
     setMeter(10);
@@ -254,7 +260,7 @@ export function VibeCheckGate({ onPass }: { onPass: () => void }) {
             </p>
             <button
               type="button"
-              onClick={() => setShowIntro(true)}
+              onClick={onStartIntro}
               className="quiz-btn-neon mt-6 w-full !py-4 !text-xs"
             >
               Click here to admire Chog Princess
@@ -262,17 +268,6 @@ export function VibeCheckGate({ onPass }: { onPass: () => void }) {
           </div>
         )}
       </div>
-
-      {/* ---- the CWO cinematic takeover ----
-          The overlay plays on top of the certificate; the route change is
-          fired when the final flash starts, so the arena dashboard is
-          already mounted underneath it by the time the flash clears. */}
-      {showIntro && (
-        <CwoCinematicIntro
-          onComplete={() => onPassRef.current()}
-          onFinished={() => setShowIntro(false)}
-        />
-      )}
     </div>
   );
 }

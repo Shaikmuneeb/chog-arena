@@ -79,8 +79,8 @@ export default function Home() {
     <>
       <ArenaHeader />
       <main className="mx-auto max-w-6xl space-y-8 px-4 py-8">
-        {/* Create Duel CTA — pure CSS arena glow, no flat background images */}
-        <section className="relative overflow-hidden rounded-3xl border border-white/10 bg-zinc-900 p-8 text-center shadow-[0_0_60px_rgba(244,63,94,0.08)]">
+        {/* Create Duel CTA — frosted tactical panel with a neon rim */}
+        <section className="relative overflow-hidden rounded-3xl border border-purple-500/20 bg-white/[0.03] p-8 text-center backdrop-blur-xl shadow-[0_0_70px_-18px_rgba(168,85,247,0.55)] transition-shadow duration-300 hover:shadow-[0_0_90px_-16px_rgba(168,85,247,0.7)]">
           <div
             className="absolute inset-0"
             style={{
@@ -91,6 +91,11 @@ export default function Home() {
           />
           <div
             className="absolute inset-0 bg-gradient-to-b from-black/50 via-black/35 to-black/70"
+            aria-hidden
+          />
+          {/* neon rim along the top edge */}
+          <div
+            className="pointer-events-none absolute inset-x-8 top-0 h-px bg-gradient-to-r from-transparent via-purple-400/70 to-transparent"
             aria-hidden
           />
           <div className="relative z-10">

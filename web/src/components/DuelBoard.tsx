@@ -207,7 +207,7 @@ export function DuelBoard({
   return (
     <section className="space-y-6">
       {/* Compact Live PvP strip */}
-      <div className="flex items-center justify-between rounded-xl border border-white/10 bg-zinc-900/60 px-4 py-2.5">
+      <div className="flex items-center justify-between rounded-xl border border-purple-500/20 bg-white/[0.03] px-4 py-2.5 backdrop-blur-xl shadow-[0_0_24px_-12px_rgba(168,85,247,0.55)]">
         <div className="flex items-center gap-3">
           <span className="text-xs font-bold uppercase tracking-[0.18em] text-zinc-400">
             Open PVP Challenges
@@ -302,7 +302,7 @@ function NpcFighterCard({
   const displayName = entry?.name ?? npc.name;
   const priceLabel = entry?.price ?? `${formatMon(duel.betAmount)} MON`;
   return (
-    <li className="group relative flex flex-col overflow-hidden rounded-2xl border border-white/10 bg-white/[0.02] transition-all duration-300 hover:border-purple-500/50 hover:bg-white/[0.04] hover:shadow-[0_0_28px_-8px_rgba(168,85,247,0.45)]">
+    <li className="group relative flex flex-col overflow-hidden rounded-2xl border border-purple-500/20 bg-white/[0.03] backdrop-blur-xl transition-all duration-300 hover:border-purple-400/50 hover:bg-white/[0.06] hover:shadow-[0_0_36px_-10px_rgba(168,85,247,0.6)]">
       {/* Class-tinted top edge */}
       <div
         className="absolute inset-x-0 top-0 h-px opacity-70"
@@ -311,37 +311,53 @@ function NpcFighterCard({
         }}
         aria-hidden
       />
-  {/* Banner — a static card illustration when the roster entry supplies one,
-      falling back to the live 3D preview otherwise */}
-  <div className="relative flex h-[220px] items-center justify-center overflow-hidden">
-    {entry?.banner ? (
-      <img
-        src={entry.banner}
-        alt=""
-        className="pointer-events-none absolute inset-0 h-full w-full object-cover"
-        style={{ imageRendering: "auto" }}
-        aria-hidden
-      />
-    ) : (
-      <FighterPreview3D
-        fighterClass={npc.fighterClass}
-        size={220}
-        className="w-full"
-      />
-    )}
-  </div>
-      <div className="absolute inset-x-0 bottom-0 z-20 bg-gradient-to-t from-black/80 via-black/40 to-transparent p-4">
-        <p className="text-xl font-black uppercase tracking-wider text-white">
-          {displayName}
-        </p>
-        <div className="mt-1 flex items-center justify-between">
+      {/* ARTWORK — the banner cropped to the fighter.
+          The artwork carries its own lettering down the left edge, so the
+          crop keeps the character only and the card below renders its own
+          crisp title, price and button. */}
+      <div className="relative aspect-[6/5] w-full overflow-hidden">
+        {entry?.banner ? (
+          <img
+            src={entry.banner}
+            alt=""
+            className="pointer-events-none absolute inset-0 h-full w-full object-cover"
+            style={{ objectPosition: entry.bannerFocus ?? "100% 50%" }}
+            aria-hidden
+          />
+        ) : (
+          <FighterPreview3D
+            fighterClass={npc.fighterClass}
+            size={280}
+            className="h-full w-full"
+          />
+        )}
+        {/* floor glow so the figure sits in the card */}
+        <div
+          className="pointer-events-none absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-black/75 to-transparent"
+          aria-hidden
+        />
+      </div>
+
+      {/* CARD BODY — one clean block of live typography. The banner's own
+          lettering is cropped out, so nothing here repeats it. */}
+      <div className="relative z-10 flex flex-1 flex-col gap-3 p-4">
+        <div className="min-w-0">
+          <h3 className="truncate text-lg font-black uppercase leading-tight tracking-wider text-white">
+            {displayName}
+          </h3>
+          <p className="mt-1 truncate font-mono text-[11px] uppercase tracking-[0.14em] text-zinc-500">
+            {style}
+          </p>
+        </div>
+
+        <div className="mt-auto flex items-center justify-between gap-2">
           <span className="font-mono text-sm font-black tabular-nums text-amber-300">
             {priceLabel}
           </span>
           <button
             type="button"
             onClick={onFight}
-            className="rounded-lg bg-rose-600 px-3 py-1.5 text-xs font-bold text-white opacity-0 shadow-lg shadow-rose-600/30 transition-all duration-300 group-hover:opacity-100 hover:bg-rose-500"
+            className="rounded-lg bg-rose-600 px-3 py-1.5 text-xs font-bold text-white opacity-70 shadow-lg shadow-rose-600/30 transition-all duration-300 group-hover:opacity-100 hover:bg-rose-500 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400"
           >
             CHALLENGE
           </button>
@@ -377,7 +393,7 @@ function PlayerDuelRow({
     address != null && duel.creator.toLowerCase() === address.toLowerCase();
   const classMeta = FIGHTER_CLASS_META[profileClass];
   return (
-    <li className="group relative overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-900/80 px-4 py-3 transition-all duration-300 hover:border-purple-500/50 hover:bg-zinc-900/95 hover:shadow-[0_0_28px_-8px_rgba(168,85,247,0.35)]">
+    <li className="group relative overflow-hidden rounded-2xl border border-purple-500/20 bg-white/[0.03] px-4 py-3 backdrop-blur-xl transition-all duration-300 hover:border-purple-400/50 hover:bg-white/[0.06] hover:shadow-[0_0_28px_-10px_rgba(168,85,247,0.5)]">
       <div
         className="absolute inset-x-0 top-0 h-px opacity-60"
         style={{
