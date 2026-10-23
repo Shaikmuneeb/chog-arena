@@ -59,7 +59,9 @@ export const FIGHTER_3D: Partial<Record<FighterClass, Fighter3DConfig>> = {
       idle: "Mma Idle.fbx",
       lightAttack: "Combo Punch.fbx",
       heavyAttack: "Armada.fbx",
-      special: "Medium Hit To Head.fbx",
+      /* she ships no dedicated special rig — her assassination art covers
+       * both finishers, exactly like James shares his takedown */
+      special: "Brutal Assassination.fbx",
       critical: "Brutal Assassination.fbx",
       block: "Body Block.fbx",
       hit: "Light Hit To Head.fbx",

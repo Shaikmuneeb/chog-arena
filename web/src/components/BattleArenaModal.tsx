@@ -47,6 +47,7 @@ import {
 } from "@/utils/chug";
 import {
   playDashSfx,
+  playHitSfx,
   playImpactSfx,
   playRoundAnnouncement,
   playSecondWindSfx,
@@ -183,22 +184,6 @@ const STAGE_LOAD_GRACE_MS = 20_000;
 /**
  * Per-archetype windup timings (ms).
  */
-const WINDUP_FOR: Record<FighterClass, Record<AttackKind, number>> = {
-  chogzila: { light: 160, heavy: 400, special: 420, critical: 500 },
-  chog_samurai: { light: 110, heavy: 220, special: 300, critical: 380 },
-  void_lord_james: { light: 150, heavy: 260, special: 320, critical: 400 },
-  crimson_lord_benja: { light: 90, heavy: 180, special: 260, critical: 320 },
-  lady_chog: { light: 100, heavy: 200, special: 280, critical: 360 },
-  chog_princess: { light: 120, heavy: 220, special: 300, critical: 380 },
-};
-const RECOVER_FOR: Record<FighterClass, Record<AttackKind, number>> = {
-  chogzila: { light: 220, heavy: 420, special: 360, critical: 440 },
-  chog_samurai: { light: 140, heavy: 240, special: 280, critical: 340 },
-  void_lord_james: { light: 180, heavy: 260, special: 300, critical: 360 },
-  crimson_lord_benja: { light: 100, heavy: 200, special: 260, critical: 320 },
-  lady_chog: { light: 120, heavy: 220, special: 280, critical: 340 },
-  chog_princess: { light: 140, heavy: 240, special: 300, critical: 360 },
-};
 const LUNGE_SPEED = 12; // %/s forward lunge during an attack windup
 const WINDUP: Record<AttackKind, number> = {
   light: 120,
@@ -384,9 +369,22 @@ function createMatch(
   playerSide: PlayerSide,
   fighters: Record<FighterSide, FighterDescriptor>,
 ): MatchState {
-  const chugTimings = (cls: FighterClass) => ({
-    startup: WINDUP_FOR[cls],
-    recover: RECOVER_FOR[cls],
+  /* Strike phases derive from the rigged clip length itself: startup is
+   * the first 35% of the animation, the hitbox closes at 65%, recovery
+   * plays the rest — so the combat windows match the animation 1:1. */
+  const chugTimings = (_cls: FighterClass) => ({
+    startup: {
+      light: Math.round(ACTION_HOLD.light * 0.35),
+      heavy: Math.round(ACTION_HOLD.heavy * 0.35),
+      special: Math.round(ACTION_HOLD.special * 0.35),
+      critical: Math.round(ACTION_HOLD.critical * 0.35),
+    },
+    recover: {
+      light: ACTION_HOLD.light - Math.round(ACTION_HOLD.light * 0.35),
+      heavy: ACTION_HOLD.heavy - Math.round(ACTION_HOLD.heavy * 0.35),
+      special: ACTION_HOLD.special - Math.round(ACTION_HOLD.special * 0.35),
+      critical: ACTION_HOLD.critical - Math.round(ACTION_HOLD.critical * 0.35),
+    },
   });
   const playerX = playerSide === "left" ? 32 : 68;
   const oppX = playerSide === "left" ? 68 : 32;
@@ -671,7 +669,8 @@ function refreshFighterPose(f: FighterRT) {
   else if (f.actionTimer > 0) pose = "attack";
   else if (f.hurtMs > 0 || f.hitTimer > 0) pose = f.hurtHeavy ? "stagger" : "hit";
   else if (f.stunMs > 0) pose = "idle";
-  else if (f.moveDir !== 0) pose = f.toward ? "dashIn" : "dashOut";
+  else if (f.moveDir !== 0 && !f.blockHeld)
+    pose = f.toward ? "dashIn" : "dashOut";
   else pose = "idle";
   if (f.pose !== pose) {
     f.pose = pose;
@@ -938,19 +937,28 @@ function presentHit(
   // 90ms arcade hit-stop freeze on heavy hits
   m.hitStopMs = ev.kind === "light" ? 60 : 90;
   m.camShakeMs = ev.kind === "light" ? 280 : 440;
-  /* ONE impact sound per landed hit — only on chug's verified connect. */
-  if (ev.move) playImpactSfx(impactCueFor(ev.move.soundCue));
-  else
+  /* ONE impact sound per landed hit — only on chug's verified connect.
+   * A blocked blow gets the blunt guard THUNK instead of the flesh
+   * impact and NO flinch: the defender holds the block stance. */
+  if (ev.blocked) {
+    playHitSfx();
+  } else if (ev.move) {
+    playImpactSfx(impactCueFor(ev.move.soundCue));
+  } else {
     playImpactSfx(ev.crit ? "crit" : ev.kind === "heavy" ? "slam" : "slash");
+  }
 
-  defender.hurtMs = ev.kind === "light" ? 220 : 340;
-  defender.hurtHeavy = ev.kind !== "light";
-  /* hold the flinch clip long enough to read, not just one hit-stop frame */
-  defender.hitTimer = HIT_HOLD;
-  defender.actionKind = null;
-  defender.actionTimer = 0;
-  defender.hurtBright = true;
-  defender.seq += 1;
+  if (!ev.blocked) {
+    defender.hurtMs = ev.kind === "light" ? 220 : 340;
+    defender.hurtHeavy = ev.kind !== "light";
+    /* hold the flinch clip long enough to read, not just one hit-stop
+     * frame — this also interrupts any idle/walk loop */
+    defender.hitTimer = HIT_HOLD;
+    defender.actionKind = null;
+    defender.actionTimer = 0;
+    defender.hurtBright = true;
+    defender.seq += 1;
+  }
 
   if (attacker.side === "challenger") {
     m.combo = {
@@ -990,6 +998,11 @@ function syncChugState(m: MatchState) {
     f.x = cf.x;
     f.hp = cf.hp;
     f.meter = cf.meter;
+    /* walking (not sliding): the sim's step direction drives the walk
+     * animation, and the block stance carries over for the guard pose */
+    f.moveDir = cf.moveDir;
+    f.toward = cf.moveDir === cf.facing;
+    f.blockHeld = cf.blockMs > 0;
   }
   const p = m.fighters.challenger;
   const ai = m.fighters.creator;

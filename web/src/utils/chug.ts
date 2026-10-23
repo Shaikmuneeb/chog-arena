@@ -25,13 +25,23 @@ export type ChugAttackKind = "light" | "heavy" | "special" | "critical";
 export type ChugPhase = "startup" | "active" | "recovery" | "done";
 export type ChugSide = "creator" | "challenger";
 
-/** Melee reach per strike kind, in stage-percent units. */
+/** Melee reach per strike kind, in stage-percent units. Tight, true
+ * boxing range — a blow only lands when the bodies are properly in each
+ * other's faces. */
 export const CHUG_REACH: Record<ChugAttackKind, number> = {
-  light: 28,
-  heavy: 32,
-  special: 34,
-  critical: 36,
+  light: 13,
+  heavy: 15,
+  special: 17,
+  critical: 19,
 };
+
+/** A fighter must stand still this long after moving before a strike may
+ * start — walk in, plant, THEN punch. */
+export const CHUG_SETTLE_MS = 140;
+
+/** Forward drift while a strike is winding up. Slow on purpose: it is a
+ * weight shift, not a dash. */
+export const CHUG_LUNGE_SPEED = 5; // stage-%/s
 
 /**
  * The active hitbox window, as a fraction of the FULL strike timeline
@@ -145,12 +155,16 @@ export function chugInRange(
 /* -------------------------------------------------------------------- brains */
 
 export type ChugProfile = {
-  /** The distance this character wants to fight at (stage %). */
+  /** The distance this character wants to fight at (stage %). Always
+   * inside light reach, so the fighter physically walks to range. */
   engageRange: number;
-  /** Movement speed (%/s). */
+  /** Walk speed (%/s). Deliberately slow — 3D fighters walk, they do
+   * not teleport or skate across the stage. */
   speed: number;
   /** How eagerly it presses an attack (0..1). */
   aggression: number;
+  /** How readily it raises its guard against an incoming strike (0..1). */
+  guardBias: number;
   /** The strike kinds it leads with, most preferred first. */
   preferred: ChugAttackKind[];
   /** Cooldown after a strike of each kind (ms). */
@@ -167,54 +181,60 @@ export type ChugProfile = {
 export const CHUG_PROFILES: Record<FighterClass, ChugProfile> = {
   // Void Lord James — heavy close-range brawler. Fights inside your guard.
   void_lord_james: {
-    engageRange: 23,
-    speed: 18,
+    engageRange: 11,
+    speed: 8,
     aggression: 0.82,
+    guardBias: 0.35,
     preferred: ["heavy", "light", "special"],
     cooldowns: { light: 230, heavy: 520, special: 880, critical: 1550 },
     paceMs: 260,
   },
   // Chog Princess — agile evasive striker. Holds the edge of her reach.
   chog_princess: {
-    engageRange: 28,
-    speed: 20,
+    engageRange: 12,
+    speed: 9,
     aggression: 0.55,
+    guardBias: 0.75,
     preferred: ["light", "special", "heavy"],
     cooldowns: { light: 240, heavy: 640, special: 900, critical: 1700 },
     paceMs: 340,
   },
   // Crimson Lord Benja — fast and brutal, always in your face.
   crimson_lord_benja: {
-    engageRange: 23,
-    speed: 34,
+    engageRange: 11,
+    speed: 13,
     aggression: 0.88,
+    guardBias: 0.4,
     preferred: ["light", "heavy", "special"],
     cooldowns: { light: 190, heavy: 500, special: 800, critical: 1450 },
     paceMs: 220,
   },
   // Chog Samurai — mid-range technician with a fast katana cadence.
   chog_samurai: {
-    engageRange: 25,
-    speed: 24,
+    engageRange: 12,
+    speed: 10,
     aggression: 0.76,
+    guardBias: 0.55,
     preferred: ["light", "heavy", "special"],
     cooldowns: { light: 220, heavy: 560, special: 860, critical: 1550 },
     paceMs: 300,
   },
   // Lady Chog — elegant opportunist. Mixes her range well.
   lady_chog: {
-    engageRange: 26,
-    speed: 26,
+    engageRange: 12,
+    speed: 10,
     aggression: 0.66,
+    guardBias: 0.6,
     preferred: ["light", "heavy", "special"],
     cooldowns: { light: 240, heavy: 580, special: 880, critical: 1600 },
     paceMs: 340,
   },
   // Warlord Chogzilla — enormous and slow. One long, heavy sequence.
   chogzila: {
-    engageRange: 23,
-    speed: 14,
+    engageRange: 11,
+    speed: 6,
     aggression: 0.52,
+    guardBias: 0.25,
     preferred: ["heavy", "special", "light"],
     cooldowns: { light: 320, heavy: 700, special: 1050, critical: 1900 },
     paceMs: 480,
@@ -255,6 +275,14 @@ export type ChugFighterState = {
   strike: ChugStrike | null;
   /** The special/critical move the current strike carries, if any. */
   activeMove: SpecialMove | null;
+  /** Facing direction (+1 right / -1 left); kept pointing at the foe. */
+  facing: 1 | -1;
+  /** ms since the fighter last moved — strikes need a planted stance. */
+  stillMs: number;
+  /** ms the guard is raised for (block stance). */
+  blockMs: number;
+  /** Walk direction this frame (-1/0/+1) — drives the walk animation. */
+  moveDir: -1 | 0 | 1;
 };
 
 export type ChugBattleEvent =
@@ -361,7 +389,13 @@ export class ChugArena {
 
     for (const side of sides) {
       const f = this.fighters[side];
+      const foe = this.fighters[other(side)];
       f.hurtMs = Math.max(0, f.hurtMs - dt);
+      f.stillMs += dt;
+      f.blockMs = Math.max(0, f.blockMs - dt);
+      /* fighters always square up to each other */
+      f.facing = (Math.sign(foe.x - f.x) || 1) as 1 | -1;
+      f.moveDir = 0;
       for (let i = 0; i < this.cooldowns[side].length; i++) {
         this.cooldowns[side][i] = Math.max(0, this.cooldowns[side][i] - dt);
       }
@@ -369,19 +403,33 @@ export class ChugArena {
 
     if (this.koEmitted) return events;
 
-    /* 1. Brains decide movement + strikes (respecting the lockdown). */
+    /* 1. Brains decide movement, guard and strikes (respecting the
+     * lockdown). */
     for (const side of sides) {
       const f = this.fighters[side];
       const foe = this.fighters[other(side)];
+      const foeStrike = foe.strike;
       const decision = this.brains[side].update(dt, {
         selfX: f.x,
         foeX: foe.x,
         canAct: this.canAct(side),
+        still: f.stillMs >= CHUG_SETTLE_MS,
+        foeWindingUp: Boolean(
+          foeStrike && chugPhase(foeStrike) === "startup",
+        ),
       });
+      if (decision.block) {
+        f.blockMs = Math.max(f.blockMs, 420);
+      }
       if (decision.move !== 0) {
-        const dir = Math.sign(foe.x - f.x) || 1;
+        const dir = (Math.sign(foe.x - f.x) || 1) as 1 | -1;
         const [minX, maxX] = this.cfg[side].track;
-        f.x = Math.min(maxX, Math.max(minX, f.x + dir * decision.move * this.brains[side].profile.speed * (dt / 1000)));
+        f.x = Math.min(
+          maxX,
+          Math.max(minX, f.x + dir * decision.move * this.brains[side].profile.speed * (dt / 1000)),
+        );
+        f.stillMs = 0;
+        f.moveDir = dir;
       }
       if (decision.strike) this.beginStrike(side, decision.strike, events);
     }
@@ -408,6 +456,14 @@ export class ChugArena {
     events: ChugBattleEvent[],
   ): void {
     const f = this.fighters[side];
+    const foe = this.fighters[other(side)];
+    /* Approach-first: no punching on the move, from outside range, or
+     * while not squared up. Walk in, plant, THEN strike. */
+    if (f.stillMs < CHUG_SETTLE_MS) return;
+    const toFoe = Math.sign(foe.x - f.x) || 1;
+    const dist = Math.abs(foe.x - f.x);
+    if (dist > CHUG_REACH[kind]) return; // not in true striking range yet
+    if (f.facing !== toFoe) return; // must be facing the defender
     const cost = kind === "special" ? 40 : kind === "critical" ? 100 : 0;
     if (f.meter < cost) return;
     f.meter = Math.max(0, f.meter - cost);
@@ -436,10 +492,13 @@ export class ChugArena {
     const ev = chugAdvance(strike, dt);
 
     if (ev === "startup") {
-      /* forward lunge while winding up — closes the last of the gap */
+      /* a slow weight shift toward the foe while winding up */
       const dir = Math.sign(foe.x - f.x) || 1;
       const [minX, maxX] = this.cfg[side].track;
-      f.x = Math.min(maxX, Math.max(minX, f.x + dir * 12 * (dt / 1000)));
+      f.x = Math.min(
+        maxX,
+        Math.max(minX, f.x + dir * CHUG_LUNGE_SPEED * (dt / 1000)),
+      );
       return;
     }
 
@@ -481,7 +540,6 @@ export class ChugArena {
   ): void {
     const attacker = this.fighters[side];
     const defender = this.fighters[other(side)];
-    const foeWasStriking = Boolean(defender.strike && !defender.strike.connected);
     const crit = strike.kind === "critical" || strike.kind === "special";
 
     let dmg: number;
@@ -496,10 +554,9 @@ export class ChugArena {
       else dmg = randInt(attacker.activeMove!.damage[0], attacker.activeMove!.damage[1]) * 0.9;
       dmg *= this.buffs[side];
     }
-    /* a fighter caught mid-swing trades damage for a flinch — the
-       interrupted strike never lands (its hit frame is cancelled) */
-    const blocked = foeWasStriking ? false : this.isBlocking(other(side));
-    if (blocked) dmg *= 0.2;
+    /* a raised guard turns a clean hit into a blocked impact */
+    const blocked = this.fighters[other(side)].blockMs > 0;
+    if (blocked) dmg *= 0.15;
     dmg = Math.max(1, Math.round(dmg));
     defender.hp = Math.max(0, defender.hp - dmg);
 
@@ -555,6 +612,10 @@ function makeState(cfg: ChugFighterConfig): ChugFighterState {
     hurtMs: 0,
     strike: null,
     activeMove: null,
+    facing: 1,
+    stillMs: CHUG_SETTLE_MS,
+    blockMs: 0,
+    moveDir: 0,
   };
 }
 
@@ -573,6 +634,8 @@ export type ChugDecision = {
   move: -1 | 0 | 1;
   /** A strike to begin this frame, or null. */
   strike: ChugAttackKind | null;
+  /** Raise / hold the guard this frame. */
+  block: boolean;
 };
 
 /**
@@ -598,8 +661,12 @@ export class ChugBrain {
     ctx: {
       selfX: number;
       foeX: number;
-      /** False while chug holds the body in a strike (state lockdown). */
+      /** False while chug holds the body in a strike or flinch. */
       canAct: boolean;
+      /** True once the fighter has stood still long enough to plant. */
+      still: boolean;
+      /** True while the foe is winding a strike up. */
+      foeWindingUp: boolean;
     },
   ): ChugDecision {
     this.nextDecisionMs -= dt;
@@ -607,28 +674,48 @@ export class ChugBrain {
       this.cooldown[i] = Math.max(0, this.cooldown[i] - dt);
     }
 
-    /* State lockdown: no movement and no new strikes until the body is
+    /* State lockdown: no movement, guard or strikes until the body is
      * free again. */
-    if (!ctx.canAct) return { move: 0, strike: null };
+    if (!ctx.canAct) return { move: 0, strike: null, block: false };
 
     const dist = Math.abs(ctx.foeX - ctx.selfX);
 
-    /* Out of range: close the distance to this character's fight range. */
-    if (dist > this.profile.engageRange) return { move: 1, strike: null };
+    /* Reactive defense: a strike is coming in and we are close enough to
+     * be the target — raise the guard on instinct. */
+    if (
+      ctx.foeWindingUp &&
+      dist <= CHUG_REACH.heavy + 8 &&
+      Math.random() < this.profile.guardBias
+    ) {
+      return { move: 0, strike: null, block: true };
+    }
 
-    /* In range: hold the pocket and strike on the character's rhythm. */
-    if (this.nextDecisionMs > 0) return { move: 0, strike: null };
+    /* Positioning first: out of range, WALK in — no punching on the
+     * approach, no punching from halfway across the stage. */
+    if (dist > this.profile.engageRange) {
+      return { move: 1, strike: null, block: false };
+    }
+
+    /* In the pocket but still settling the stance — hold position. */
+    if (!ctx.still) return { move: 0, strike: null, block: false };
+
+    /* Planted and in range: strike on the character's rhythm, but only
+     * with a blow whose reach actually covers the gap. */
+    if (this.nextDecisionMs > 0) return { move: 0, strike: null, block: false };
     this.nextDecisionMs = this.profile.paceMs;
 
-    if (Math.random() > this.profile.aggression) return { move: 0, strike: null };
+    if (Math.random() > this.profile.aggression) {
+      return { move: 0, strike: null, block: false };
+    }
 
     for (const kind of this.profile.preferred) {
       const idx = KIND_INDEX[kind];
       if (this.cooldown[idx] > 0) continue;
+      if (dist > CHUG_REACH[kind]) continue; // keep walking in
       this.cooldown[idx] = this.profile.cooldowns[kind];
-      return { move: 0, strike: kind };
+      return { move: 0, strike: kind, block: false };
     }
-    return { move: 0, strike: null };
+    return { move: 0, strike: null, block: false };
   }
 }
 
