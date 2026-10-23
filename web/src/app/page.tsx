@@ -41,6 +41,18 @@ export default function Home() {
     }
   }, [router]);
 
+  /* Warm the fighter rigs in the background so pressing CHALLENGE opens
+   * the arena without the multi-second clip download stall. Deferred a
+   * few seconds so it never competes with first paint. */
+  useEffect(() => {
+    const t = setTimeout(() => {
+      void import("@/components/Fighter3D").then((m) =>
+        m.preloadFighterRoster(),
+      );
+    }, 3000);
+    return () => clearTimeout(t);
+  }, []);
+
   const handleCreated = useCallback(
     async (betAmount: bigint) => {
       let id = Math.max(0, ...duels.map((d) => d.id)) + 1;

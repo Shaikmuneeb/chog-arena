@@ -34,14 +34,14 @@ type Question = {
  */
 const QUESTIONS: Question[] = [
   {
-    prompt: "Did Benja and James kiss?",
+    prompt: "Did Benja and James clash in the void?",
     options: [
-      { text: "Yes, they are gay", iq: 4 },
+      { text: "Yes, they are sworn rivals", iq: 4 },
       {
         text: "Yes, with the full spiky purple armor still on",
         iq: 6,
       },
-      { text: "No, they were just transferring MON mouth-to-mouth", iq: 3 },
+      { text: "No, they were just settling a MON transfer", iq: 3 },
     ],
   },
   {
@@ -53,7 +53,7 @@ const QUESTIONS: Question[] = [
       },
       { text: "I am only here for the 3D physics, respectfully", iq: 4 },
       {
-        text: "No, I only simp for big sweaty armored men like Void Lord James",
+        text: "No, I only root for armored overlords like Void Lord James",
         iq: 2,
       },
     ],
@@ -61,9 +61,9 @@ const QUESTIONS: Question[] = [
   {
     prompt: "Why did Benja touch Toad?",
     options: [
-      { text: "Cause he cant touch mamio", iq: 4 },
-      { text: "Benja need a gay builder thats why", iq: 6 },
-      { text: "But toad liks chog princesss", iq: 3 },
+      { text: "Because he can't touch Mamio", iq: 4 },
+      { text: "Benja needed a builder, that's why", iq: 6 },
+      { text: "But Toad likes Chog Princess", iq: 3 },
     ],
   },
 ];
@@ -202,17 +202,17 @@ export function VibeCheckGate({
                 aria-hidden
               />
               <label
-                htmlFor="cwo-gay-meter"
+                htmlFor="cwo-degen-meter"
                 className="stat-label !text-fuchsia-200/90"
               >
-                How gay are you?
+                How degen are you?
               </label>
               <div className="mt-4 flex items-center gap-4">
                 <span className="stat-value w-8 text-right text-2xl font-bold text-cyan-300 drop-shadow-[0_0_14px_rgba(34,211,238,0.6)]">
                   {meter}
                 </span>
                 <input
-                  id="cwo-gay-meter"
+                  id="cwo-degen-meter"
                   type="range"
                   min={1}
                   max={10}
@@ -237,7 +237,7 @@ export function VibeCheckGate({
                 {meter === 10 && <Check className="h-4 w-4" aria-hidden />}
               </span>
               <span className="font-display text-sm font-bold text-pink-100">
-                bigchog is a lesbian
+                bigchog runs this arena
               </span>
               <span className="ml-auto font-display text-[10px] font-bold uppercase tracking-[0.18em] text-pink-300/70">
                 {meter === 10 ? "BASED" : "CLICK ME"}
@@ -297,7 +297,7 @@ export function VibeCheckGate({
               aria-hidden
             />
             <h2 className="neon-title mt-4 max-w-xl text-2xl font-bold uppercase leading-tight tracking-tight drop-shadow-[0_0_28px_rgba(217,70,239,0.6)] sm:text-4xl">
-              Congrats — You will be chugged by Benja
+              Congrats — The Arena Awaits
             </h2>
             <p className="stat-value mt-3 text-sm font-bold uppercase tracking-[0.3em] text-fuchsia-200">
               IQ Verified: {iqScore}

@@ -1351,16 +1351,6 @@ export function BattleArenaModal({
   const stageReadyRef = useRef(stageReady);
   stageReadyRef.current = stageReady;
 
-  /* Loading progress for the READY? screen (0..1 across both fighters). */
-  const stageProgress = useMemo(() => {
-    if (!gatedSides.length) return 1;
-    const sum = gatedSides.reduce(
-      (acc, side) => acc + rigStatus[side].progress,
-      0,
-    );
-    return sum / gatedSides.length;
-  }, [gatedSides, rigStatus]);
-
   /* Safety net: a rig that never reports in (a hung fetch) must not freeze
    * the match â€” after the grace period the stage is released anyway. */
   useEffect(() => {
@@ -1886,30 +1876,10 @@ export function BattleArenaModal({
               {view.stage === "faceoff" && (
                 <div className="pointer-events-none absolute inset-0 z-[34] flex items-center justify-center">
                   <div className="flex flex-col items-center gap-2">
-                    {stageReady ? (
+                    {stageReady && (
                       <p className="animate-pop-in whitespace-nowrap bg-gradient-to-r from-red-300 via-amber-200 to-orange-300 bg-clip-text text-4xl font-black tracking-widest text-transparent drop-shadow-[0_0_22px_rgba(239,68,68,0.9)] sm:text-5xl">
-                        âš”ï¸ READY?
+                        ⚔️ READY?
                       </p>
-                    ) : (
-                      <>
-                        <p className="animate-pulse whitespace-nowrap bg-gradient-to-r from-fuchsia-300 via-pink-300 to-cyan-300 bg-clip-text text-3xl font-black tracking-widest text-transparent drop-shadow-[0_0_22px_rgba(217,70,239,0.9)] sm:text-4xl">
-                          â— LOADING ARENA
-                        </p>
-                        {/* Streamed clip progress â€” the bell waits for the rigs */}
-                        <div className="h-1 w-56 overflow-hidden rounded-full bg-white/10">
-                          <div
-                            className="h-full rounded-full bg-gradient-to-r from-fuchsia-500 via-pink-400 to-cyan-300 transition-[width] duration-300"
-                            style={{
-                              width: `${Math.round(
-                                Math.min(1, Math.max(0.02, stageProgress)) * 100,
-                              )}%`,
-                            }}
-                          />
-                        </div>
-                        <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-zinc-400">
-                          Streaming fighter rigs Â· {Math.round(stageProgress * 100)}%
-                        </p>
-                      </>
                     )}
                     <p className="text-[10px] font-bold uppercase tracking-[0.35em] text-zinc-400">
                       {nameOf(leftSide)} vs {nameOf(rightSide)} Â· Best of 3

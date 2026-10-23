@@ -25,6 +25,7 @@ import {
   type ReactNode,
 } from "react";
 import {
+  BATTLE_ROSTER,
   fighter3DConfig,
   type Fighter3DConfig,
   type FighterActionState,
@@ -164,6 +165,35 @@ function loadSkinTexture(url: string): Promise<THREE.Texture> {
 /** Asset URLs live under /new fighters design/<character>/. */
 export function clipUrl(cfg: Fighter3DConfig, file: string): string {
   return `/new fighters design/${encodeURIComponent(cfg.dir)}/${encodeURIComponent(file)}`;
+}
+
+/**
+ * Warm the FBX + texture caches for every fighter on the battle roster.
+ *
+ * Each duel streams ~5 rigged clips per fighter at ~20MB a file, which is
+ * the multi-second stall after pressing CHALLENGE. Pulling them in the
+ * background once the lobby is interactive means the arena opens with the
+ * rigs already in memory. Files load one at a time with a small gap so the
+ * parse work never janks the landing page, and failures are ignored — a
+ * missed preload just falls back to the on-demand path.
+ */
+export function preloadFighterRoster(): void {
+  void (async () => {
+    for (const cls of BATTLE_ROSTER) {
+      const cfg = fighter3DConfig(cls);
+      if (!cfg) continue;
+      const files = [...new Set(Object.values(cfg.clips))];
+      for (const file of files) {
+        try {
+          await loadFbx(clipUrl(cfg, file));
+          await loadSkinTexture(textureUrl(cfg));
+        } catch {
+          /* best effort — the duel will retry on demand */
+        }
+        await new Promise((r) => setTimeout(r, 150));
+      }
+    }
+  })();
 }
 
 export function textureUrl(cfg: Fighter3DConfig): string {
