@@ -543,21 +543,27 @@ function FighterModel({
       group.current.scale.setScalar(FIGHTER_HEIGHT / bbox.sizeY);
     }
 
-    /* ---- fixed stage slots ------------------------------------------
-     * Each character owns a slot on the stage: the Princess stands on the
-     * left of the CWO lettering, James on the right. They never cross it.
-     * A mirror match (both fighters the same character) splits by role so
-     * the pair never stacks on top of each other. */
+    /* ---- live stage positions ---------------------------------------
+     * The rig FOLLOWS the battle sim's stage-% position, so what chug
+     * computes is what renders: when the sim closes to melee range, the
+     * bodies visibly close with it. The old fixed slots left the rigs
+     * frozen half a stage apart while the sim traded blows — fake hits.
+     * The fixed slot is only the pre-fight fallback. */
     const foe = fightersRef.current.find((f) => f.side !== spec.side);
+    const liveSelf = fightersRef.current.find((f) => f.side === spec.side);
     const slotX = stageSlot(spec.side, spec.fighterClass, foe?.fighterClass);
     const foeSlotX = foe
       ? stageSlot(foe.side, foe.fighterClass, spec.fighterClass)
       : -slotX;
+    const selfX = liveSelf
+      ? STAGE_X_OFFSET + liveSelf.x * STAGE_X_SCALE
+      : slotX;
+    const foeX = foe ? STAGE_X_OFFSET + foe.x * STAGE_X_SCALE : foeSlotX;
 
     /* ---- look at the opponent ---------------------------------------
      * The rigs are authored facing +Z, so the yaw that points a fighter
      * at its target is +/- PI/2 — never toward the camera. */
-    const dx = foeSlotX - slotX;
+    const dx = foeX - selfX;
     const yaw =
       Math.abs(dx) < 1e-4
         ? group.current.rotation.y
@@ -580,7 +586,7 @@ function FighterModel({
 
     /* ---- the floor lock ---------------------------------------------
      * Feet on the floor, fixed z line, X only for sliding. */
-    group.current.position.x = slotX + lungeRef.current;
+    group.current.position.x = selfX + lungeRef.current;
     group.current.position.y = 0;
     group.current.position.z = 0;
     group.current.rotation.y = yaw;
@@ -681,6 +687,11 @@ function FighterModel({
 /* World units: the fighters are ~2.4 units tall, the stage is ~10.5 units wide. */
 const FIGHTER_HEIGHT = 2.6;
 const STAGE_WIDTH = 12;
+
+/* Stage-% to world-X mapping: the fixed slots sit at world +/-2.35 for
+ * stage-% 28 / 73 (see stageLayout), which fixes the linear map. */
+const STAGE_X_SCALE = 4.7 / 45;
+const STAGE_X_OFFSET = -2.35 - 28 * STAGE_X_SCALE;
 
 /**
  * Keeps a 3/4 view instead of a flat profile when a fighter looks at its

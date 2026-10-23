@@ -13,7 +13,6 @@ import { ExternalLink, Loader2, Swords } from "lucide-react";
 import { FIGHTER_CLASS_META, type FighterClass } from "@/config/fighterClasses";
 import { has3DModel, type FighterActionState } from "@/config/fighterModels";
 import type { StageRigStatus } from "./Fighter3D";
-import { stageAnchorX } from "@/config/stageLayout";
 import { setChogScene } from "@/lib/chogTheme";
 import type { StageFighter3D } from "./Fighter3D";
 
@@ -356,13 +355,6 @@ type MatchScript = {
  * fixed slots; the sim's `x` still wanders inside a track, and painting
  * damage on that wandering x stuck the numbers on the wrong body.
  */
-function anchorX(side: FighterSide, script: MatchScript): number {
-  const cls = side === "creator" ? script.creatorClass : script.challengerClass;
-  if (cls === "chog_princess") return 28;
-  if (cls === "void_lord_james") return 73;
-  return side === "creator" ? 70 : 30;
-}
-
 function fighterLabel(name: string, fighterClass: FighterClass): string {
   const trimmed = name.trim();
   if (trimmed) return trimmed;
@@ -870,7 +862,7 @@ function handleChugEvent(
       break;
     }
     case "connect":
-      presentHit(m, ev, script);
+      presentHit(m, ev);
       break;
     case "whiff":
       /* clean miss — the swing already sounded, nothing else happens */
@@ -909,12 +901,13 @@ function handleChugEvent(
 function presentHit(
   m: MatchState,
   ev: Extract<ChugBattleEvent, { type: "connect" }>,
-  script: MatchScript,
 ) {
   const attacker = m.fighters[ev.side];
   const defender = m.fighters[ev.foeSide];
-  const defenderX = anchorX(defender.side, script);
-  const attackerX = anchorX(attacker.side, script);
+  /* FX ride the fighters' LIVE positions, not fixed stage anchors —
+   * the impact flashes where the blow actually landed. */
+  const defenderX = defender.x;
+  const attackerX = attacker.x;
 
   m.impact = { id: ++m.fxId, x: defenderX };
   m.impactMs = 380;
@@ -1626,9 +1619,10 @@ export function BattleArenaModal({
                     side === "creator"
                       ? challengerFighter.fighterClass
                       : creatorFighter.fighterClass;
-                  /* the anchor follows the fighter's stage slot, so the
-                   * number stays on the body that was actually hit */
-                  const x = stageAnchorX(side, cls, foeCls);
+                  /* the number rides the fighter's LIVE position, so it
+                   * stays on the body that was actually hit */
+                  const x = view.fighters[side].x;
+                  void cls; void foeCls;
                   return (
                   <div
                     key={`dmg-${side}`}
