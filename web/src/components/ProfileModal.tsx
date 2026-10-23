@@ -292,7 +292,7 @@ export function ProfileModal({ open, onClose }: ProfileModalProps) {
 
             {/* Fighter class — the two characters that enter the 3D arena */}
             <p className="stat-label mt-5">Fighter Class</p>
-            <div className="mt-2 grid grid-cols-2 gap-2">
+            <div className="mt-2 grid grid-cols-2 gap-2.5">
               {BATTLE_ROSTER.map((cls) => {
                 const meta = FIGHTER_CLASS_META[cls];
                 const selected = fighterClass === cls;
@@ -302,19 +302,23 @@ export function ProfileModal({ open, onClose }: ProfileModalProps) {
                     type="button"
                     onClick={() => setFighterClass(cls)}
                     className={cn(
-                      "flex flex-col items-center gap-1 rounded-xl border px-2 pb-2 pt-1 transition-all",
+                      "flex h-full flex-col overflow-hidden rounded-xl border transition-all",
                       selected
                         ? "border-fuchsia-400/60 bg-fuchsia-500/10 shadow-glow-purple"
                         : "border-white/10 bg-black/40 hover:border-white/25",
                     )}
                   >
-                     <FighterPreview3D
-                       fighterClass={cls}
-                       size={96}
-                       className="w-full"
-                     />
+                    {/* Fixed-height stage keeps every card identical and the
+                     * labels on one baseline regardless of model load state. */}
+                    <div className="flex h-24 w-full items-center justify-center">
+                      <FighterPreview3D
+                        fighterClass={cls}
+                        size={92}
+                        className="w-full"
+                      />
+                    </div>
                     <span
-                      className="font-display text-[10px] font-bold uppercase tracking-[0.12em]"
+                      className="block w-full px-2 pb-2.5 pt-1 text-center font-display text-[10px] font-bold uppercase tracking-[0.12em]"
                       style={{ color: selected ? meta.secondary : "#a1a1aa" }}
                     >
                       {meta.profileLabel ?? meta.label}
@@ -329,7 +333,7 @@ export function ProfileModal({ open, onClose }: ProfileModalProps) {
 
             {/* Title */}
             <p className="stat-label mt-5">Fighter Title</p>
-            <div className="mt-2 flex flex-wrap gap-2">
+            <div className="mt-2 flex flex-wrap gap-2 gap-y-2.5">
               {FIGHTER_TITLES.map((t) => (
                 <button
                   key={t}
@@ -350,7 +354,7 @@ export function ProfileModal({ open, onClose }: ProfileModalProps) {
             <button
               type="button"
               onClick={save}
-              className="btn-neon mt-6 w-full"
+              className="btn-neon mt-7 mb-1 w-full"
             >
               <Check className="h-4 w-4" aria-hidden />
               Save Fighter Profile
