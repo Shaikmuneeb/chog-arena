@@ -209,8 +209,13 @@ const MOVE_FX_MS: Record<SpecialMove["vfxType"], number> = {
   breath: 900,
 };
 /** Horizontal tracks each fighter is confined to (stage %). */
-const TRACK_LEFT: [number, number] = [10, 38.5];
-const TRACK_RIGHT: [number, number] = [61.5, 90];
+/* The walk tracks MEET in the middle: melee reach is tight (13-19 stage-%),
+ * so both fighters must be able to step deep into center stage to close
+ * to striking distance. A no-man's land between the tracks would strand
+ * them out of range forever. Their brains stop at engage range (~11-12%),
+ * so the overlap never turns into body-passing. */
+const TRACK_LEFT: [number, number] = [8, 52];
+const TRACK_RIGHT: [number, number] = [48, 92];
 
 function randInt(min: number, max: number): number {
   return Math.floor(min + Math.random() * (max - min + 1));
