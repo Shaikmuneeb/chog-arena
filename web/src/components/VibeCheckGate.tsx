@@ -34,14 +34,14 @@ type Question = {
  */
 const QUESTIONS: Question[] = [
   {
-    prompt: "Did Benja and James clash in the void?",
+    prompt: "Did Benja and James kiss?",
     options: [
-      { text: "Yes, they are sworn rivals", iq: 4 },
+      { text: "Yes, they are gay", iq: 4 },
       {
         text: "Yes, with the full spiky purple armor still on",
         iq: 6,
       },
-      { text: "No, they were just settling a MON transfer", iq: 3 },
+      { text: "No, they were just transferring MON mouth-to-mouth", iq: 3 },
     ],
   },
   {
@@ -53,7 +53,7 @@ const QUESTIONS: Question[] = [
       },
       { text: "I am only here for the 3D physics, respectfully", iq: 4 },
       {
-        text: "No, I only root for armored overlords like Void Lord James",
+        text: "No, I only simp for big sweaty armored men like Void Lord James",
         iq: 2,
       },
     ],
@@ -61,9 +61,9 @@ const QUESTIONS: Question[] = [
   {
     prompt: "Why did Benja touch Toad?",
     options: [
-      { text: "Because he can't touch Mamio", iq: 4 },
-      { text: "Benja needed a builder, that's why", iq: 6 },
-      { text: "But Toad likes Chog Princess", iq: 3 },
+      { text: "Cause he cant touch mamio", iq: 4 },
+      { text: "Benja need a gay builder thats why", iq: 6 },
+      { text: "But toad liks chog princesss", iq: 3 },
     ],
   },
 ];
