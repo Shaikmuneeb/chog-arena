@@ -877,6 +877,7 @@ function PreviewRig({
   const cfg = fighter3DConfig(fighterClass) as Fighter3DConfig;
   const group = useRef<THREE.Group>(null);
   const desired = useRef<FighterActionState>(state);
+  const fitFrames = useRef(0);
   const { size: previewSize } = useThree();
   const source = useFBX(clipUrl(cfg, cfg.clips.idle));
   const scene = useMemo(() => SkeletonUtils.clone(source), [source]);
@@ -964,24 +965,64 @@ function PreviewRig({
     const { width, height } = previewSize;
     void width;
     const facingLeft = facing === "left";
-    const bbox = group.current.userData.bbox as
+    let bbox = group.current.userData.fit as
       | { sizeY: number; centerX: number; minY: number }
       | undefined;
-    if (bbox && bbox.sizeY > 0) {
+
+    /* The bind-pose geometry box can lie badly for these rigs — the skeleton
+     * rescales the skinned mesh, so Chog Princess measured 1.9 units tall in
+     * bind pose while her animated body is ~0.26 units, which framed her as
+     * a speck. Measure the LIVE skinned vertices instead: wait for the idle
+     * clip to settle, snapshot the precise (skin-aware) world box once with
+     * the group at identity, then reuse that fit every frame. */
+    if (!bbox) {
+      fitFrames.current += 1;
+      group.current.visible = false;
+      if (fitFrames.current > 150) {
+        const prevScale = group.current.scale.clone();
+        const prevPos = group.current.position.clone();
+        group.current.scale.setScalar(1);
+        group.current.position.set(0, 0, 0);
+        group.current.updateMatrixWorld(true);
+        const box = new THREE.Box3().setFromObject(group.current, true);
+        const size = new THREE.Vector3();
+        const center = new THREE.Vector3();
+        box.getSize(size);
+        box.getCenter(center);
+        group.current.scale.copy(prevScale);
+        group.current.position.copy(prevPos);
+        if (size.y > 0.001) {
+          group.current.userData.fit = bbox = {
+            sizeY: size.y,
+            centerX: center.x,
+            minY: box.min.y,
+          };
+        } else if (fitFrames.current > 400) {
+          /* fallback: the stale bind box beats an invisible fighter */
+          const bind = group.current.userData.bbox as
+            | { sizeY: number; centerX: number; minY: number }
+            | undefined;
+          if (bind) group.current.userData.fit = bbox = bind;
+        }
+      }
+    }
+
+    if (bbox) {
+      group.current.visible = true;
       /* the idle clips raise the arms above the bind pose — leave headroom */
       const zoom = PREVIEW_ZOOM[fighterClass] ?? 1;
       /* Never let the figure exceed the canvas: a zoom that overflows the
        * ortho frustum crops the head off (Chog Princess did exactly that).
        * The zoom biases the fit, the clamp guarantees the whole rig is
        * inside the frame. */
-      const maxHeight = height * 0.86;
-      const targetHeight = Math.min(height * 0.72 * zoom, maxHeight);
+      const maxHeight = height * 0.78;
+      const targetHeight = Math.min(height * 0.68 * zoom, maxHeight);
       const scale = targetHeight / bbox.sizeY;
       group.current.scale.setScalar(scale);
       group.current.position.x =
-        (facingLeft ? bbox.centerX : -bbox.centerX) * scale * 0.15;
+        (facingLeft ? bbox.centerX : -bbox.centerX) * scale;
       /* feet sit just below the lower third so the body reads centred */
-      group.current.position.y = -height * 0.4 - bbox.minY * scale;
+      group.current.position.y = -height * 0.38 - bbox.minY * scale;
     }
     desired.current = state;
   });
@@ -1031,11 +1072,11 @@ export function FighterPreview3D({
         }}
       >
         <Suspense fallback={null}>
-          <ambientLight intensity={1.5} />
-          <hemisphereLight args={["#e9d5ff", "#1a1030", 1]} />
+          <ambientLight intensity={2.2} />
+          <hemisphereLight args={["#f3e8ff", "#2a1a4a", 1.4]} />
           <directionalLight
             position={[-40, 60, 90]}
-            intensity={2.4}
+            intensity={2.8}
             color="#fff4e6"
           />
           <directionalLight

@@ -309,8 +309,15 @@ export function ProfileModal({ open, onClose }: ProfileModalProps) {
                     )}
                   >
                     {/* Fixed-height stage keeps every card identical and the
-                     * labels on one baseline regardless of model load state. */}
-                    <div className="flex h-24 w-full items-center justify-center">
+                     * labels on one baseline regardless of model load state.
+                     * The soft glow lifts dark fighters off the card. */}
+                    <div
+                      className="flex h-24 w-full items-center justify-center"
+                      style={{
+                        background:
+                          "radial-gradient(ellipse at 50% 65%, rgba(168,85,247,0.18), transparent 70%)",
+                      }}
+                    >
                       <FighterPreview3D
                         fighterClass={cls}
                         size={92}
