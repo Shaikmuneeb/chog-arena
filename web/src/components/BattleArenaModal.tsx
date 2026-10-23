@@ -9,6 +9,7 @@ import {
   type CSSProperties,
 } from "react";
 import dynamic from "next/dynamic";
+import { Vector3 as THREEVector3 } from "three";
 import { ExternalLink, Loader2, Swords } from "lucide-react";
 import { FIGHTER_CLASS_META, type FighterClass } from "@/config/fighterClasses";
 import { has3DModel, type FighterActionState } from "@/config/fighterModels";
@@ -202,6 +203,14 @@ const RECOVER_FOR: Record<FighterClass, Record<AttackKind, number>> = {
   chog_princess: { light: 140, heavy: 240, special: 300, critical: 360 },
 };
 const LUNGE_SPEED = 12; // %/s forward lunge during an attack windup
+
+/* Stage geometry for the 3D proximity gate in applyHit: both rigs fight on
+ * the floor plane (y = 0) in the same depth lane (z = 0), so the vector
+ * distance is the exact world-space gap the rendered models show. */
+const STAGE_FLOOR_Y = 0;
+const FIGHT_LANE_Z = 0;
+const attackerPos = new THREEVector3();
+const defenderPos = new THREEVector3();
 const WINDUP: Record<AttackKind, number> = {
   light: 120,
   heavy: 240,
@@ -253,6 +262,9 @@ type ActiveAttack = {
   windup: number;
   recover: number;
   move: SpecialMove | null;
+  /** True once the strike's single active hit frame has connected or whiffed —
+   * a strike can never land twice. */
+  resolved: boolean;
 };
 
 type FighterRT = {
@@ -844,6 +856,7 @@ function startStrike(
     windup: WINDUP_FOR[cls][kind],
     recover: RECOVER_FOR[cls][kind],
     move,
+    resolved: false,
   };
   f.activeMoveName = move ? move.name : null;
   /* the animation outlives the strike's damage window so the whole Mixamo
@@ -852,6 +865,10 @@ function startStrike(
   f.actionTimer = ACTION_HOLD[kind];
   f.pose = "attack";
   f.seq += 1;
+  /* Swing SFX belongs to the ATTACK, not the hit — it plays the moment the
+   * strike starts, whether or not the blow later connects. The impact sound
+   * lives in applyHit and only fires on a verified connection. */
+  playDashSfx();
 }
 
 function applyHit(
@@ -863,8 +880,26 @@ function applyHit(
   script: MatchScript,
   playerSide: PlayerSide,
 ) {
-  const dist = Math.abs(attacker.x - defender.x);
-  if (dist > REACH[a.kind]) return; // whiff â€” out of range! No sound, no damage.
+  /* Active hit-frame validation: a strike may only connect on the single
+   * frame its windup expires, exactly once, while the attacker is still
+   * mid-attack. Anything else (already resolved, recovering, interrupted)
+   * is not a live hit frame. */
+  if (a.resolved) return;
+  if (!attacker.attack || attacker.attack !== a) return;
+  if (a.windup > 0 || a.recover <= 0) return;
+  a.resolved = true;
+
+  /* Strict 3D proximity gate. The match sim drives fighters along the stage
+   * X axis; the 3D rig mirrors that position with fixed Y (stage floor) and
+   * Z (fight lane) values, so the vector distance is the true world-space
+   * distance the rigs render at — no connecting from across the arena or
+   * while one body is visually off the ground plane. */
+  const dist = attackerPos
+    .set(attacker.x, STAGE_FLOOR_Y, FIGHT_LANE_Z)
+    .distanceTo(
+      defenderPos.set(defender.x, STAGE_FLOOR_Y, FIGHT_LANE_Z),
+    );
+  if (dist > REACH[a.kind]) return; // whiff — out of range! No sound, no damage.
   if (defender.shieldMs > 0) return; // invulnerable
 
   const crit = a.kind === "critical" || a.kind === "special";
