@@ -116,7 +116,7 @@ const PREVIEW_ZOOM: Partial<Record<FighterClass, number>> = {
  * kick needs this step to make contact instead of hitting thin air. It eases
  * back to the base stance as soon as the attack is over.
  */
-const ATTACK_LUNGE = 1.8;
+const ATTACK_LUNGE = 1.1;
 
 /**
  * How long a hit flinch is held before it freezes (seconds). The Mixamo hit
@@ -580,7 +580,7 @@ function FighterModel({
     const lungeTarget = attacking ? toward * ATTACK_LUNGE : 0;
     /* quick in (the strike lands ~200ms after the animation starts), softer
      * back out to the base stance. */
-    const rate = attacking ? 11 : 6;
+    const rate = attacking ? 15 : 6;
     lungeRef.current +=
       (lungeTarget - lungeRef.current) * (1 - Math.exp(-delta * rate));
 

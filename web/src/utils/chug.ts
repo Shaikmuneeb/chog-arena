@@ -30,9 +30,9 @@ export type ChugSide = "creator" | "challenger";
  * other's faces. */
 export const CHUG_REACH: Record<ChugAttackKind, number> = {
   light: 13,
-  heavy: 15,
-  special: 17,
-  critical: 19,
+  heavy: 14,
+  special: 15,
+  critical: 17,
 };
 
 /** A fighter must stand still this long after moving before a strike may
@@ -49,7 +49,7 @@ export const CHUG_LUNGE_SPEED = 5; // stage-%/s
  * plane instead of clipping through each other, no matter how the brains,
  * lunges or strikes move them.
  */
-export const CHUG_PUSHBOX = 10;
+export const CHUG_PUSHBOX = 11;
 
 /**
  * The active hitbox window, as a fraction of the FULL strike timeline
