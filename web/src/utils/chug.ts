@@ -44,6 +44,14 @@ export const CHUG_SETTLE_MS = 140;
 export const CHUG_LUNGE_SPEED = 5; // stage-%/s
 
 /**
+ * Character pushbox: the minimum stage-% gap between the two bodies.
+ * Below this they are two solid masses — they push apart along the ground
+ * plane instead of clipping through each other, no matter how the brains,
+ * lunges or strikes move them.
+ */
+export const CHUG_PUSHBOX = 10;
+
+/**
  * The active hitbox window, as a fraction of the FULL strike timeline
  * (startup + active + recovery). A punch may only land between 35% and
  * 65% of its animation — never during startup wind-up, never in recovery.
@@ -439,6 +447,12 @@ export class ChugArena {
       this.stepStrike(side, dt, events);
     }
 
+    /* 3. Pushbox collision: the bodies are solid. Anything that squeezed
+     * them inside the minimum gap this frame — walking, lunges, strike
+     * drift — is pushed back apart along the ground plane before the
+     * frame is presented. */
+    this.resolvePushbox();
+
     /* 3. K.O. check. */
     for (const side of sides) {
       if (this.fighters[side].hp <= 0 && !this.koEmitted) {
@@ -448,6 +462,46 @@ export class ChugArena {
     }
 
     return events;
+  }
+
+  /**
+   * Minimum-distance enforcement. If the gap between the two bodies drops
+   * below CHUG_PUSHBOX, each is moved half the overlap away from the
+   * other along the stage X axis (the ground plane), clamped to its walk
+   * track. If one fighter is against its rail, the other absorbs the
+   * whole correction so the separation always holds and the fighters can
+   * never merge, phase through, or cross over — they stay face to face.
+   */
+  private resolvePushbox(): void {
+    const a = this.fighters.creator;
+    const b = this.fighters.challenger;
+    const gap = Math.abs(b.x - a.x);
+    if (gap >= CHUG_PUSHBOX) return;
+
+    const dir: 1 | -1 = b.x >= a.x ? 1 : -1; // push b toward dir, a against
+    const overlap = CHUG_PUSHBOX - gap;
+    const [minA, maxA] = this.cfg.creator.track;
+    const [minB, maxB] = this.cfg.challenger.track;
+
+    const clampX = (x: number, [lo, hi]: [number, number]) =>
+      Math.min(hi, Math.max(lo, x));
+
+    let aX = clampX(a.x - (dir * overlap) / 2, this.cfg.creator.track);
+    let bX = clampX(b.x + (dir * overlap) / 2, this.cfg.challenger.track);
+
+    /* a hit its rail — b takes the remaining correction */
+    if (Math.abs(aX - (a.x - (dir * overlap) / 2)) > 1e-6) {
+      bX = clampX(b.x + dir * (overlap - Math.abs(aX - a.x)), this.cfg.challenger.track);
+    } else if (Math.abs(bX - (b.x + (dir * overlap) / 2)) > 1e-6) {
+      /* b hit its rail — a takes the rest */
+      aX = clampX(a.x - dir * (overlap - Math.abs(bX - b.x)), this.cfg.creator.track);
+    }
+
+    /* never let the push cross the two bodies over each other */
+    if ((bX - aX) * dir < 0) return;
+
+    a.x = aX;
+    b.x = bX;
   }
 
   private beginStrike(
