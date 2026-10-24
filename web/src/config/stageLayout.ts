@@ -59,3 +59,32 @@ export function stageAnchorX(
 ): number {
   return SLOT_ANCHOR_X[stageSlot(side, fighterClass, foeClass)] ?? 50;
 }
+
+/* ---------------------------------------------------------------- camera *
+ * The arena 3D layer's perspective camera. Stage-% positions, the 3D rigs
+ * and the CSS hit-FX all derive their world/screen mapping from THESE
+ * constants — one truth, no drift between sim, render and effects. */
+export const ARENA_CAMERA = {
+  /** Camera position. */
+  y: 1.5,
+  z: 9,
+  /** Vertical field of view in degrees. */
+  fovDeg: 42,
+} as const;
+
+/**
+ * World units spanned by the full stage width (stage-% 0..100) on the
+ * fighters' ground plane (z = 0), for a given viewport aspect ratio.
+ * Every consumer (rig placement, hit validation, FX anchors) must use
+ * this same conversion.
+ */
+export function stageWorldPerPercent(aspect: number): number {
+  const dist = Math.sqrt(
+    ARENA_CAMERA.z * ARENA_CAMERA.z + ARENA_CAMERA.y * ARENA_CAMERA.y,
+  );
+  const halfH = Math.tan((ARENA_CAMERA.fovDeg * Math.PI) / 360) * dist;
+  /* the ground plane is tilted relative to the view axis — fold in the
+   * cosine so horizontal ground distances project exactly */
+  const groundComp = ARENA_CAMERA.z / dist;
+  return 2 * halfH * aspect * groundComp;
+}

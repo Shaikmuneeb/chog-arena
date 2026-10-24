@@ -30,7 +30,7 @@ import {
   type Fighter3DConfig,
   type FighterActionState,
 } from "@/config/fighterModels";
-import { stageSlot } from "@/config/stageLayout";
+import { ARENA_CAMERA, stageSlot, stageWorldPerPercent } from "@/config/stageLayout";
 import type { FighterClass } from "@/config/fighterClasses";
 
 export type StageFighter3D = {
@@ -369,9 +369,10 @@ function FighterModel({
   const wasHit = useRef(false);
   /** current X lunge offset (world units) */
   const lungeRef = useRef(0);
-  /* the ortho camera is 1 world unit = 1 px, so the canvas size IS the stage
-   * size in pixels and the 3D fighters line up with the stage. */
-  const { size } = useThree();
+  /* The arena camera is PERSPECTIVE — world placement is derived from the
+   * live camera geometry every frame so the rigs sit exactly where the
+   * sim's stage-% says, on any viewport size. */
+  const { camera, size } = useThree();
 
   /* the rig: the idle export doubles as the visible mesh */
   const source = useFBX(clipUrl(cfg, cfg.clips.idle));
@@ -555,10 +556,12 @@ function FighterModel({
     const foeSlotX = foe
       ? stageSlot(foe.side, foe.fighterClass, spec.fighterClass)
       : -slotX;
-    const selfX = liveSelf
-      ? STAGE_X_OFFSET + liveSelf.x * STAGE_X_SCALE
-      : slotX;
-    const foeX = foe ? STAGE_X_OFFSET + foe.x * STAGE_X_SCALE : foeSlotX;
+    const cam = camera as THREE.PerspectiveCamera;
+    const aspect = cam.aspect ?? size.width / size.height;
+    const stageWidth = stageWorldPerPercent(aspect);
+    const stageToWorld = (pct: number) => (pct / 100) * stageWidth - stageWidth / 2;
+    const selfX = liveSelf ? stageToWorld(liveSelf.x) : slotX;
+    const foeX = foe ? stageToWorld(foe.x) : foeSlotX;
 
     /* ---- look at the opponent ---------------------------------------
      * The rigs are authored facing +Z, so the yaw that points a fighter
@@ -688,10 +691,9 @@ function FighterModel({
 const FIGHTER_HEIGHT = 2.6;
 const STAGE_WIDTH = 12;
 
-/* Stage-% to world-X mapping: the fixed slots sit at world +/-2.35 for
- * stage-% 28 / 73 (see stageLayout), which fixes the linear map. */
-const STAGE_X_SCALE = 4.7 / 45;
-const STAGE_X_OFFSET = -2.35 - 28 * STAGE_X_SCALE;
+/* Camera framing constants live in stageLayout (ARENA_CAMERA) — the rigs,
+ * the sim's hit validation and the CSS FX all share that one mapping. */
+void ARENA_CAMERA;
 
 /**
  * Keeps a 3/4 view instead of a flat profile when a fighter looks at its

@@ -14,6 +14,7 @@ import { FIGHTER_CLASS_META, type FighterClass } from "@/config/fighterClasses";
 import { has3DModel, type FighterActionState } from "@/config/fighterModels";
 import type { StageRigStatus } from "./Fighter3D";
 import { setChogScene } from "@/lib/chogTheme";
+import { stageWorldPerPercent } from "@/config/stageLayout";
 import type { StageFighter3D } from "./Fighter3D";
 
 /* three.js + R3F are heavy â€” load the 3D layer only when a duel starts. */
@@ -40,6 +41,7 @@ import {
 } from "@/data/fighterMoves";
 import { cn, formatMon, truncateAddress } from "@/lib/utils";
 import {
+  CHUG_ACTIVE_WINDOW,
   ChugArena,
   type ChugBattleEvent,
   type ChugSide,
@@ -365,22 +367,30 @@ function createMatch(
   script: MatchScript,
   playerSide: PlayerSide,
   fighters: Record<FighterSide, FighterDescriptor>,
+  worldPerStage: number,
 ): MatchState {
-  /* Strike phases derive from the rigged clip length itself: startup is
-   * the first 35% of the animation, the hitbox closes at 65%, recovery
-   * plays the rest — so the combat windows match the animation 1:1. */
+  /* Strike phases derive from the rigged clip length itself: the hitbox
+   * exists ONLY at maximum limb extension — startup is the first 48% of
+   * the clip, the window closes at 60%, recovery plays the rest. */
+  const phase = (kind: keyof typeof ACTION_HOLD) => {
+    const startup = Math.round(ACTION_HOLD[kind] * CHUG_ACTIVE_WINDOW.from);
+    return {
+      startup,
+      recover: ACTION_HOLD[kind] - startup,
+    };
+  };
   const chugTimings = (_cls: FighterClass) => ({
     startup: {
-      light: Math.round(ACTION_HOLD.light * 0.35),
-      heavy: Math.round(ACTION_HOLD.heavy * 0.35),
-      special: Math.round(ACTION_HOLD.special * 0.35),
-      critical: Math.round(ACTION_HOLD.critical * 0.35),
+      light: phase("light").startup,
+      heavy: phase("heavy").startup,
+      special: phase("special").startup,
+      critical: phase("critical").startup,
     },
     recover: {
-      light: ACTION_HOLD.light - Math.round(ACTION_HOLD.light * 0.35),
-      heavy: ACTION_HOLD.heavy - Math.round(ACTION_HOLD.heavy * 0.35),
-      special: ACTION_HOLD.special - Math.round(ACTION_HOLD.special * 0.35),
-      critical: ACTION_HOLD.critical - Math.round(ACTION_HOLD.critical * 0.35),
+      light: phase("light").recover,
+      heavy: phase("heavy").recover,
+      special: phase("special").recover,
+      critical: phase("critical").recover,
     },
   });
   const playerX = playerSide === "left" ? 32 : 68;
@@ -439,6 +449,7 @@ function createMatch(
         timings: chugTimings(script.creatorClass),
         moves: getFighterMoveSet(script.creatorClass),
         hp: script.creatorClass === "chogzila" ? 130 : 100,
+        worldPerStage,
       },
       {
         side: "challenger",
@@ -448,6 +459,7 @@ function createMatch(
         timings: chugTimings(script.challengerClass),
         moves: getFighterMoveSet(script.challengerClass),
         hp: script.challengerClass === "chogzila" ? 130 : 100,
+        worldPerStage,
       },
     ),
     aiNextMs: 400,
@@ -1222,6 +1234,7 @@ export function BattleArenaModal({
    * canvas that sits behind the 2D sprites; everyone else keeps the 2D
    * treatment. The array is mutated in place every frame so the canvas
    * never re-renders â€” it just reads the latest values in useFrame. */
+  const stageRef = useRef<HTMLDivElement | null>(null);
   const fighters3DRef = useRef<StageFighter3D[]>([
     {
       side: "creator",
@@ -1356,10 +1369,15 @@ export function BattleArenaModal({
   useEffect(() => {
     if (!isOpen || !outcome || !script) return;
     resetArenaAudio();
-    const m = createMatch(script, playerSide, {
-    creator: creatorFighter,
-    challenger: challengerFighter,
-  });
+    const stageEl = stageRef.current;
+    const m = createMatch(
+      script,
+      playerSide,
+      { creator: creatorFighter, challenger: challengerFighter },
+      stageEl
+        ? stageWorldPerPercent(stageEl.clientWidth / Math.max(1, stageEl.clientHeight))
+        : 0.12,
+    );
     matchRef.current = m;
     const snap = snapshot(m);
     viewRef.current = snap;
@@ -1406,6 +1424,15 @@ export function BattleArenaModal({
         entry.x = f.x;
         entry.facing = f.facing;
         entry.state = fighterActionState(f);
+      }
+      /* keep the world-space hit validation honest across resizes */
+      const stageEl = stageRef.current;
+      if (stageEl) {
+        m.chug.setWorldScale(
+          stageWorldPerPercent(
+            stageEl.clientWidth / Math.max(1, stageEl.clientHeight),
+          ),
+        );
       }
 
       const stageChanged = m.stage !== viewRef.current.stage;
@@ -1454,6 +1481,7 @@ export function BattleArenaModal({
   return (
     <div className="fixed inset-0 z-[95] flex h-[100dvh] items-center justify-center bg-black/90 p-2 backdrop-blur-sm sm:h-[92vh] sm:p-4">
       <div
+        ref={stageRef}
         className="relative flex h-full max-h-full w-full max-w-7xl flex-col overflow-hidden rounded-2xl border border-red-500/30 bg-zinc-950 shadow-[0_0_70px_-10px_rgba(239,68,68,0.3)]"
         role="dialog"
         aria-modal="true"

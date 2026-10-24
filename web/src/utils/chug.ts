@@ -53,10 +53,24 @@ export const CHUG_PUSHBOX = 11;
 
 /**
  * The active hitbox window, as a fraction of the FULL strike timeline
- * (startup + active + recovery). A punch may only land between 35% and
- * 65% of its animation — never during startup wind-up, never in recovery.
+ * (startup + active + recovery). The hitbox exists ONLY around maximum
+ * limb extension — roughly frames 8-12 of a 30-frame jab: 48% to 60% of
+ * the clip. Nothing lands during wind-up, nothing lands in recovery.
  */
-export const CHUG_ACTIVE_WINDOW = { from: 0.35, to: 0.65 } as const;
+export const CHUG_ACTIVE_WINDOW = { from: 0.48, to: 0.6 } as const;
+
+/* ---- rig-derived collision bounds (WORLD units) ----
+ * The rigs stand 2.6 world units tall; a body's half-width is ~0.5 and a
+ * fist reaches ~0.95-1.6 world from the body center depending on the
+ * strike. Hit validation runs against these physical bounds in true
+ * world space — never against animation state alone. */
+export const CHUG_BODY_RADIUS = 0.5;
+export const CHUG_ARM_REACH: Record<ChugAttackKind, number> = {
+  light: 0.95,
+  heavy: 1.1,
+  special: 1.25,
+  critical: 1.6,
+};
 
 /* ------------------------------------------------------------------ strikes */
 
@@ -268,6 +282,9 @@ export type ChugFighterConfig = {
   moves: { signatureMove: SpecialMove; criticalArt: SpecialMove };
   /** Starting hp (boss fighters get more). Defaults to 100. */
   hp?: number;
+  /** World units per stage-% under the live arena camera. Provided by
+   * the modal from the real camera geometry (see stageLayout). */
+  worldPerStage: number;
 };
 
 export type ChugFighterState = {
@@ -327,10 +344,12 @@ export class ChugArena {
     creator: 1,
     challenger: 1,
   };
+  private worldPerStage: number;
   private koEmitted = false;
 
   constructor(creator: ChugFighterConfig, challenger: ChugFighterConfig) {
     this.cfg = { creator, challenger };
+    this.worldPerStage = creator.worldPerStage;
     this.buffs = { creator: 1, challenger: 1 };
     this.fighters = {
       creator: makeState(creator),
@@ -359,6 +378,14 @@ export class ChugArena {
 
   setBuff(side: ChugSide, multiplier: number): void {
     this.buffs[side] = multiplier;
+  }
+
+  /**
+   * Live camera scale. Called by the modal on resize so the world-space
+   * hit validation always matches what the canvas renders.
+   */
+  setWorldScale(worldPerStage: number): void {
+    if (worldPerStage > 0.001) this.worldPerStage = worldPerStage;
   }
 
   /**
@@ -564,7 +591,14 @@ export class ChugArena {
         strike.resolved = true;
         return;
       }
-      if (chugInRange(f.x, foe.x, CHUG_REACH[strike.kind])) {
+      /* TRUE world-space verification: the gap between body centers, in
+       * world units under the live camera, must be inside this strike's
+       * physical arm reach plus both body radii. Animation state alone
+       * can NEVER confirm a hit. */
+      const worldGap = Math.abs(foe.x - f.x) * this.worldPerStage;
+      const maxContact =
+        CHUG_ARM_REACH[strike.kind] + CHUG_BODY_RADIUS * 2 * 0.9;
+      if (worldGap <= maxContact) {
         strike.connected = true;
         strike.resolved = true;
         this.applyDamage(side, strike, events);
