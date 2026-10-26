@@ -422,14 +422,6 @@ export class ChugArena {
     const events: ChugBattleEvent[] = [];
     const sides: ChugSide[] = ["creator", "challenger"];
 
-    /* ===== Position Rollback Guard — Step A =====================
-     * Snapshot the last known-safe world positions BEFORE anything
-     * moves. If this frame ends with the bodies fused, both are rolled
-     * back here — no forces, no springs, no oscillation. */
-    const prevSafeX: Record<ChugSide, number> = {
-      creator: this.fighters.creator.x,
-      challenger: this.fighters.challenger.x,
-    };
 
     for (const side of sides) {
       const f = this.fighters[side];
@@ -484,11 +476,12 @@ export class ChugArena {
       this.stepStrike(side, dt, events);
     }
 
-    /* ===== Steps C-E — the Guard Check ==========================
+    /* ===== Sliding Push Resolution ==============================
      * 3. If the bodies ended this frame inside the hard minimum
-     * distance, both roll back to their safe snapshots and all forward
-     * movement toward each other is halted for this frame. */
-    this.enforceSeparation(prevSafeX);
+     * distance, displace each along the penetration vector just enough
+     * to clear it — motion is preserved, only the penetration is
+     * removed. No rollbacks, no dead stops. */
+    this.resolveSlidePush();
 
     /* 3. K.O. check. */
     for (const side of sides) {
@@ -502,44 +495,51 @@ export class ChugArena {
   }
 
   /**
-   * Position Rollback Guard (Steps C-E). No physics forces, no push
-   * impulses: if the frame ended with the bodies closer than the hard
-   * minimum, BOTH fighters are teleported back to their exact safe
-   * snapshots from Step A, and nothing else moves them this frame —
-   * forward motion toward each other is simply gone.
+   * Sliding Push Resolution. When the frame ends with the bodies closer
+   * than the hard minimum, compute the penetration vector (stage-X
+   * ground axis) and displace EACH fighter backward along it by half
+   * the overlap — enough to clear the pushbox, nothing more. Everything
+   * else about the frame's movement is preserved, so lunges ease the
+   * pair into range instead of slamming into an invisible wall.
    *
-   * Fallback: if the snapshots were ALREADY inside the minimum (should
-   * be impossible — safe states propagate forward inductively from the
-   * spawn corners), the pair is deterministically separated to exactly
-   * the minimum gap along the ground axis. That clamp is a pure
-   * position write, not a force, so it cannot oscillate or slide.
+   * Track rails make the push slide: a fighter already against their
+   * rail contributes no displacement and the other absorbs the whole
+   * correction — motion along the constraint never hard-stops. (The
+   * lane is 1-D by design: fighters share the z line and never cross.)
    */
-  private enforceSeparation(prevSafeX: Record<ChugSide, number>): void {
+  private resolveSlidePush(): void {
     const a = this.fighters.creator;
     const b = this.fighters.challenger;
 
-    /* Step C — current distance */
-    const currentDist = Math.abs(b.x - a.x);
-    /* Step D — hard minimum from the combined pushbox radii */
-    if (currentDist >= CHUG_PUSHBOX) return;
+    const gap = Math.abs(b.x - a.x);
+    if (gap >= CHUG_PUSHBOX) return;
 
-    /* Step E — rollback both fighters to the saved safe positions */
-    const prevDist = Math.abs(prevSafeX.challenger - prevSafeX.creator);
-    if (prevDist >= CHUG_PUSHBOX) {
-      a.x = prevSafeX.creator;
-      b.x = prevSafeX.challenger;
-      return;
-    }
-
-    /* safety net only: separate deterministically to exactly the minimum */
-    const dir: 1 | -1 = b.x >= a.x ? 1 : -1;
-    const mid = (a.x + b.x) / 2;
+    const dir: 1 | -1 = b.x >= a.x ? 1 : -1; // push b along dir, a against
+    const overlap = CHUG_PUSHBOX - gap;
     const clampX = (x: number, side: ChugSide) => {
       const [lo, hi] = this.cfg[side].track;
       return Math.min(hi, Math.max(lo, x));
     };
-    a.x = clampX(mid - (dir * CHUG_PUSHBOX) / 2, "creator");
-    b.x = clampX(mid + (dir * CHUG_PUSHBOX) / 2, "challenger");
+
+    /* split the penetration 50/50 along the push vector */
+    const aWant = a.x - (dir * overlap) / 2;
+    const bWant = b.x + (dir * overlap) / 2;
+    const aX = clampX(aWant, "creator");
+    const bX = clampX(bWant, "challenger");
+
+    /* slide: whoever sat on a rail passes their share to the other */
+    if (aX !== aWant && bX === bWant) {
+      a.x = aX;
+      b.x = clampX(b.x + dir * (overlap - Math.abs(aX - a.x)), "challenger");
+    } else if (bX !== bWant && aX === aWant) {
+      b.x = bX;
+      a.x = clampX(a.x - dir * (overlap - Math.abs(bX - b.x)), "creator");
+    } else {
+      /* both clamped (gap wider than both rails' slack): split what is
+       * actually available and accept the residual — it cannot grow */
+      a.x = aX;
+      b.x = bX;
+    }
   }
 
   private beginStrike(
