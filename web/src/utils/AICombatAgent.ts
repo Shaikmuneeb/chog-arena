@@ -82,8 +82,8 @@ export const AGENT_PROFILES: Record<FighterClass, AgentProfile> = {
   // guard, leads with the slam and does not run from a heavy: he takes it
   // and answers harder. Relentless rhythm, slow to give ground.
   void_lord_james: {
-    engageRange: 23,
-    speed: 18,
+    engageRange: 11,
+    speed: 8,
     aggression: 0.82,
     evadeBias: 0.3,
     preferred: ["heavy", "light", "special"],
@@ -99,8 +99,8 @@ export const AGENT_PROFILES: Record<FighterClass, AgentProfile> = {
   // light reach, leads with the jab and slips out of a heavy rather than
   // trading through it. Quick feet, longer resets.
   chog_princess: {
-    engageRange: 28,
-    speed: 20,
+    engageRange: 12,
+    speed: 9,
     aggression: 0.55,
     evadeBias: 0.9,
     preferred: ["light", "special", "heavy"],
@@ -115,8 +115,8 @@ export const AGENT_PROFILES: Record<FighterClass, AgentProfile> = {
   // Crimson Lord Benja — fast and brutal. He is always in your face and
   // chains the shortest strikes together.
   crimson_lord_benja: {
-    engageRange: 23,
-    speed: 34,
+    engageRange: 11,
+    speed: 13,
     aggression: 0.88,
     evadeBias: 0.55,
     preferred: ["light", "heavy", "special"],
@@ -130,8 +130,8 @@ export const AGENT_PROFILES: Record<FighterClass, AgentProfile> = {
   },
   // Chog Samurai — a mid-range technician with a fast katana cadence.
   chog_samurai: {
-    engageRange: 25,
-    speed: 24,
+    engageRange: 12,
+    speed: 10,
     aggression: 0.76,
     evadeBias: 0.6,
     preferred: ["light", "heavy", "special"],
@@ -145,8 +145,8 @@ export const AGENT_PROFILES: Record<FighterClass, AgentProfile> = {
   },
   // Lady Chog — an elegant opportunist. She mixes her range well.
   lady_chog: {
-    engageRange: 26,
-    speed: 26,
+    engageRange: 12,
+    speed: 10,
     aggression: 0.66,
     evadeBias: 0.7,
     preferred: ["light", "heavy", "special"],
@@ -161,8 +161,8 @@ export const AGENT_PROFILES: Record<FighterClass, AgentProfile> = {
   // Warlord Chogzilla — enormous and slow. Once he is on top of you the
   // whole thing is one long, heavy sequence.
   chogzila: {
-    engageRange: 23,
-    speed: 14,
+    engageRange: 11,
+    speed: 6,
     aggression: 0.52,
     evadeBias: 0.25,
     preferred: ["heavy", "special", "light"],
