@@ -422,6 +422,15 @@ export class ChugArena {
     const events: ChugBattleEvent[] = [];
     const sides: ChugSide[] = ["creator", "challenger"];
 
+    /* ===== Position Rollback Guard — Step A =====================
+     * Snapshot the last known-safe world positions BEFORE anything
+     * moves. If this frame ends with the bodies fused, both are rolled
+     * back here — no forces, no springs, no oscillation. */
+    const prevSafeX: Record<ChugSide, number> = {
+      creator: this.fighters.creator.x,
+      challenger: this.fighters.challenger.x,
+    };
+
     for (const side of sides) {
       const f = this.fighters[side];
       const foe = this.fighters[other(side)];
@@ -438,7 +447,8 @@ export class ChugArena {
 
     if (this.koEmitted) return events;
 
-    /* 1. Brains decide movement, guard and strikes (respecting the
+    /* ===== Step B — apply movement normally (brains, lunges) =====
+     * 1. Brains decide movement, guard and strikes (respecting the
      * lockdown). */
     for (const side of sides) {
       const f = this.fighters[side];
@@ -474,11 +484,11 @@ export class ChugArena {
       this.stepStrike(side, dt, events);
     }
 
-    /* 3. Pushbox collision: the bodies are solid. Anything that squeezed
-     * them inside the minimum gap this frame — walking, lunges, strike
-     * drift — is pushed back apart along the ground plane before the
-     * frame is presented. */
-    this.resolvePushbox();
+    /* ===== Steps C-E — the Guard Check ==========================
+     * 3. If the bodies ended this frame inside the hard minimum
+     * distance, both roll back to their safe snapshots and all forward
+     * movement toward each other is halted for this frame. */
+    this.enforceSeparation(prevSafeX);
 
     /* 3. K.O. check. */
     for (const side of sides) {
@@ -492,43 +502,44 @@ export class ChugArena {
   }
 
   /**
-   * Minimum-distance enforcement. If the gap between the two bodies drops
-   * below CHUG_PUSHBOX, each is moved half the overlap away from the
-   * other along the stage X axis (the ground plane), clamped to its walk
-   * track. If one fighter is against its rail, the other absorbs the
-   * whole correction so the separation always holds and the fighters can
-   * never merge, phase through, or cross over — they stay face to face.
+   * Position Rollback Guard (Steps C-E). No physics forces, no push
+   * impulses: if the frame ended with the bodies closer than the hard
+   * minimum, BOTH fighters are teleported back to their exact safe
+   * snapshots from Step A, and nothing else moves them this frame —
+   * forward motion toward each other is simply gone.
+   *
+   * Fallback: if the snapshots were ALREADY inside the minimum (should
+   * be impossible — safe states propagate forward inductively from the
+   * spawn corners), the pair is deterministically separated to exactly
+   * the minimum gap along the ground axis. That clamp is a pure
+   * position write, not a force, so it cannot oscillate or slide.
    */
-  private resolvePushbox(): void {
+  private enforceSeparation(prevSafeX: Record<ChugSide, number>): void {
     const a = this.fighters.creator;
     const b = this.fighters.challenger;
-    const gap = Math.abs(b.x - a.x);
-    if (gap >= CHUG_PUSHBOX) return;
 
-    const dir: 1 | -1 = b.x >= a.x ? 1 : -1; // push b toward dir, a against
-    const overlap = CHUG_PUSHBOX - gap;
-    const [minA, maxA] = this.cfg.creator.track;
-    const [minB, maxB] = this.cfg.challenger.track;
+    /* Step C — current distance */
+    const currentDist = Math.abs(b.x - a.x);
+    /* Step D — hard minimum from the combined pushbox radii */
+    if (currentDist >= CHUG_PUSHBOX) return;
 
-    const clampX = (x: number, [lo, hi]: [number, number]) =>
-      Math.min(hi, Math.max(lo, x));
-
-    let aX = clampX(a.x - (dir * overlap) / 2, this.cfg.creator.track);
-    let bX = clampX(b.x + (dir * overlap) / 2, this.cfg.challenger.track);
-
-    /* a hit its rail — b takes the remaining correction */
-    if (Math.abs(aX - (a.x - (dir * overlap) / 2)) > 1e-6) {
-      bX = clampX(b.x + dir * (overlap - Math.abs(aX - a.x)), this.cfg.challenger.track);
-    } else if (Math.abs(bX - (b.x + (dir * overlap) / 2)) > 1e-6) {
-      /* b hit its rail — a takes the rest */
-      aX = clampX(a.x - dir * (overlap - Math.abs(bX - b.x)), this.cfg.creator.track);
+    /* Step E — rollback both fighters to the saved safe positions */
+    const prevDist = Math.abs(prevSafeX.challenger - prevSafeX.creator);
+    if (prevDist >= CHUG_PUSHBOX) {
+      a.x = prevSafeX.creator;
+      b.x = prevSafeX.challenger;
+      return;
     }
 
-    /* never let the push cross the two bodies over each other */
-    if ((bX - aX) * dir < 0) return;
-
-    a.x = aX;
-    b.x = bX;
+    /* safety net only: separate deterministically to exactly the minimum */
+    const dir: 1 | -1 = b.x >= a.x ? 1 : -1;
+    const mid = (a.x + b.x) / 2;
+    const clampX = (x: number, side: ChugSide) => {
+      const [lo, hi] = this.cfg[side].track;
+      return Math.min(hi, Math.max(lo, x));
+    };
+    a.x = clampX(mid - (dir * CHUG_PUSHBOX) / 2, "creator");
+    b.x = clampX(mid + (dir * CHUG_PUSHBOX) / 2, "challenger");
   }
 
   private beginStrike(

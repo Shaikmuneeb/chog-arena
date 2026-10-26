@@ -580,7 +580,16 @@ function FighterModel({
       live.state === "special" ||
       live.state === "critical";
     const toward = dx >= 0 ? 1 : -1;
-    const lungeTarget = attacking ? toward * ATTACK_LUNGE : 0;
+    let lungeTarget = attacking ? toward * ATTACK_LUNGE : 0;
+    /* RENDER-side Position Guard: the attack step-in is animation-driven
+     * translation and must NEVER fuse the meshes — clamp it so the
+     * rendered gap stays at skin contact no matter what the clip asks
+     * for. The sim owns real movement; this is only a visual lean. */
+    const MIN_RENDER_GAP = 0.95; // world: both body half-widths + skin
+    const maxApproach = Math.max(0, Math.abs(foeX - selfX) - MIN_RENDER_GAP);
+    if (Math.abs(lungeTarget) > maxApproach) {
+      lungeTarget = toward * maxApproach;
+    }
     /* quick in (the strike lands ~200ms after the animation starts), softer
      * back out to the base stance. */
     const rate = attacking ? 15 : 6;
