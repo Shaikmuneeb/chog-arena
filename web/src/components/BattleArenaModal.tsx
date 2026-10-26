@@ -9,12 +9,13 @@ import {
   type CSSProperties,
 } from "react";
 import dynamic from "next/dynamic";
+import { Vector3 as THREEVector3 } from "three";
 import { ExternalLink, Loader2, Swords } from "lucide-react";
 import { FIGHTER_CLASS_META, type FighterClass } from "@/config/fighterClasses";
 import { has3DModel, type FighterActionState } from "@/config/fighterModels";
 import type { StageRigStatus } from "./Fighter3D";
+import { stageAnchorX } from "@/config/stageLayout";
 import { setChogScene } from "@/lib/chogTheme";
-import { stageWorldPerPercent } from "@/config/stageLayout";
 import type { StageFighter3D } from "./Fighter3D";
 
 /* three.js + R3F are heavy â€” load the 3D layer only when a duel starts. */
@@ -41,11 +42,11 @@ import {
 } from "@/data/fighterMoves";
 import { cn, formatMon, truncateAddress } from "@/lib/utils";
 import {
-  CHUG_ACTIVE_WINDOW,
-  ChugArena,
-  type ChugBattleEvent,
-  type ChugSide,
-} from "@/utils/chug";
+  AGENT_REACH,
+  AICombatAgent,
+  agentProfileFor,
+  type AgentAttackKind,
+} from "@/utils/AICombatAgent";
 import {
   playDashSfx,
   playHitSfx,
@@ -185,7 +186,31 @@ const STAGE_LOAD_GRACE_MS = 20_000;
 /**
  * Per-archetype windup timings (ms).
  */
+const WINDUP_FOR: Record<FighterClass, Record<AttackKind, number>> = {
+  chogzila: { light: 160, heavy: 400, special: 420, critical: 500 },
+  chog_samurai: { light: 110, heavy: 220, special: 300, critical: 380 },
+  void_lord_james: { light: 150, heavy: 260, special: 320, critical: 400 },
+  crimson_lord_benja: { light: 90, heavy: 180, special: 260, critical: 320 },
+  lady_chog: { light: 100, heavy: 200, special: 280, critical: 360 },
+  chog_princess: { light: 120, heavy: 220, special: 300, critical: 380 },
+};
+const RECOVER_FOR: Record<FighterClass, Record<AttackKind, number>> = {
+  chogzila: { light: 220, heavy: 420, special: 360, critical: 440 },
+  chog_samurai: { light: 140, heavy: 240, special: 280, critical: 340 },
+  void_lord_james: { light: 180, heavy: 260, special: 300, critical: 360 },
+  crimson_lord_benja: { light: 100, heavy: 200, special: 260, critical: 320 },
+  lady_chog: { light: 120, heavy: 220, special: 280, critical: 340 },
+  chog_princess: { light: 140, heavy: 240, special: 300, critical: 360 },
+};
 const LUNGE_SPEED = 12; // %/s forward lunge during an attack windup
+
+/* Stage geometry for the 3D proximity gate in applyHit: both rigs fight on
+ * the floor plane (y = 0) in the same depth lane (z = 0), so the vector
+ * distance is the exact world-space gap the rendered models show. */
+const STAGE_FLOOR_Y = 0;
+const FIGHT_LANE_Z = 0;
+const attackerPos = new THREEVector3();
+const defenderPos = new THREEVector3();
 const WINDUP: Record<AttackKind, number> = {
   light: 120,
   heavy: 240,
@@ -200,6 +225,16 @@ const RECOVER: Record<AttackKind, number> = {
 };
 /** Center-to-center reach (stage %) for each attack â€” shared with the AI
  *  agent so the brain and the hit detection always agree on what lands. */
+/* Tight, true boxing range (stage-%) — a blow only lands when the rigs
+ * can visually reach. */
+const REACH: Record<AttackKind, number> = {
+  light: 13,
+  heavy: 14,
+  special: 15,
+  critical: 17,
+};
+/** Solid-body minimum gap between the two fighters (stage-%). */
+const PUSHBOX = 11;
 const MOVE_FX_MS: Record<SpecialMove["vfxType"], number> = {
   void_rift: 650,
   laser: 750,
@@ -210,13 +245,8 @@ const MOVE_FX_MS: Record<SpecialMove["vfxType"], number> = {
   breath: 900,
 };
 /** Horizontal tracks each fighter is confined to (stage %). */
-/* The walk tracks MEET in the middle: melee reach is tight (13-19 stage-%),
- * so both fighters must be able to step deep into center stage to close
- * to striking distance. A no-man's land between the tracks would strand
- * them out of range forever. Their brains stop at engage range (~11-12%),
- * so the overlap never turns into body-passing. */
-const TRACK_LEFT: [number, number] = [8, 52];
-const TRACK_RIGHT: [number, number] = [48, 92];
+const TRACK_LEFT: [number, number] = [10, 38.5];
+const TRACK_RIGHT: [number, number] = [61.5, 90];
 
 function randInt(min: number, max: number): number {
   return Math.floor(min + Math.random() * (max - min + 1));
@@ -236,6 +266,15 @@ function trackFor(side: FighterSide, playerSide: PlayerSide): [number, number] {
 
 /* ------------------------------------------------------------- match model */
 
+type ActiveAttack = {
+  kind: AttackKind;
+  windup: number;
+  recover: number;
+  move: SpecialMove | null;
+  /** True once the strike's single active hit frame has connected or whiffed —
+   * a strike can never land twice. */
+  resolved: boolean;
+};
 
 type FighterRT = {
   side: FighterSide;
@@ -245,6 +284,7 @@ type FighterRT = {
   pose: SpriteState;
   seq: number;
   facing: "left" | "right";
+  attack: ActiveAttack | null;
   blockHeld: boolean;
   hurtMs: number;
   hurtHeavy: boolean;
@@ -296,7 +336,7 @@ type MatchState = {
   heldBlock: boolean;
   attackQueued: AttackKind | null;
   /** One local AI brain per fighter â€” stepped every frame by the game loop. */
-  chug: ChugArena;
+  agents: Record<FighterSide, AICombatAgent>;
   aiNextMs: number;
   aiAction: AiAction | null;
   aiActionMs: number;
@@ -357,6 +397,13 @@ type MatchScript = {
  * fixed slots; the sim's `x` still wanders inside a track, and painting
  * damage on that wandering x stuck the numbers on the wrong body.
  */
+function anchorX(side: FighterSide, script: MatchScript): number {
+  const cls = side === "creator" ? script.creatorClass : script.challengerClass;
+  if (cls === "chog_princess") return 28;
+  if (cls === "void_lord_james") return 73;
+  return side === "creator" ? 70 : 30;
+}
+
 function fighterLabel(name: string, fighterClass: FighterClass): string {
   const trimmed = name.trim();
   if (trimmed) return trimmed;
@@ -367,32 +414,7 @@ function createMatch(
   script: MatchScript,
   playerSide: PlayerSide,
   fighters: Record<FighterSide, FighterDescriptor>,
-  worldPerStage: number,
 ): MatchState {
-  /* Strike phases derive from the rigged clip length itself: the hitbox
-   * exists ONLY at maximum limb extension — startup is the first 48% of
-   * the clip, the window closes at 60%, recovery plays the rest. */
-  const phase = (kind: keyof typeof ACTION_HOLD) => {
-    const startup = Math.round(ACTION_HOLD[kind] * CHUG_ACTIVE_WINDOW.from);
-    return {
-      startup,
-      recover: ACTION_HOLD[kind] - startup,
-    };
-  };
-  const chugTimings = (_cls: FighterClass) => ({
-    startup: {
-      light: phase("light").startup,
-      heavy: phase("heavy").startup,
-      special: phase("special").startup,
-      critical: phase("critical").startup,
-    },
-    recover: {
-      light: phase("light").recover,
-      heavy: phase("heavy").recover,
-      special: phase("special").recover,
-      critical: phase("critical").recover,
-    },
-  });
   const playerX = playerSide === "left" ? 32 : 68;
   const oppX = playerSide === "left" ? 68 : 32;
   const playerFacing: "left" | "right" = playerSide === "left" ? "right" : "left";
@@ -405,6 +427,7 @@ function createMatch(
     pose: "idle",
     seq: 0,
     facing,
+    attack: null,
     blockHeld: false,
     hurtMs: 0,
     hurtHeavy: false,
@@ -421,7 +444,7 @@ function createMatch(
     hitTimer: 0,
     nextActionMs: 600,
   });
-  const m: MatchState = {
+  return {
     stage: "faceoff",
     stageMs: 0,
     stageDur: FACE_OFF_MS,
@@ -440,28 +463,10 @@ function createMatch(
     heldRight: false,
     heldBlock: false,
     attackQueued: null,
-    chug: new ChugArena(
-      {
-        side: "creator",
-        fighterClass: script.creatorClass,
-        track: oppTrack(playerSide),
-        isPlayer: false,
-        timings: chugTimings(script.creatorClass),
-        moves: getFighterMoveSet(script.creatorClass),
-        hp: script.creatorClass === "chogzila" ? 130 : 100,
-        worldPerStage,
-      },
-      {
-        side: "challenger",
-        fighterClass: script.challengerClass,
-        track: playerTrack(playerSide),
-        isPlayer: true,
-        timings: chugTimings(script.challengerClass),
-        moves: getFighterMoveSet(script.challengerClass),
-        hp: script.challengerClass === "chogzila" ? 130 : 100,
-        worldPerStage,
-      },
-    ),
+    agents: {
+      creator: new AICombatAgent(agentProfileFor(fighters.creator.fighterClass)),
+      challenger: new AICombatAgent(agentProfileFor(fighters.challenger.fighterClass)),
+    },
     aiNextMs: 400,
     aiAction: null,
     aiActionMs: 0,
@@ -497,13 +502,6 @@ function createMatch(
     roundWinner: null,
     matchWinner: null,
   };
-  /* chug owns the authoritative fight state — seed its corner positions
-   * and the match's damage buffs so the sim starts in sync. */
-  m.chug.fighters.creator.x = oppX;
-  m.chug.fighters.challenger.x = playerX;
-  m.chug.setBuff("creator", m.buffs.ai);
-  m.chug.setBuff("challenger", m.buffs.player);
-  return m;
 }
 
 /* ------------------------------------------------------------ view snapshot */
@@ -675,11 +673,10 @@ function refreshFighterPose(f: FighterRT) {
   let pose: SpriteState;
   if (f.down) pose = "dead";
   else if (f.shieldMs > 0) pose = "secondWind";
-  else if (f.actionTimer > 0) pose = "attack";
+  else if (f.attack || f.actionTimer > 0) pose = "attack";
   else if (f.hurtMs > 0 || f.hitTimer > 0) pose = f.hurtHeavy ? "stagger" : "hit";
   else if (f.stunMs > 0) pose = "idle";
-  else if (f.moveDir !== 0 && !f.blockHeld)
-    pose = f.toward ? "dashIn" : "dashOut";
+  else if (f.moveDir !== 0) pose = f.toward ? "dashIn" : "dashOut";
   else pose = "idle";
   if (f.pose !== pose) {
     f.pose = pose;
@@ -725,6 +722,8 @@ function startRound(
   ai.hp = 100;
   p.down = false;
   ai.down = false;
+  p.attack = null;
+  ai.attack = null;
   p.hurtMs = 0;
   ai.hurtMs = 0;
   p.shieldMs = 0;
@@ -745,13 +744,10 @@ function startRound(
   ai.nextActionMs = 500;
   /* A fresh round means a fresh brain â€” no leftover route, cooldown or
    * evade state carries into the next fight. */
-  m.chug.reset();
-  m.chug.setBuff("creator", m.buffs.ai);
-  m.chug.setBuff("challenger", m.buffs.player);
+  m.agents.creator.reset();
+  m.agents.challenger.reset();
   p.x = playerSide === "left" ? 32 : 68;
   ai.x = playerSide === "left" ? 68 : 32;
-  m.chug.fighters.creator.x = ai.x;
-  m.chug.fighters.challenger.x = p.x;
   p.pose = "idle";
   ai.pose = "idle";
   p.seq += 1;
@@ -823,12 +819,9 @@ function triggerSecondWind(m: MatchState, p: FighterRT) {
   playSecondWindSfx();
   const ai = m.fighters.creator;
   ai.stunMs = 3000;
+  ai.attack = null;
   ai.blockHeld = false;
   m.buffs.player *= 1.4;
-  /* chug stays authoritative: resurrect, re-stun, and rebuff inside sim */
-  m.chug.resurrect("challenger", 55);
-  m.chug.fighters.creator.hurtMs = 3000;
-  m.chug.setBuff("challenger", m.buffs.player);
 }
 
 function triggerOverdrive(m: MatchState, ai: FighterRT) {
@@ -843,184 +836,285 @@ function triggerOverdrive(m: MatchState, ai: FighterRT) {
   m.bannerMs = 1600;
   playSecondWindSfx();
   m.buffs.ai = 2.0;
-  m.chug.resurrect("creator", Math.max(m.chug.fighters.creator.hp, 50));
-  m.chug.setBuff("creator", m.buffs.ai);
   m.aiAction = { kind: "telegraph", attack: "critical", dur: 300 };
   m.aiActionMs = 0;
   m.aiNextMs = 400;
 }
 
-/**
- * chug event -> presentation. chug runs the whole battle and reports what
- * happened; this is the ONLY place a swing or an impact is allowed to
- * make a sound: swing the instant a strike starts, impact only on a
- * verified active-frame connection.
- */
-function handleChugEvent(
+function startStrike(
   m: MatchState,
-  ev: ChugBattleEvent,
+  side: FighterSide,
+  kind: AttackKind,
+  script: MatchScript,
+) {
+  const f = m.fighters[side];
+  if (m.stage !== "fight" || f.down || f.stunMs > 0 || f.attack) return;
+  const moves = m.moves[side];
+  const cls = side === "creator" ? script.creatorClass : script.challengerClass;
+  const cost = kind === "special" ? 40 : kind === "critical" ? 100 : 0;
+  if (f.meter < cost) return;
+  f.meter = Math.max(0, f.meter - cost);
+  const move =
+    kind === "special"
+      ? moves.signatureMove
+      : kind === "critical"
+        ? moves.criticalArt
+        : null;
+  f.attack = {
+    kind,
+    windup: WINDUP_FOR[cls][kind],
+    recover: RECOVER_FOR[cls][kind],
+    move,
+    resolved: false,
+  };
+  f.activeMoveName = move ? move.name : null;
+  /* the animation outlives the strike's damage window so the whole Mixamo
+   * clip can play â€” the pose alone only lasted ~300ms. */
+  f.actionKind = kind;
+  f.actionTimer = ACTION_HOLD[kind];
+  f.pose = "attack";
+  f.seq += 1;
+  /* Swing SFX belongs to the ATTACK, not the hit — it plays the moment the
+   * strike starts, whether or not the blow later connects. The impact sound
+   * lives in applyHit and only fires on a verified connection. */
+  playDashSfx();
+}
+
+function applyHit(
+  m: MatchState,
+  attacker: FighterRT,
+  defender: FighterRT,
+  a: ActiveAttack,
+  isPlayer: boolean,
   script: MatchScript,
   playerSide: PlayerSide,
 ) {
-  switch (ev.type) {
-    case "swing": {
-      const f = m.fighters[ev.side];
-      /* swing SFX belongs to the ATTACK, not the hit */
-      playDashSfx();
-      f.actionKind = ev.kind;
-      f.actionTimer = ACTION_HOLD[ev.kind];
-      f.activeMoveName = ev.moveName ?? null;
-      f.seq += 1;
-      break;
-    }
-    case "connect":
-      presentHit(m, ev);
-      break;
-    case "whiff":
-      /* clean miss — the swing already sounded, nothing else happens */
-      break;
-    case "ko": {
-      const winner: FighterSide =
-        ev.loser === "creator" ? "challenger" : "creator";
-      if (
-        ev.loser === "challenger" &&
-        script.playerWon &&
-        !m.shieldUsed &&
-        m.orbs.challenger >= 1
-      ) {
-        triggerSecondWind(m, m.fighters.challenger);
-      } else if (
-        ev.loser === "creator" &&
-        !script.playerWon &&
-        !m.overdrive &&
-        m.orbs.creator >= 1
-      ) {
-        triggerOverdrive(m, m.fighters.creator);
-      } else {
-        startKO(m, winner, script, playerSide);
-      }
-      break;
-    }
-  }
-}
+  /* Active hit-frame validation: a strike may only connect on the single
+   * frame its windup expires, exactly once, while the attacker is still
+   * mid-attack. Anything else (already resolved, recovering, interrupted)
+   * is not a live hit frame. */
+  if (a.resolved) return;
+  if (!attacker.attack || attacker.attack !== a) return;
+  if (a.windup > 0 || a.recover <= 0) return;
+  a.resolved = true;
 
-/**
- * Present a verified chug connection: damage numbers, hit-stop, camera
- * shake, combo counter, cinematic cut-ins — and the ONE impact sound per
- * landed hit. Everything here is cosmetic; chug already applied the
- * damage.
- */
-function presentHit(
-  m: MatchState,
-  ev: Extract<ChugBattleEvent, { type: "connect" }>,
-) {
-  const attacker = m.fighters[ev.side];
-  const defender = m.fighters[ev.foeSide];
-  /* FX ride the fighters' LIVE positions, not fixed stage anchors —
-   * the impact flashes where the blow actually landed. */
+  /* Strict 3D proximity gate. The match sim drives fighters along the stage
+   * X axis; the 3D rig mirrors that position with fixed Y (stage floor) and
+   * Z (fight lane) values, so the vector distance is the true world-space
+   * distance the rigs render at — no connecting from across the arena or
+   * while one body is visually off the ground plane. */
+  const dist = attackerPos
+    .set(attacker.x, STAGE_FLOOR_Y, FIGHT_LANE_Z)
+    .distanceTo(
+      defenderPos.set(defender.x, STAGE_FLOOR_Y, FIGHT_LANE_Z),
+    );
+  if (dist > REACH[a.kind]) return; // whiff — out of range! No sound, no damage.
+  if (defender.shieldMs > 0) return; // invulnerable
+
+  const crit = a.kind === "critical" || a.kind === "special";
+  let dmg: number;
+  if (isPlayer) {
+    if (a.kind === "light") dmg = randInt(8, 12);
+    else if (a.kind === "heavy") dmg = randInt(14, 19);
+    else dmg = randInt(a.move!.damage[0], a.move!.damage[1]);
+    dmg *= m.buffs.player;
+  } else {
+    if (a.kind === "light") dmg = randInt(7, 11);
+    else if (a.kind === "heavy") dmg = randInt(12, 17);
+    else dmg = randInt(a.move!.damage[0], a.move!.damage[1]) * 0.9;
+    dmg *= m.buffs.ai;
+  }
+  const blocked = defender.blockHeld;
+  if (blocked) dmg *= 0.2; // 80% damage reduction while blocking
+  dmg = Math.max(1, Math.round(dmg));
+  defender.hp = Math.max(0, defender.hp - dmg);
+
+  // Super meter: attacker builds on clean hits, defender builds on taking a hit
+  if (a.kind === "light") attacker.meter = Math.min(100, attacker.meter + 10);
+  else if (a.kind === "heavy") attacker.meter = Math.min(100, attacker.meter + 14);
+  defender.meter = Math.min(100, defender.meter + 6);
+  if (blocked) defender.meter = Math.min(100, defender.meter + 10);
+
+  // FX + AUDIO: ONLY play strike/impact SFX when attack actually connects
   const defenderX = defender.x;
   const attackerX = attacker.x;
-
   m.impact = { id: ++m.fxId, x: defenderX };
   m.impactMs = 380;
   m.hurtFx = { id: ++m.fxId, x: defenderX, bright: true };
   m.hurtFxMs = 430;
   m.dust = { id: ++m.fxId, x: attackerX };
   m.dustMs = 500;
-  if (ev.blocked) {
+  if (blocked) {
     m.guard = { id: ++m.fxId, x: defenderX };
     m.guardMs = 300;
   }
-  const multi = ev.move && ev.move.hitCount > 1 ? ev.move.hitCount : undefined;
+  const multi = a.move && a.move.hitCount > 1 ? a.move.hitCount : undefined;
   m.hits.push({
     id: ++m.fxId,
     side: defender.side,
-    dmg: ev.dmg,
-    crit: ev.crit && !ev.blocked,
+    dmg,
+    crit: crit && !blocked,
     multi,
-    name:
-      ev.kind === "special" || ev.kind === "critical" ? ev.move?.name : undefined,
+    name: (a.kind === "special" || a.kind === "critical") ? a.move?.name : undefined,
     ms: 950,
   });
   if (m.hits.length > 6) m.hits.shift();
 
   // 90ms arcade hit-stop freeze on heavy hits
-  m.hitStopMs = ev.kind === "light" ? 60 : 90;
-  m.camShakeMs = ev.kind === "light" ? 280 : 440;
-  /* ONE impact sound per landed hit — only on chug's verified connect.
-   * A blocked blow gets the blunt guard THUNK instead of the flesh
-   * impact and NO flinch: the defender holds the block stance. */
-  if (ev.blocked) {
-    playHitSfx();
-  } else if (ev.move) {
-    playImpactSfx(impactCueFor(ev.move.soundCue));
-  } else {
-    playImpactSfx(ev.crit ? "crit" : ev.kind === "heavy" ? "slam" : "slash");
+  m.hitStopMs = a.kind === "light" ? 60 : 90;
+  m.camShakeMs = a.kind === "light" ? 280 : 440;
+  /* ONE impact sound per landed hit, and only here — inside applyHit,
+   * which is the only place damage is actually applied. A swing that
+   * whiffs never reaches this line, so it never makes a sound. */
+  if (a.move) playImpactSfx(impactCueFor(a.move.soundCue));
+  else playImpactSfx(crit ? "crit" : a.kind === "heavy" ? "slam" : "slash");
+
+  defender.hurtMs = a.kind === "light" ? 220 : 340;
+  defender.hurtHeavy = a.kind !== "light";
+  /* hold the flinch clip long enough to read, not just one hit-stop frame */
+  defender.hitTimer = HIT_HOLD;
+  defender.actionKind = null;
+  defender.actionTimer = 0;
+  defender.hurtBright = true;
+  defender.pose = "hit";
+  defender.seq += 1;
+  if (defender.attack) {
+    defender.attack = null;
+    defender.activeMoveName = null;
   }
 
-  if (!ev.blocked) {
-    defender.hurtMs = ev.kind === "light" ? 220 : 340;
-    defender.hurtHeavy = ev.kind !== "light";
-    /* hold the flinch clip long enough to read, not just one hit-stop
-     * frame — this also interrupts any idle/walk loop */
-    defender.hitTimer = HIT_HOLD;
-    defender.actionKind = null;
-    defender.actionTimer = 0;
-    defender.hurtBright = true;
-    defender.seq += 1;
-  }
-
-  if (attacker.side === "challenger") {
+  if (isPlayer) {
     m.combo = {
       id: ++m.fxId,
-      count: (m.combo?.count ?? 0) + (ev.move?.hitCount ?? 1),
+      count: (m.combo?.count ?? 0) + (a.move?.hitCount ?? 1),
     };
     m.comboMs = 1500;
   }
-  if (ev.kind === "special" || ev.kind === "critical") {
+  if (a.kind === "special" || a.kind === "critical") {
     /* a signature move gets a light banner (the animation must stay
      * visible); only the critical art gets the full screen cut-in. */
     m.cinematic = {
       id: ++m.fxId,
-      kind: ev.kind === "critical" ? "critical" : "special",
-      moveName: ev.move?.name,
+      kind: a.kind === "critical" ? "critical" : "special",
+      moveName: a.move?.name,
     };
-    m.cinematicMs = ev.kind === "critical" ? 1100 : 900;
+    m.cinematicMs = a.kind === "critical" ? 1100 : 900;
     m.moveFx = {
       id: ++m.fxId,
       x: defenderX,
-      vfx: ev.move!.vfxType,
-      kind: ev.kind === "critical" ? "critical" : "special",
+      vfx: a.move!.vfxType,
+      kind: a.kind === "critical" ? "critical" : "special",
     };
-    m.moveFxMs = MOVE_FX_MS[ev.move!.vfxType];
+    m.moveFxMs = MOVE_FX_MS[a.move!.vfxType];
+  }
+
+  if (defender.hp <= 0) {
+    if (
+      defender.side === "challenger" &&
+      script.playerWon &&
+      !m.shieldUsed &&
+      m.orbs.challenger >= 1
+    ) {
+      triggerSecondWind(m, defender);
+    } else if (
+      defender.side === "creator" &&
+      !script.playerWon &&
+      !m.overdrive &&
+      m.orbs.creator >= 1
+    ) {
+      triggerOverdrive(m, defender);
+    } else {
+      startKO(m, attacker.side, script, playerSide);
+    }
+  }
+}
+
+function updateAttack(
+  m: MatchState,
+  f: FighterRT,
+  dt: number,
+  isPlayer: boolean,
+  script: MatchScript,
+  playerSide: PlayerSide,
+) {
+  const a = f.attack;
+  if (!a) return;
+  const foe = isPlayer ? m.fighters.creator : m.fighters.challenger;
+  if (a.windup > 0) {
+    a.windup -= dt;
+    const dir = Math.sign(foe.x - f.x) || (isPlayer ? 1 : -1);
+    f.x += dir * LUNGE_SPEED * (dt / 1000);
+    f.x = clamp(f.x, trackFor(f.side, playerSide));
+    if (a.windup <= 0) applyHit(m, f, foe, a, isPlayer, script, playerSide);
+  } else {
+    a.recover -= dt;
+    if (a.recover <= 0) {
+      f.attack = null;
+      f.activeMoveName = null;
+      f.pose = "idle";
+      f.seq += 1;
+    }
   }
 }
 
 /**
- * Copy chug's authoritative fight state (positions, hp, meter) into the
- * presentation mirror, and feed chug the live shield state so Second Wind
- * invulnerability eats strikes inside the sim.
+ * Drive a fighter with its LOCAL AI AGENT.
+ *
+ * The agent owns the tactics â€” approach, combo, evade â€” and is stepped
+ * here, once per animation frame, from the arena's single game loop. It
+ * is a pure in-browser state machine: no timers, no network, no audio
+ * dependency, so a decision lands on the very next frame.
  */
-function syncChugState(m: MatchState) {
-  for (const side of ["creator", "challenger"] as const) {
-    const cf = m.chug.fighters[side];
-    const f = m.fighters[side];
-    f.x = cf.x;
-    f.hp = cf.hp;
-    f.meter = cf.meter;
-    /* walking (not sliding): the sim's step direction drives the walk
-     * animation, and the block stance carries over for the guard pose */
-    f.moveDir = cf.moveDir;
-    f.toward = cf.moveDir === cf.facing;
-    f.blockHeld = cf.blockMs > 0;
-  }
-  const p = m.fighters.challenger;
-  const ai = m.fighters.creator;
-  m.chug.invulnerable = {
-    challenger: p.shieldMs > 0,
-    creator: ai.shieldMs > 0,
-  };
+function updateAutoFighter(
+  m: MatchState,
+  dt: number,
+  script: MatchScript,
+  playerSide: PlayerSide,
+  side: FighterSide,
+  fighters: Record<FighterSide, FighterDescriptor>,
+) {
+  const f = m.fighters[side];
+  const foeSide: FighterSide = side === "creator" ? "challenger" : "creator";
+  const foe = m.fighters[foeSide];
+  const agent = m.agents[side];
+  const track = side === "creator" ? oppTrack(playerSide) : playerTrack(playerSide);
+  const foeTrack = side === "creator" ? playerTrack(playerSide) : oppTrack(playerSide);
+  /* The brain reads the LOADED fighter â€” its class, and the unique id it
+   * is locked onto. */
+  const selfId = fighterInstanceId(side, fighters[side]);
+  const foeId = fighterInstanceId(foeSide, fighters[foeSide]);
+
+  agent.update(dt, {
+    self: f,
+    foe,
+    selfId,
+    foeId,
+    profile: agent.profile,
+    foeProfile: m.agents[foeSide].profile,
+    track,
+    foeTrack,
+    strike: (kind: AgentAttackKind, targetId: string) => {
+      /* a strike aimed at anything but the locked-on opponent is a
+       * mis-aim and is dropped */
+      if (targetId !== foeId) return;
+      startStrike(m, side, kind, script);
+    },
+  });
 }
+
+/**
+ * A unique id for a fighter instance.
+ *
+ * The AI brain locks onto these, so a strike can only ever be resolved
+ * against one exact opponent â€” never "the other side".
+ */
+function fighterInstanceId(
+  side: FighterSide,
+  fighter: FighterDescriptor,
+): string {
+  return `${side}:${fighter.fighterClass}:${fighter.address}`;
+}
+
 
 function syncMechanics(m: MatchState, script: MatchScript) {
   const p = m.fighters.challenger;
@@ -1071,14 +1165,42 @@ function updateFight(
   const p = m.fighters.challenger;
   const ai = m.fighters.creator;
 
-  /* chug runs the entire battle — brains, movement, strike phases, hit
-   * validation, damage — and reports events for presentation. */
-  const events = m.chug.step(dt);
-  for (const ev of events) handleChugEvent(m, ev, script, playerSide);
-
+  /* Spectator mode: no manual input. BOTH fighters are driven by the same
+   * auto-fighter brain, so they square up, close the distance and trade
+   * strikes instead of one standing still. */
+  updateAutoFighter(m, dt, script, playerSide, "creator", fighters);
+  updateAutoFighter(m, dt, script, playerSide, "challenger", fighters);
+  updateAttack(m, p, dt, true, script, playerSide);
+  updateAttack(m, ai, dt, false, script, playerSide);
   tickFighter(p, dt);
   tickFighter(ai, dt);
-  syncChugState(m);
+  /* Solid-body separation: if anything walked/lunged the pair inside the
+   * pushbox, displace each back along the axis by half the overlap
+   * (track-clamped; a rail-pinned fighter passes its share across). */
+  {
+    const gap = Math.abs(ai.x - p.x);
+    if (gap < PUSHBOX) {
+      const dir: 1 | -1 = ai.x >= p.x ? 1 : -1;
+      const overlap = PUSHBOX - gap;
+      const half = overlap / 2;
+      const slide = (x: number, want: number, side: FighterSide, take: number) => {
+        const [lo, hi] = trackFor(side, playerSide);
+        return Math.min(hi, Math.max(lo, want + take));
+      };
+      const pWant = p.x - dir * half;
+      const aWant = ai.x + dir * half;
+      const pX = slide(p.x, pWant, "challenger", 0);
+      const aX = slide(ai.x, aWant, "creator", 0);
+      if (pX !== pWant && aX === aWant) {
+        ai.x = slide(ai.x, aWant, "creator", dir * (overlap - Math.abs(pX - p.x)));
+      } else if (aX !== aWant && pX === pWant) {
+        p.x = slide(p.x, pWant, "challenger", -dir * (overlap - Math.abs(aX - ai.x)));
+      } else {
+        p.x = pX;
+        ai.x = aX;
+      }
+    }
+  }
   syncMechanics(m, script);
 }
 
@@ -1234,7 +1356,6 @@ export function BattleArenaModal({
    * canvas that sits behind the 2D sprites; everyone else keeps the 2D
    * treatment. The array is mutated in place every frame so the canvas
    * never re-renders â€” it just reads the latest values in useFrame. */
-  const stageRef = useRef<HTMLDivElement | null>(null);
   const fighters3DRef = useRef<StageFighter3D[]>([
     {
       side: "creator",
@@ -1369,15 +1490,10 @@ export function BattleArenaModal({
   useEffect(() => {
     if (!isOpen || !outcome || !script) return;
     resetArenaAudio();
-    const stageEl = stageRef.current;
-    const m = createMatch(
-      script,
-      playerSide,
-      { creator: creatorFighter, challenger: challengerFighter },
-      stageEl
-        ? stageWorldPerPercent(stageEl.clientWidth / Math.max(1, stageEl.clientHeight))
-        : 0.12,
-    );
+    const m = createMatch(script, playerSide, {
+    creator: creatorFighter,
+    challenger: challengerFighter,
+  });
     matchRef.current = m;
     const snap = snapshot(m);
     viewRef.current = snap;
@@ -1424,15 +1540,6 @@ export function BattleArenaModal({
         entry.x = f.x;
         entry.facing = f.facing;
         entry.state = fighterActionState(f);
-      }
-      /* keep the world-space hit validation honest across resizes */
-      const stageEl = stageRef.current;
-      if (stageEl) {
-        m.chug.setWorldScale(
-          stageWorldPerPercent(
-            stageEl.clientWidth / Math.max(1, stageEl.clientHeight),
-          ),
-        );
       }
 
       const stageChanged = m.stage !== viewRef.current.stage;
@@ -1481,7 +1588,6 @@ export function BattleArenaModal({
   return (
     <div className="fixed inset-0 z-[95] flex h-[100dvh] items-center justify-center bg-black/90 p-2 backdrop-blur-sm sm:h-[92vh] sm:p-4">
       <div
-        ref={stageRef}
         className="relative flex h-full max-h-full w-full max-w-7xl flex-col overflow-hidden rounded-2xl border border-red-500/30 bg-zinc-950 shadow-[0_0_70px_-10px_rgba(239,68,68,0.3)]"
         role="dialog"
         aria-modal="true"
@@ -1647,10 +1753,8 @@ export function BattleArenaModal({
                     side === "creator"
                       ? challengerFighter.fighterClass
                       : creatorFighter.fighterClass;
-                  /* the number rides the fighter's LIVE position, so it
-                   * stays on the body that was actually hit */
+                  /* the number rides the fighter's live position */
                   const x = view.fighters[side].x;
-                  void cls; void foeCls;
                   return (
                   <div
                     key={`dmg-${side}`}
