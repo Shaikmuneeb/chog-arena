@@ -853,7 +853,10 @@ function StageScene({
       <pointLight position={[0, 0.4, 3]} intensity={5} color="#22d3ee" />
       {three.map((spec) => (
         <RigErrorBoundary
-          key={spec.side}
+          /* A side can host a different fighter in the next duel. Remounting
+           * here resets the FBX scene, texture, mixer and readiness gate as
+           * one unit instead of letting the previous character leak through. */
+          key={`${spec.side}-${spec.fighterClass}`}
           onError={() =>
             onStatus?.({
               side: spec.side,
