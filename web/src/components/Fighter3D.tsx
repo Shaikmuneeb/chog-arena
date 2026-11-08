@@ -241,6 +241,78 @@ function applySkinTexture(object: THREE.Object3D, texture: THREE.Texture) {
 }
 
 /**
+ * Mixamo/FBX and GLTF exporters do not agree on bone names. Common examples
+ * are `mixamorig:Hips` vs `mixamorigHips`, or a clip targeting
+ * `Armature/mixamorig:Hips` while the loaded rig contains a plain `Hips`
+ * node. AnimationMixer resolves track targets by name, so an otherwise valid
+ * clip silently misses those bones and produces stretched or frozen limbs.
+ */
+function canonicalBoneName(name: string): string {
+  const leaf = name.split("/").pop()?.split("|").pop() ?? name;
+  return leaf
+    .replace(/^mixamorig[:_]?/i, "")
+    .replace(/[^a-z0-9]/gi, "")
+    .toLowerCase();
+}
+
+function remapClipToRig(
+  clip: THREE.AnimationClip,
+  rig: THREE.Object3D | null,
+): THREE.AnimationClip {
+  if (!rig) return clip;
+
+  const exact = new Map<string, string>();
+  const canonical = new Map<string, string>();
+  rig.traverse((node) => {
+    if (!node.name) return;
+    exact.set(node.name, node.name);
+    const key = canonicalBoneName(node.name);
+    /* Keep the first match when an exporter has duplicate helper names. */
+    if (!canonical.has(key)) canonical.set(key, node.name);
+  });
+
+  const remapped = clip.clone();
+  remapped.tracks = clip.tracks.map((track) => {
+    const separator = track.name.indexOf(".");
+    if (separator < 0) return track;
+    const target = track.name.slice(0, separator);
+    const property = track.name.slice(separator);
+    const targetLeaf = target.split("/").pop()?.split("|").pop() ?? target;
+    const mapped =
+      exact.get(target) ??
+      exact.get(targetLeaf) ??
+      canonical.get(canonicalBoneName(target));
+    if (!mapped || mapped === target) return track;
+    const copy = track.clone();
+    copy.name = `${mapped}${property}`;
+    return copy;
+  });
+  return remapped;
+}
+
+/**
+ * SkeletonUtils.clone creates independent bone/skeleton bindings, but the
+ * loader still needs a deterministic validation pass. This also makes the
+ * update contract explicit: every SkinnedMesh skeleton is updated after its
+ * AnimationMixer has evaluated the current frame.
+ */
+function prepareSkinnedRig(object: THREE.Object3D): void {
+  object.updateWorldMatrix(true, true);
+  object.traverse((node) => {
+    const mesh = node as THREE.SkinnedMesh;
+    if (!mesh.isSkinnedMesh || !mesh.skeleton) return;
+    mesh.skeleton.update();
+  });
+}
+
+function updateSkinnedRig(object: THREE.Object3D): void {
+  object.traverse((node) => {
+    const mesh = node as THREE.SkinnedMesh;
+    if (mesh.isSkinnedMesh && mesh.skeleton) mesh.skeleton.update();
+  });
+}
+
+/**
  * Measure a rig in its BIND pose.
  *
  * `Box3.setFromObject` uses the CURRENT animated pose, so the box would
@@ -314,20 +386,20 @@ function useFighterActions(
     (async () => {
       const groups = await Promise.all(
         [...byUrl.keys()].map(async (url) => {
-          const group = await loadFbx(url);
+          const loadedGroup = await loadFbx(url);
           done += 1;
           progressRef.current?.(done, total);
-          return { url, group };
+          return { url, group: loadedGroup };
         }),
       );
       if (cancelled) return;
       const out: THREE.AnimationClip[] = [];
-      for (const { url, group } of groups) {
-        const source = group.animations?.[0];
+      for (const { url, group: loadedGroup } of groups) {
+        const source = loadedGroup.animations?.[0];
         if (!source) continue;
         for (const state of byUrl.get(url) ?? []) {
           /* strip the root motion so the rig never leaves the floor */
-          const copy = stripRootMotion(source);
+          const copy = remapClipToRig(stripRootMotion(source), group.current);
           copy.name = state;
           out.push(copy);
         }
@@ -348,6 +420,38 @@ function useFighterActions(
     group as unknown as React.RefObject<THREE.Object3D>,
   );
   return { ...api, loaded, clips };
+}
+
+function playFighterAction(
+  actions: Record<string, THREE.AnimationAction | null>,
+  nextState: FighterActionState,
+  previousState?: FighterActionState,
+): void {
+  const next = actions[playableState(nextState)] ?? actions.idle;
+  if (!next) return;
+  const previous = previousState
+    ? actions[playableState(previousState)]
+    : undefined;
+  const state = playableState(nextState);
+  const looping = state === "idle" || state === "block";
+
+  next.enabled = true;
+  next.setEffectiveTimeScale(1);
+  next.setLoop(looping ? THREE.LoopRepeat : THREE.LoopOnce, Infinity);
+  next.clampWhenFinished = state === "hit";
+  /* Never restart an already-running idle clip: that snaps the rig to frame 0. */
+  if (state !== "idle" || !next.isRunning()) next.reset();
+
+  if (previous && previous !== next && previous.isRunning()) {
+    next.setEffectiveWeight(1).play();
+    previous.crossFadeTo(next, 0.18, false);
+  } else {
+    next.fadeIn(0.18).play();
+  }
+
+  for (const action of Object.values(actions)) {
+    if (action && action !== next && action !== previous) action.fadeOut(0.18);
+  }
 }
 
 /* ------------------------------------------------------------- stage fighter */
@@ -377,6 +481,9 @@ function FighterModel({
   /* the rig: the idle export doubles as the visible mesh */
   const source = useFBX(clipUrl(cfg, cfg.clips.idle));
   const scene = useMemo(() => SkeletonUtils.clone(source), [source]);
+  useEffect(() => {
+    prepareSkinnedRig(scene);
+  }, [scene]);
 
   /* the status callback is kept in a ref so a new identity from the parent
    * never re-runs the load effects */
@@ -455,23 +562,7 @@ function FighterModel({
     if (desired.current === "ko") return;
     const current = actions[playableState(desired.current)] ?? actions.idle;
     if (!current) return;
-    for (const key of Object.keys(actions)) {
-      const action = actions[key];
-      if (action && action !== current) action.fadeOut(0.15);
-    }
-    /* the idle loop is never restarted (that made the fighter twitch);
-     * strikes restart so each punch reads as a new blow. */
-    const state = playableState(desired.current);
-    if (state !== "idle") current.reset();
-    current.setEffectiveTimeScale(1);
-    current.setLoop(
-      state === "idle" || state === "block"
-        ? THREE.LoopRepeat
-        : THREE.LoopOnce,
-      Infinity,
-    );
-    current.clampWhenFinished = state === "hit";
-    current.fadeIn(0.15).play();
+    playFighterAction(actions, desired.current);
   }, [actions, loaded, desired]);
 
   /* ---- compute the fit once the mesh is in ---- */
@@ -619,26 +710,9 @@ function FighterModel({
       group.current.rotation.x = 0;
       const wanted = playableState(live.state);
       if (wanted !== desired.current) {
+        const previous = desired.current;
         desired.current = wanted;
-        const action = actions[wanted] ?? actions.idle;
-        if (action) {
-          for (const key of Object.keys(actions)) {
-            const other = actions[key];
-            if (other && other !== action) other.fadeOut(0.15);
-          }
-          /* strikes restart so each blow reads; the idle loop is left alone
-           * so the fighter never twitches back to frame zero. */
-          if (wanted !== "idle") action.reset();
-          action.setEffectiveTimeScale(1);
-          action.setLoop(
-            wanted === "idle" || wanted === "block"
-              ? THREE.LoopRepeat
-              : THREE.LoopOnce,
-            Infinity,
-          );
-          action.clampWhenFinished = wanted === "hit";
-          action.fadeIn(0.15).play();
-        }
+        playFighterAction(actions, wanted, previous);
       } else if (wanted === "idle") {
         /* The fight-idle loop must always be alive — a rig with no running
          * action falls back to the bind / T-pose. */
@@ -678,6 +752,7 @@ function FighterModel({
     group.current.rotation.y = yaw;
     group.current.position.y = 0;
     group.current.position.z = 0;
+    updateSkinnedRig(scene);
 
     void mixer;
     void delta;
@@ -936,6 +1011,9 @@ function PreviewRig({
   const { size: previewSize } = useThree();
   const source = useFBX(clipUrl(cfg, cfg.clips.idle));
   const scene = useMemo(() => SkeletonUtils.clone(source), [source]);
+  useEffect(() => {
+    prepareSkinnedRig(scene);
+  }, [scene]);
 
   const [texture, setTexture] = useState<THREE.Texture | null>(null);
   const [textureSettled, setTextureSettled] = useState(false);
@@ -965,18 +1043,9 @@ function PreviewRig({
 
   useEffect(() => {
     if (!loaded) return;
-    const current = actions[desired.current] ?? actions.idle;
+    const current = actions[playableState(desired.current)] ?? actions.idle;
     if (!current) return;
-    for (const key of Object.keys(actions)) {
-      const action = actions[key];
-      if (action && action !== current) action.fadeOut(0.15);
-    }
-    current.reset();
-    current.setLoop(
-      desired.current === "idle" ? THREE.LoopRepeat : THREE.LoopOnce,
-      Infinity,
-    );
-    current.fadeIn(0.15).play();
+    playFighterAction(actions, desired.current);
   }, [actions, loaded, desired]);
 
   useEffect(() => {
@@ -1079,6 +1148,7 @@ function PreviewRig({
       /* feet sit just below the lower third so the body reads centred */
       group.current.position.y = -height * 0.38 - bbox.minY * scale;
     }
+    updateSkinnedRig(scene);
     desired.current = state;
   });
 
