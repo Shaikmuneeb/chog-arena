@@ -1372,6 +1372,39 @@ export function BattleArenaModal({
       facing: "right",
     },
   ]);
+
+  /* BattleArenaModal stays mounted while the user moves from one duel to the
+   * next. The ref above is intentionally mutated by the rAF loop, but its
+   * character identities must still be refreshed from the new matchup;
+  * otherwise the next duel can render the previous duel's rig. */
+  useEffect(() => {
+    fighters3DRef.current = [
+      {
+        side: "creator",
+        fighterClass: creatorFighter.fighterClass,
+        state: "idle",
+        x: 68,
+        facing: "left",
+      },
+      {
+        side: "challenger",
+        fighterClass: challengerFighter.fighterClass,
+        state: "idle",
+        x: 32,
+        facing: "right",
+      },
+    ];
+    setRigStatus({
+      creator: { side: "creator", progress: 0, ready: false, failed: false },
+      challenger: {
+        side: "challenger",
+        progress: 0,
+        ready: false,
+        failed: false,
+      },
+    });
+  }, [creatorFighter.fighterClass, challengerFighter.fighterClass]);
+
   /* ================= 3D STAGE READINESS =================
    * The 3D layer streams ~200MB of Mixamo rigs before the bell. The match
    * is HELD in the face-off until every rigged fighter reports that it is
@@ -1738,6 +1771,7 @@ export function BattleArenaModal({
                 {(has3DModel(creatorFighter.fighterClass) ||
                   has3DModel(challengerFighter.fighterClass)) && (
                   <FighterStage3D
+                    key={`${creatorFighter.fighterClass}-${challengerFighter.fighterClass}`}
                     fightersRef={fighters3DRef}
                     onStatus={handle3DStatus}
                   />
